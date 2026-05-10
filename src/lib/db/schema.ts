@@ -1,0 +1,76 @@
+export const SCHEMA_STATEMENTS = [
+  `CREATE TABLE IF NOT EXISTS documents (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    source_type TEXT NOT NULL,
+    content TEXT NOT NULL,
+    word_count INTEGER NOT NULL,
+    estimated_pages REAL,
+    language TEXT DEFAULT 'en',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    archived_at TEXT
+  )`,
+  'CREATE INDEX IF NOT EXISTS idx_documents_created_at ON documents(created_at)',
+  'CREATE INDEX IF NOT EXISTS idx_documents_updated_at ON documents(updated_at)',
+  'CREATE INDEX IF NOT EXISTS idx_documents_archived_at ON documents(archived_at)',
+  `CREATE TABLE IF NOT EXISTS source_files (
+    id TEXT PRIMARY KEY,
+    document_id TEXT REFERENCES documents(id),
+    kind TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    local_path TEXT,
+    sha256 TEXT,
+    created_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS ocr_jobs (
+    id TEXT PRIMARY KEY,
+    document_id TEXT REFERENCES documents(id),
+    status TEXT NOT NULL,
+    model_id TEXT NOT NULL,
+    input_file_count INTEGER NOT NULL,
+    prompt_version TEXT NOT NULL,
+    error_message TEXT,
+    created_at TEXT NOT NULL,
+    completed_at TEXT
+  )`,
+  'CREATE INDEX IF NOT EXISTS idx_ocr_jobs_status ON ocr_jobs(status)',
+  'CREATE INDEX IF NOT EXISTS idx_ocr_jobs_created_at ON ocr_jobs(created_at)',
+  `CREATE TABLE IF NOT EXISTS reading_sessions (
+    id TEXT PRIMARY KEY,
+    document_id TEXT NOT NULL REFERENCES documents(id),
+    mode TEXT NOT NULL,
+    target_wpm INTEGER NOT NULL,
+    actual_wpm REAL NOT NULL,
+    adjusted_wpm REAL,
+    words_read INTEGER NOT NULL,
+    duration_seconds INTEGER NOT NULL,
+    start_position INTEGER NOT NULL,
+    end_position INTEGER NOT NULL,
+    pause_count INTEGER DEFAULT 0,
+    regression_count INTEGER DEFAULT 0,
+    comprehension_score REAL,
+    self_rating INTEGER,
+    notes TEXT DEFAULT '',
+    started_at TEXT NOT NULL,
+    ended_at TEXT NOT NULL
+  )`,
+  'CREATE INDEX IF NOT EXISTS idx_reading_sessions_document_id ON reading_sessions(document_id)',
+  'CREATE INDEX IF NOT EXISTS idx_reading_sessions_started_at ON reading_sessions(started_at)',
+  'CREATE INDEX IF NOT EXISTS idx_reading_sessions_mode ON reading_sessions(mode)',
+  `CREATE TABLE IF NOT EXISTS comprehension_checks (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES reading_sessions(id),
+    question TEXT NOT NULL,
+    answer_type TEXT NOT NULL,
+    expected_answer TEXT,
+    user_answer TEXT,
+    score REAL,
+    created_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
+]

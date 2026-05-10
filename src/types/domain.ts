@@ -1,0 +1,87 @@
+export type SourceType = 'paste' | 'text_file' | 'pdf_text' | 'photo_ocr' | 'manual'
+
+export type ReaderMode = 'rail' | 'chunk' | 'rsvp'
+
+export type ThemeMode = 'system' | 'light' | 'dark'
+
+export type DocumentRecord = {
+  id: string
+  title: string
+  sourceType: SourceType
+  content: string
+  wordCount: number
+  estimatedPages: number
+  language: string
+  createdAt: string
+  updatedAt: string
+  archivedAt: string | null
+}
+
+export type ReadingSession = {
+  id: string
+  documentId: string
+  mode: ReaderMode
+  targetWpm: number
+  actualWpm: number
+  adjustedWpm: number | null
+  wordsRead: number
+  durationSeconds: number
+  startPosition: number
+  endPosition: number
+  pauseCount: number
+  regressionCount: number
+  comprehensionScore: number | null
+  selfRating: number | null
+  notes: string
+  startedAt: string
+  endedAt: string
+}
+
+export type ReaderSettings = {
+  defaultWpm: number
+  defaultMode: ReaderMode
+  chunkSize: number
+  fontFamily: 'system' | 'atkinson' | 'charter' | 'georgia'
+  fontSize: number
+  lineHeight: number
+  theme: ThemeMode
+  reducedMotion: boolean
+}
+
+export type PrivacySettings = {
+  retainSourceImages: boolean
+  confirmRemoteOcrEachTime: boolean
+}
+
+export type OcrSettings = {
+  modelId: 'gemini-2.5-flash-lite'
+  preservePageBreaks: boolean
+}
+
+export type AppSettings = {
+  reader: ReaderSettings
+  privacy: PrivacySettings
+  ocr: OcrSettings
+}
+
+export type SourceFileRecord = {
+  id: string
+  documentId: string | null
+  kind: 'image' | 'pdf' | 'text'
+  displayName: string
+  localPath: string | null
+  sha256: string | null
+  createdAt: string
+}
+
+export type OcrJob = {
+  id: string
+  documentId: string | null
+  status: 'queued' | 'running' | 'review' | 'saved' | 'failed' | 'cancelled'
+  modelId: string
+  inputFileCount: number
+  promptVersion: string
+  errorMessage: string | null
+  createdAt: string
+  completedAt: string | null
+}
