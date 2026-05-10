@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { AppSettings, DocumentRecord, ReaderMode, ReadingSession, SourceType } from '../types/domain'
+import type { AppSettings, DocumentRecord, OnboardingState, ReaderMode, ReadingSession, SourceType } from '../types/domain'
 import { calculateAdjustedWpm, calculateActualWpm } from '../lib/reading/pacing'
 import { cleanReadingText } from '../lib/text/cleanup'
 import { countWords, estimatePages } from '../lib/text/wordCount'
@@ -30,12 +30,16 @@ type AppState = {
   sessions: ReadingSession[]
   activeDocumentId: string | null
   settings: AppSettings
+  onboarding: OnboardingState
   createDocument: (input: CreateDocumentInput) => DocumentRecord
   updateDocument: (id: string, updates: Partial<Pick<DocumentRecord, 'title' | 'content'>>) => void
   archiveDocument: (id: string) => void
   setActiveDocument: (id: string | null) => void
   completeSession: (input: CompleteSessionInput) => ReadingSession
   updateSettings: (settings: Partial<AppSettings>) => void
+  skipOnboarding: () => void
+  completeOnboardingIntro: () => void
+  reopenOnboarding: () => void
   resetAllData: () => void
 }
 
@@ -60,6 +64,12 @@ const defaultSettings: AppSettings = {
   },
 }
 
+export const defaultOnboardingState: OnboardingState = {
+  status: 'not_started',
+  skippedAt: null,
+  introCompletedAt: null,
+}
+
 export const useAppStore = create<AppState>()(
   persist(
     (set) => ({
@@ -67,6 +77,7 @@ export const useAppStore = create<AppState>()(
       sessions: [],
       activeDocumentId: null,
       settings: defaultSettings,
+      onboarding: defaultOnboardingState,
       createDocument: (input) => {
         const now = new Date().toISOString()
         const content = cleanReadingText(input.content, { preservePageBreaks: true })
@@ -167,7 +178,32 @@ export const useAppStore = create<AppState>()(
           },
         }))
       },
-      resetAllData: () => set({ documents: [], sessions: [], activeDocumentId: null }),
+      skipOnboarding: () => {
+        set({
+          onboarding: {
+            status: 'skipped',
+            skippedAt: new Date().toISOString(),
+            introCompletedAt: null,
+          },
+        })
+      },
+      completeOnboardingIntro: () => {
+        set({
+          onboarding: {
+            status: 'intro_completed',
+            skippedAt: null,
+            introCompletedAt: new Date().toISOString(),
+          },
+        })
+      },
+      reopenOnboarding: () => set({ onboarding: defaultOnboardingState }),
+      resetAllData: () =>
+        set({
+          documents: [],
+          sessions: [],
+          activeDocumentId: null,
+          onboarding: defaultOnboardingState,
+        }),
     }),
     {
       name: 'readrail-local-state',
@@ -177,6 +213,7 @@ export const useAppStore = create<AppState>()(
         sessions: state.sessions,
         activeDocumentId: state.activeDocumentId,
         settings: state.settings,
+        onboarding: state.onboarding,
       }),
     },
   ),

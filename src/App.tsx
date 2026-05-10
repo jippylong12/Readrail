@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { AppShell } from './components/AppShell'
 import { ImportPanel } from './components/ImportPanel'
 import { LibraryList } from './components/LibraryList'
+import { OnboardingJourney } from './components/OnboardingJourney'
 import { OcrReview } from './components/OcrReview'
 import { ReaderRail } from './components/ReaderRail'
 import { SessionSummary } from './components/SessionSummary'
@@ -29,12 +30,16 @@ function App() {
   const documents = useAppStore((state) => state.documents)
   const sessions = useAppStore((state) => state.sessions)
   const settings = useAppStore((state) => state.settings)
+  const onboarding = useAppStore((state) => state.onboarding)
   const activeDocument = useAppStore(selectActiveDocument)
   const createDocument = useAppStore((state) => state.createDocument)
   const archiveDocument = useAppStore((state) => state.archiveDocument)
   const setActiveDocument = useAppStore((state) => state.setActiveDocument)
   const completeSession = useAppStore((state) => state.completeSession)
   const updateSettings = useAppStore((state) => state.updateSettings)
+  const skipOnboarding = useAppStore((state) => state.skipOnboarding)
+  const completeOnboardingIntro = useAppStore((state) => state.completeOnboardingIntro)
+  const reopenOnboarding = useAppStore((state) => state.reopenOnboarding)
   const resetAllData = useAppStore((state) => state.resetAllData)
 
   useEffect(() => {
@@ -66,6 +71,20 @@ function App() {
     URL.revokeObjectURL(url)
   }
 
+  function enterAppAfterSkip(): void {
+    skipOnboarding()
+    setRoute('library')
+  }
+
+  function enterAppAfterIntro(): void {
+    completeOnboardingIntro()
+    setRoute('library')
+  }
+
+  if (onboarding.status === 'not_started') {
+    return <OnboardingJourney onComplete={enterAppAfterIntro} onSkip={enterAppAfterSkip} />
+  }
+
   return (
     <AppShell activeDocument={activeDocument} activeRoute={route} onRouteChange={setRoute}>
       {route === 'library' && (
@@ -83,6 +102,7 @@ function App() {
             activeDocumentId={activeDocument?.id ?? null}
             documents={documents}
             onArchive={archiveDocument}
+            onOpenJourney={reopenOnboarding}
             onSelect={(id) => {
               setActiveDocument(id)
               setRoute('reader')
@@ -140,6 +160,7 @@ function App() {
       {route === 'settings' && (
         <SettingsPanel
           onKeyStateChange={setHasGeminiKey}
+          onOpenJourney={reopenOnboarding}
           onResetData={resetAllData}
           onSettingsChange={updateSettings}
           settings={settings}

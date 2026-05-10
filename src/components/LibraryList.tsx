@@ -6,9 +6,10 @@ type LibraryListProps = {
   activeDocumentId: string | null
   onSelect: (id: string) => void
   onArchive: (id: string) => void
+  onOpenJourney: () => void
 }
 
-export function LibraryList({ documents, activeDocumentId, onSelect, onArchive }: LibraryListProps) {
+export function LibraryList({ documents, activeDocumentId, onSelect, onArchive, onOpenJourney }: LibraryListProps) {
   const [query, setQuery] = useState('')
 
   const visibleDocuments = useMemo(() => {
@@ -31,14 +32,19 @@ export function LibraryList({ documents, activeDocumentId, onSelect, onArchive }
           <span className="eyebrow">Local Library</span>
           <h1>Reading documents</h1>
         </div>
-        <input
-          aria-label="Search documents"
-          className="search-input"
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="Search"
-          type="search"
-          value={query}
-        />
+        <div className="header-actions">
+          <button className="secondary-button" onClick={onOpenJourney} type="button">
+            Learner journey
+          </button>
+          <input
+            aria-label="Search documents"
+            className="search-input"
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search"
+            type="search"
+            value={query}
+          />
+        </div>
       </div>
 
       {visibleDocuments.length === 0 ? (

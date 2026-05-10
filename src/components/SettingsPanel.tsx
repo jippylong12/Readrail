@@ -7,10 +7,11 @@ type SettingsPanelProps = {
   settings: AppSettings
   onSettingsChange: (settings: Partial<AppSettings>) => void
   onResetData: () => void
+  onOpenJourney: () => void
   onKeyStateChange: (hasKey: boolean) => void
 }
 
-export function SettingsPanel({ settings, onSettingsChange, onResetData, onKeyStateChange }: SettingsPanelProps) {
+export function SettingsPanel({ settings, onSettingsChange, onResetData, onOpenJourney, onKeyStateChange }: SettingsPanelProps) {
   const [apiKey, setApiKey] = useState('')
   const [hasKey, setHasKey] = useState(false)
   const [message, setMessage] = useState('')
@@ -148,6 +149,16 @@ export function SettingsPanel({ settings, onSettingsChange, onResetData, onKeySt
           </label>
           <button className="danger-button" onClick={onResetData} type="button">
             Delete local app data
+          </button>
+        </section>
+
+        <section>
+          <h2>Guidance</h2>
+          <p className="settings-note">
+            Revisit the learner journey, baseline setup, and mode overview before a practice session.
+          </p>
+          <button className="secondary-button" onClick={onOpenJourney} type="button">
+            Open learner journey
           </button>
         </section>
       </div>

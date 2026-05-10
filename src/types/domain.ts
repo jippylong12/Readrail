@@ -4,6 +4,14 @@ export type ReaderMode = 'rail' | 'chunk' | 'rsvp'
 
 export type ThemeMode = 'system' | 'light' | 'dark'
 
+export type OnboardingStatus = 'not_started' | 'skipped' | 'intro_completed'
+
+export type OnboardingState = {
+  status: OnboardingStatus
+  skippedAt: string | null
+  introCompletedAt: string | null
+}
+
 export type DocumentRecord = {
   id: string
   title: string
