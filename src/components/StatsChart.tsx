@@ -1,13 +1,14 @@
 import { Area, AreaChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { buildTrendRows, summarizeSessions } from '../lib/reading/stats'
-import type { DocumentRecord, ReadingSession } from '../types/domain'
+import type { BaselineAssessmentResult, DocumentRecord, ReadingSession } from '../types/domain'
 
 type StatsChartProps = {
+  baselineResult: BaselineAssessmentResult | null
   documents: DocumentRecord[]
   sessions: ReadingSession[]
 }
 
-export function StatsChart({ documents, sessions }: StatsChartProps) {
+export function StatsChart({ baselineResult, documents, sessions }: StatsChartProps) {
   const summary = summarizeSessions(sessions)
   const trends = buildTrendRows(sessions)
 
@@ -29,6 +30,22 @@ export function StatsChart({ documents, sessions }: StatsChartProps) {
         <Metric label="Avg comp." value={summary.averageComprehension ? `${summary.averageComprehension}%` : 'N/A'} />
         <Metric label="Streak" value={`${summary.streakDays} days`} />
       </div>
+
+      {baselineResult && (
+        <section className="baseline-summary">
+          <div>
+            <span className="eyebrow">Baseline</span>
+            <h2>{baselineResult.storyTitle}</h2>
+            <p>{baselineResult.explanation}</p>
+          </div>
+          <div className="summary-grid">
+            <Metric label="Raw WPM" value={baselineResult.rawWpm} />
+            <Metric label="Comprehension" value={`${baselineResult.comprehensionPercent}%`} />
+            <Metric label="Adjusted WPM" value={baselineResult.adjustedWpm} />
+            <Metric label="Starting pace" value={`${baselineResult.recommendedWpm} WPM`} />
+          </div>
+        </section>
+      )}
 
       {sessions.length === 0 ? (
         <div className="empty-state">

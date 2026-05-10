@@ -3,7 +3,7 @@ export function calculateActualWpm(wordsRead: number, durationSeconds: number): 
     return 0
   }
 
-  return Math.round((wordsRead / (durationSeconds / 60)) * 10) / 10
+  return Math.round(wordsRead / (durationSeconds / 60))
 }
 
 export function calculateAdjustedWpm(actualWpm: number, comprehensionScore: number | null): number | null {
@@ -12,11 +12,19 @@ export function calculateAdjustedWpm(actualWpm: number, comprehensionScore: numb
   }
 
   const normalizedScore = Math.min(100, Math.max(0, comprehensionScore))
-  return Math.round(actualWpm * (normalizedScore / 100) * 10) / 10
+  return Math.round(actualWpm * (normalizedScore / 100))
 }
 
 export function clampWpm(wpm: number): number {
   return Math.min(900, Math.max(80, Math.round(wpm)))
+}
+
+export function roundWpmToNearestFive(wpm: number): number {
+  if (wpm <= 0) {
+    return 0
+  }
+
+  return Math.round(wpm / 5) * 5
 }
 
 export function formatDuration(totalSeconds: number): string {

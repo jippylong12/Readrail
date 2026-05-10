@@ -12,6 +12,46 @@ export type OnboardingState = {
   introCompletedAt: string | null
 }
 
+export type BaselineStorySource = 'default' | 'custom'
+
+export type BaselineQuestionKind = 'main_idea' | 'detail' | 'sequence_cause' | 'inference' | 'confidence'
+
+export type BaselineQuestionOption = {
+  id: string
+  label: string
+  score: number
+}
+
+export type BaselineQuestion = {
+  id: string
+  kind: BaselineQuestionKind
+  prompt: string
+  options: BaselineQuestionOption[]
+}
+
+export type BaselineQuestionResult = {
+  questionId: string
+  selectedOptionId: string
+  score: number
+  maxScore: number
+}
+
+export type BaselineAssessmentResult = {
+  id: string
+  storyTitle: string
+  storySource: BaselineStorySource
+  wordCount: number
+  durationSeconds: number
+  rawWpm: number
+  comprehensionPercent: number
+  adjustedWpm: number
+  recommendedWpm: number
+  explanation: string
+  questionResults: BaselineQuestionResult[]
+  completedAt: string
+  appliedWpmAt: string | null
+}
+
 export type DocumentRecord = {
   id: string
   title: string

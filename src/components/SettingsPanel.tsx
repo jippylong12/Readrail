@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
-import type { AppSettings, ReaderMode, ThemeMode } from '../types/domain'
+import type { AppSettings, BaselineAssessmentResult, ReaderMode, ThemeMode } from '../types/domain'
 import { isTauriRuntime } from '../lib/db/migrations'
 
 type SettingsPanelProps = {
+  baselineResult: BaselineAssessmentResult | null
   settings: AppSettings
   onSettingsChange: (settings: Partial<AppSettings>) => void
   onResetData: () => void
@@ -11,7 +12,14 @@ type SettingsPanelProps = {
   onKeyStateChange: (hasKey: boolean) => void
 }
 
-export function SettingsPanel({ settings, onSettingsChange, onResetData, onOpenJourney, onKeyStateChange }: SettingsPanelProps) {
+export function SettingsPanel({
+  baselineResult,
+  settings,
+  onSettingsChange,
+  onResetData,
+  onOpenJourney,
+  onKeyStateChange,
+}: SettingsPanelProps) {
   const [apiKey, setApiKey] = useState('')
   const [hasKey, setHasKey] = useState(false)
   const [message, setMessage] = useState('')
@@ -157,6 +165,12 @@ export function SettingsPanel({ settings, onSettingsChange, onResetData, onOpenJ
           <p className="settings-note">
             Revisit the learner journey, baseline setup, and mode overview before a practice session.
           </p>
+          {baselineResult && (
+            <p className="settings-note">
+              Baseline: {baselineResult.rawWpm} raw WPM, {baselineResult.comprehensionPercent}% comprehension,{' '}
+              {baselineResult.recommendedWpm} WPM recommended.
+            </p>
+          )}
           <button className="secondary-button" onClick={onOpenJourney} type="button">
             Open learner journey
           </button>

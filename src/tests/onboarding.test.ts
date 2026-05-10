@@ -8,6 +8,7 @@ describe('onboarding state', () => {
       sessions: [],
       activeDocumentId: null,
       onboarding: defaultOnboardingState,
+      baselineResult: null,
     })
   })
 
@@ -35,5 +36,28 @@ describe('onboarding state', () => {
     useAppStore.getState().reopenOnboarding()
 
     expect(useAppStore.getState().onboarding).toEqual(defaultOnboardingState)
+  })
+
+  it('stores baseline result and automatically applies recommended WPM', () => {
+    useAppStore.getState().saveBaselineResult({
+      id: 'baseline-1',
+      storyTitle: 'Test story',
+      storySource: 'default',
+      wordCount: 250,
+      durationSeconds: 60,
+      rawWpm: 250,
+      comprehensionPercent: 80,
+      adjustedWpm: 200,
+      recommendedWpm: 225,
+      explanation: 'Test explanation.',
+      questionResults: [],
+      completedAt: new Date().toISOString(),
+      appliedWpmAt: null,
+    })
+
+    const state = useAppStore.getState()
+    expect(state.baselineResult?.recommendedWpm).toBe(225)
+    expect(state.baselineResult?.appliedWpmAt).not.toBeNull()
+    expect(state.settings.reader.defaultWpm).toBe(225)
   })
 })

@@ -31,12 +31,14 @@ function App() {
   const sessions = useAppStore((state) => state.sessions)
   const settings = useAppStore((state) => state.settings)
   const onboarding = useAppStore((state) => state.onboarding)
+  const baselineResult = useAppStore((state) => state.baselineResult)
   const activeDocument = useAppStore(selectActiveDocument)
   const createDocument = useAppStore((state) => state.createDocument)
   const archiveDocument = useAppStore((state) => state.archiveDocument)
   const setActiveDocument = useAppStore((state) => state.setActiveDocument)
   const completeSession = useAppStore((state) => state.completeSession)
   const updateSettings = useAppStore((state) => state.updateSettings)
+  const saveBaselineResult = useAppStore((state) => state.saveBaselineResult)
   const skipOnboarding = useAppStore((state) => state.skipOnboarding)
   const completeOnboardingIntro = useAppStore((state) => state.completeOnboardingIntro)
   const reopenOnboarding = useAppStore((state) => state.reopenOnboarding)
@@ -82,7 +84,14 @@ function App() {
   }
 
   if (onboarding.status === 'not_started') {
-    return <OnboardingJourney onComplete={enterAppAfterIntro} onSkip={enterAppAfterSkip} />
+    return (
+      <OnboardingJourney
+        baselineResult={baselineResult}
+        onBaselineComplete={saveBaselineResult}
+        onComplete={enterAppAfterIntro}
+        onSkip={enterAppAfterSkip}
+      />
+    )
   }
 
   return (
@@ -141,7 +150,7 @@ function App() {
 
       {route === 'stats' && (
         <div className="content-stack">
-          <StatsChart documents={documents} sessions={sessions} />
+          <StatsChart baselineResult={baselineResult} documents={documents} sessions={sessions} />
           <section className="panel export-panel">
             <span className="eyebrow">Export</span>
             <h2>Progress backup</h2>
@@ -163,6 +172,7 @@ function App() {
           onOpenJourney={reopenOnboarding}
           onResetData={resetAllData}
           onSettingsChange={updateSettings}
+          baselineResult={baselineResult}
           settings={settings}
         />
       )}

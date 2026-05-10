@@ -1,6 +1,14 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { AppSettings, DocumentRecord, OnboardingState, ReaderMode, ReadingSession, SourceType } from '../types/domain'
+import type {
+  AppSettings,
+  BaselineAssessmentResult,
+  DocumentRecord,
+  OnboardingState,
+  ReaderMode,
+  ReadingSession,
+  SourceType,
+} from '../types/domain'
 import { calculateAdjustedWpm, calculateActualWpm } from '../lib/reading/pacing'
 import { cleanReadingText } from '../lib/text/cleanup'
 import { countWords, estimatePages } from '../lib/text/wordCount'
@@ -31,12 +39,14 @@ type AppState = {
   activeDocumentId: string | null
   settings: AppSettings
   onboarding: OnboardingState
+  baselineResult: BaselineAssessmentResult | null
   createDocument: (input: CreateDocumentInput) => DocumentRecord
   updateDocument: (id: string, updates: Partial<Pick<DocumentRecord, 'title' | 'content'>>) => void
   archiveDocument: (id: string) => void
   setActiveDocument: (id: string | null) => void
   completeSession: (input: CompleteSessionInput) => ReadingSession
   updateSettings: (settings: Partial<AppSettings>) => void
+  saveBaselineResult: (result: BaselineAssessmentResult) => void
   skipOnboarding: () => void
   completeOnboardingIntro: () => void
   reopenOnboarding: () => void
@@ -78,6 +88,7 @@ export const useAppStore = create<AppState>()(
       activeDocumentId: null,
       settings: defaultSettings,
       onboarding: defaultOnboardingState,
+      baselineResult: null,
       createDocument: (input) => {
         const now = new Date().toISOString()
         const content = cleanReadingText(input.content, { preservePageBreaks: true })
@@ -178,6 +189,21 @@ export const useAppStore = create<AppState>()(
           },
         }))
       },
+      saveBaselineResult: (result) => {
+        set((state) => ({
+          baselineResult: {
+            ...result,
+            appliedWpmAt: new Date().toISOString(),
+          },
+          settings: {
+            ...state.settings,
+            reader: {
+              ...state.settings.reader,
+              defaultWpm: result.recommendedWpm,
+            },
+          },
+        }))
+      },
       skipOnboarding: () => {
         set({
           onboarding: {
@@ -203,6 +229,7 @@ export const useAppStore = create<AppState>()(
           sessions: [],
           activeDocumentId: null,
           onboarding: defaultOnboardingState,
+          baselineResult: null,
         }),
     }),
     {
@@ -214,6 +241,7 @@ export const useAppStore = create<AppState>()(
         activeDocumentId: state.activeDocumentId,
         settings: state.settings,
         onboarding: state.onboarding,
+        baselineResult: state.baselineResult,
       }),
     },
   ),
