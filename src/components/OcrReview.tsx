@@ -43,7 +43,7 @@ export function OcrReview({ hasKey, preservePageBreaks, onCreateDocument }: OcrR
   }
 
   return (
-    <section className="panel ocr-panel">
+    <section className="panel ocr-panel" data-tour="ocr">
       <div className="panel-header compact">
         <div>
           <span className="eyebrow">OCR</span>

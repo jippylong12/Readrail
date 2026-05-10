@@ -26,7 +26,7 @@ export function LibraryList({ documents, activeDocumentId, onSelect, onArchive, 
   }, [documents, query])
 
   return (
-    <section className="panel library-panel">
+    <section className="panel library-panel" data-tour="library-list">
       <div className="panel-header">
         <div>
           <span className="eyebrow">Local Library</span>

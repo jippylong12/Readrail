@@ -8,8 +8,10 @@ import { ReaderRail } from './components/ReaderRail'
 import { SessionSummary } from './components/SessionSummary'
 import { SettingsPanel } from './components/SettingsPanel'
 import { StatsChart } from './components/StatsChart'
+import { GuidedTour } from './components/GuidedTour'
 import { type AppRoute } from './app/routes'
 import { selectActiveDocument, useAppStore } from './app/store'
+import { TOUR_DEFINITIONS, type TourId } from './app/tours'
 import { exportProgressCsv, exportProgressJson } from './lib/db/export'
 import { getDatabase } from './lib/db/migrations'
 import type { ReaderMode } from './types/domain'
@@ -27,10 +29,12 @@ function App() {
   const [route, setRoute] = useState<AppRoute>('library')
   const [pendingSession, setPendingSession] = useState<PendingSession | null>(null)
   const [hasGeminiKey, setHasGeminiKey] = useState(false)
+  const [replayTourId, setReplayTourId] = useState<TourId | null>(null)
   const documents = useAppStore((state) => state.documents)
   const sessions = useAppStore((state) => state.sessions)
   const settings = useAppStore((state) => state.settings)
   const onboarding = useAppStore((state) => state.onboarding)
+  const completedTourIds = useAppStore((state) => state.tourProgress.completedTourIds)
   const baselineResult = useAppStore((state) => state.baselineResult)
   const activeDocument = useAppStore(selectActiveDocument)
   const createDocument = useAppStore((state) => state.createDocument)
@@ -42,6 +46,9 @@ function App() {
   const skipOnboarding = useAppStore((state) => state.skipOnboarding)
   const completeOnboardingIntro = useAppStore((state) => state.completeOnboardingIntro)
   const reopenOnboarding = useAppStore((state) => state.reopenOnboarding)
+  const completeTour = useAppStore((state) => state.completeTour)
+  const resetTour = useAppStore((state) => state.resetTour)
+  const resetAllTours = useAppStore((state) => state.resetAllTours)
   const resetAllData = useAppStore((state) => state.resetAllData)
 
   useEffect(() => {
@@ -51,6 +58,8 @@ function App() {
   useEffect(() => {
     void getDatabase()
   }, [])
+
+  const activeTourId = replayTourId ?? (completedTourIds.includes(route) ? null : route)
 
   const createAndOpenDocument = useCallback(
     (title: string, content: string, sourceType: 'paste' | 'text_file' | 'photo_ocr' = 'paste') => {
@@ -83,6 +92,22 @@ function App() {
     setRoute('library')
   }
 
+  function replayTour(tourId: TourId = route): void {
+    setRoute(tourId)
+    resetTour(tourId)
+    setReplayTourId(tourId)
+  }
+
+  function finishTour(tourId: TourId): void {
+    completeTour(tourId)
+    setReplayTourId(null)
+  }
+
+  function changeRoute(nextRoute: AppRoute): void {
+    setReplayTourId(null)
+    setRoute(nextRoute)
+  }
+
   if (onboarding.status === 'not_started') {
     return (
       <OnboardingJourney
@@ -95,7 +120,7 @@ function App() {
   }
 
   return (
-    <AppShell activeDocument={activeDocument} activeRoute={route} onRouteChange={setRoute}>
+    <AppShell activeDocument={activeDocument} activeRoute={route} onReplayTour={() => replayTour()} onRouteChange={changeRoute}>
       {route === 'library' && (
         <div className="content-stack">
           <ImportPanel
@@ -151,7 +176,7 @@ function App() {
       {route === 'stats' && (
         <div className="content-stack">
           <StatsChart baselineResult={baselineResult} documents={documents} sessions={sessions} />
-          <section className="panel export-panel">
+          <section className="panel export-panel" data-tour="export">
             <span className="eyebrow">Export</span>
             <h2>Progress backup</h2>
             <div className="button-row">
@@ -170,11 +195,16 @@ function App() {
         <SettingsPanel
           onKeyStateChange={setHasGeminiKey}
           onOpenJourney={reopenOnboarding}
+          onReplayTour={replayTour}
           onResetData={resetAllData}
           onSettingsChange={updateSettings}
+          onResetTours={resetAllTours}
           baselineResult={baselineResult}
           settings={settings}
         />
+      )}
+      {activeTourId && (
+        <GuidedTour key={activeTourId} tour={TOUR_DEFINITIONS[activeTourId]} onComplete={() => finishTour(activeTourId)} />
       )}
     </AppShell>
   )

@@ -24,7 +24,7 @@ export function ImportPanel({ defaultWpm, onCreateDocument }: ImportPanelProps) 
   }
 
   return (
-    <section className="panel import-panel">
+    <section className="panel import-panel" data-tour="import">
       <div className="panel-header compact">
         <div>
           <span className="eyebrow">Import</span>

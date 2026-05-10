@@ -12,6 +12,10 @@ export type OnboardingState = {
   introCompletedAt: string | null
 }
 
+export type TourProgressState = {
+  completedTourIds: string[]
+}
+
 export type BaselineStorySource = 'default' | 'custom'
 
 export type BaselineQuestionKind = 'main_idea' | 'detail' | 'sequence_cause' | 'inference' | 'confidence'

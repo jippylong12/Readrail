@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
+import type { TourId } from '../app/tours'
 import type { AppSettings, BaselineAssessmentResult, ReaderMode, ThemeMode } from '../types/domain'
 import { isTauriRuntime } from '../lib/db/migrations'
 
@@ -9,6 +10,8 @@ type SettingsPanelProps = {
   onSettingsChange: (settings: Partial<AppSettings>) => void
   onResetData: () => void
   onOpenJourney: () => void
+  onReplayTour: (tourId: TourId) => void
+  onResetTours: () => void
   onKeyStateChange: (hasKey: boolean) => void
 }
 
@@ -18,6 +21,8 @@ export function SettingsPanel({
   onSettingsChange,
   onResetData,
   onOpenJourney,
+  onReplayTour,
+  onResetTours,
   onKeyStateChange,
 }: SettingsPanelProps) {
   const [apiKey, setApiKey] = useState('')
@@ -72,7 +77,7 @@ export function SettingsPanel({
       </div>
 
       <div className="settings-grid">
-        <section>
+        <section data-tour="settings-key">
           <h2>Gemini API key</h2>
           <label className="field">
             API key
@@ -95,7 +100,7 @@ export function SettingsPanel({
           {message && <span className="form-message">{message}</span>}
         </section>
 
-        <section>
+        <section data-tour="settings-reader">
           <h2>Reader defaults</h2>
           <label className="field">
             Default WPM
@@ -135,7 +140,7 @@ export function SettingsPanel({
           </label>
         </section>
 
-        <section>
+        <section data-tour="settings-ocr">
           <h2>OCR and data</h2>
           <label className="toggle">
             <input
@@ -160,7 +165,7 @@ export function SettingsPanel({
           </button>
         </section>
 
-        <section>
+        <section data-tour="settings-guidance">
           <h2>Guidance</h2>
           <p className="settings-note">
             Revisit the learner journey, baseline setup, and mode overview before a practice session.
@@ -173,6 +178,17 @@ export function SettingsPanel({
           )}
           <button className="secondary-button" onClick={onOpenJourney} type="button">
             Open learner journey
+          </button>
+          <div className="tour-replay-grid" aria-label="Replay walkthroughs">
+            {(['library', 'reader', 'stats', 'settings'] as const).map((tourId) => (
+              <button className="secondary-button" key={tourId} onClick={() => onReplayTour(tourId)} type="button">
+                {tourId[0].toUpperCase()}
+                {tourId.slice(1)}
+              </button>
+            ))}
+          </div>
+          <button className="ghost-button" onClick={onResetTours} type="button">
+            Show walkthroughs again automatically
           </button>
         </section>
       </div>

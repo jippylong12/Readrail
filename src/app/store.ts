@@ -8,6 +8,7 @@ import type {
   ReaderMode,
   ReadingSession,
   SourceType,
+  TourProgressState,
 } from '../types/domain'
 import { calculateAdjustedWpm, calculateActualWpm } from '../lib/reading/pacing'
 import { cleanReadingText } from '../lib/text/cleanup'
@@ -39,6 +40,7 @@ type AppState = {
   activeDocumentId: string | null
   settings: AppSettings
   onboarding: OnboardingState
+  tourProgress: TourProgressState
   baselineResult: BaselineAssessmentResult | null
   createDocument: (input: CreateDocumentInput) => DocumentRecord
   updateDocument: (id: string, updates: Partial<Pick<DocumentRecord, 'title' | 'content'>>) => void
@@ -50,6 +52,9 @@ type AppState = {
   skipOnboarding: () => void
   completeOnboardingIntro: () => void
   reopenOnboarding: () => void
+  completeTour: (tourId: string) => void
+  resetTour: (tourId: string) => void
+  resetAllTours: () => void
   resetAllData: () => void
 }
 
@@ -80,6 +85,10 @@ export const defaultOnboardingState: OnboardingState = {
   introCompletedAt: null,
 }
 
+export const defaultTourProgressState: TourProgressState = {
+  completedTourIds: [],
+}
+
 export const useAppStore = create<AppState>()(
   persist(
     (set) => ({
@@ -88,6 +97,7 @@ export const useAppStore = create<AppState>()(
       activeDocumentId: null,
       settings: defaultSettings,
       onboarding: defaultOnboardingState,
+      tourProgress: defaultTourProgressState,
       baselineResult: null,
       createDocument: (input) => {
         const now = new Date().toISOString()
@@ -223,12 +233,34 @@ export const useAppStore = create<AppState>()(
         })
       },
       reopenOnboarding: () => set({ onboarding: defaultOnboardingState }),
+      completeTour: (tourId) => {
+        set((state) => {
+          if (state.tourProgress.completedTourIds.includes(tourId)) {
+            return state
+          }
+
+          return {
+            tourProgress: {
+              completedTourIds: [...state.tourProgress.completedTourIds, tourId],
+            },
+          }
+        })
+      },
+      resetTour: (tourId) => {
+        set((state) => ({
+          tourProgress: {
+            completedTourIds: state.tourProgress.completedTourIds.filter((completedTourId) => completedTourId !== tourId),
+          },
+        }))
+      },
+      resetAllTours: () => set({ tourProgress: defaultTourProgressState }),
       resetAllData: () =>
         set({
           documents: [],
           sessions: [],
           activeDocumentId: null,
           onboarding: defaultOnboardingState,
+          tourProgress: defaultTourProgressState,
           baselineResult: null,
         }),
     }),
@@ -241,6 +273,7 @@ export const useAppStore = create<AppState>()(
         activeDocumentId: state.activeDocumentId,
         settings: state.settings,
         onboarding: state.onboarding,
+        tourProgress: state.tourProgress,
         baselineResult: state.baselineResult,
       }),
     },

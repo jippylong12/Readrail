@@ -76,7 +76,7 @@ export function ReaderRail({
 
   if (!document) {
     return (
-      <section className="panel reader-empty">
+      <section className="panel reader-empty" data-tour="reader-surface">
         <span className="eyebrow">Reader</span>
         <h1>Select a document</h1>
         <p>Saved readings appear in the Library. Choose one to start rail or phrase training.</p>
@@ -134,7 +134,7 @@ export function ReaderRail({
         <span style={{ width: `${progress}%` }} />
       </div>
 
-      <div className={`reading-surface ${mode}`} style={{ fontSize, lineHeight }}>
+      <div className={`reading-surface ${mode}`} data-tour="reader-surface" style={{ fontSize, lineHeight }}>
         {mode === 'rsvp' ? (
           <div className="rsvp-frame">{activeChunk?.text ?? 'Done'}</div>
         ) : (

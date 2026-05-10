@@ -172,6 +172,10 @@ button:disabled {
   padding: 16px;
 }
 
+.help-button {
+  width: 100%;
+}
+
 .main-panel {
   min-width: 0;
   padding: 28px;
@@ -492,6 +496,66 @@ h2 {
   padding: 16px;
   border: 1px solid var(--line);
   border-radius: 8px;
+}
+
+.tour-replay-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.tour-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+}
+
+.tour-scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 17, 21, 0.5);
+}
+
+.tour-highlight {
+  position: absolute;
+  border: 2px solid var(--primary);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+  box-shadow:
+    0 0 0 9999px rgba(15, 17, 21, 0.42),
+    0 18px 40px rgba(15, 17, 21, 0.22);
+}
+
+.tour-card {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  display: grid;
+  gap: 12px;
+  width: min(360px, calc(100vw - 32px));
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  padding: 18px;
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+}
+
+.tour-card[style] {
+  transform: none;
+}
+
+.tour-card p {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.tour-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
 }
 
 .toggle {

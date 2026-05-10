@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { defaultOnboardingState, useAppStore } from '../app/store'
+import { defaultOnboardingState, defaultTourProgressState, useAppStore } from '../app/store'
 
 describe('onboarding state', () => {
   beforeEach(() => {
@@ -8,6 +8,7 @@ describe('onboarding state', () => {
       sessions: [],
       activeDocumentId: null,
       onboarding: defaultOnboardingState,
+      tourProgress: defaultTourProgressState,
       baselineResult: null,
     })
   })
@@ -59,5 +60,24 @@ describe('onboarding state', () => {
     expect(state.baselineResult?.recommendedWpm).toBe(225)
     expect(state.baselineResult?.appliedWpmAt).not.toBeNull()
     expect(state.settings.reader.defaultWpm).toBe(225)
+  })
+
+  it('stores completed walkthrough tours locally and can replay them', () => {
+    useAppStore.getState().completeTour('library')
+    useAppStore.getState().completeTour('library')
+
+    expect(useAppStore.getState().tourProgress.completedTourIds).toEqual(['library'])
+
+    useAppStore.getState().resetTour('library')
+
+    expect(useAppStore.getState().tourProgress.completedTourIds).toEqual([])
+  })
+
+  it('can reset all completed walkthrough tours', () => {
+    useAppStore.getState().completeTour('library')
+    useAppStore.getState().completeTour('reader')
+    useAppStore.getState().resetAllTours()
+
+    expect(useAppStore.getState().tourProgress).toEqual(defaultTourProgressState)
   })
 })

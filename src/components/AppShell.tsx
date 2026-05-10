@@ -6,10 +6,11 @@ type AppShellProps = {
   activeRoute: AppRoute
   activeDocument: DocumentRecord | null
   onRouteChange: (route: AppRoute) => void
+  onReplayTour: () => void
   children: React.ReactNode
 }
 
-export function AppShell({ activeRoute, activeDocument, onRouteChange, children }: AppShellProps) {
+export function AppShell({ activeRoute, activeDocument, onRouteChange, onReplayTour, children }: AppShellProps) {
   return (
     <div className="app-shell">
       <aside className="sidebar" aria-label="Primary">
@@ -40,6 +41,10 @@ export function AppShell({ activeRoute, activeDocument, onRouteChange, children 
           <strong>{activeDocument?.title ?? 'No document selected'}</strong>
           <span>{activeDocument ? `${activeDocument.wordCount.toLocaleString()} words` : 'Import text to begin'}</span>
         </div>
+
+        <button className="secondary-button help-button" onClick={onReplayTour} type="button">
+          Replay walkthrough
+        </button>
       </aside>
 
       <main className="main-panel">{children}</main>

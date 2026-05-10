@@ -22,7 +22,7 @@ export function StatsChart({ baselineResult, documents, sessions }: StatsChartPr
         <span>{documents.filter((document) => !document.archivedAt).length} active documents</span>
       </div>
 
-      <div className="summary-grid">
+      <div className="summary-grid" data-tour="stats-summary">
         <Metric label="Sessions" value={summary.totalSessions} />
         <Metric label="Words read" value={summary.totalWords.toLocaleString()} />
         <Metric label="Minutes" value={summary.totalMinutes} />
@@ -32,7 +32,7 @@ export function StatsChart({ baselineResult, documents, sessions }: StatsChartPr
       </div>
 
       {baselineResult && (
-        <section className="baseline-summary">
+        <section className="baseline-summary" data-tour="baseline-summary">
           <div>
             <span className="eyebrow">Baseline</span>
             <h2>{baselineResult.storyTitle}</h2>
@@ -48,12 +48,12 @@ export function StatsChart({ baselineResult, documents, sessions }: StatsChartPr
       )}
 
       {sessions.length === 0 ? (
-        <div className="empty-state">
+        <div className="empty-state" data-tour="stats-charts">
           <strong>No sessions yet</strong>
           <span>Finish a reader session and save the comprehension check to populate trends.</span>
         </div>
       ) : (
-        <div className="chart-grid">
+        <div className="chart-grid" data-tour="stats-charts">
           <div className="chart-block">
             <h2>WPM and adjusted WPM</h2>
             <ResponsiveContainer height={260} width="100%">

@@ -31,7 +31,7 @@ export function SessionSummary({ pendingSession, onSave, onDiscard }: SessionSum
   const adjustedWpm = calculateAdjustedWpm(actualWpm, comprehensionScore)
 
   return (
-    <section className="panel summary-panel">
+    <section className="panel summary-panel" data-tour="session-summary">
       <div>
         <span className="eyebrow">Session Summary</span>
         <h2>Comprehension check</h2>

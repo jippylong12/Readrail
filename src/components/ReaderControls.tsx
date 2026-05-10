@@ -28,7 +28,7 @@ export function ReaderControls({
   onFinish,
 }: ReaderControlsProps) {
   return (
-    <div className="reader-controls">
+    <div className="reader-controls" data-tour="reader-controls">
       <div className="segmented" aria-label="Reading mode">
         {(['rail', 'chunk', 'rsvp'] as const).map((candidate) => (
           <button
@@ -59,7 +59,7 @@ export function ReaderControls({
         />
       </label>
 
-      <div className="control-buttons">
+      <div className="control-buttons" data-tour="reader-actions">
         <button className="primary-button" onClick={onToggleRunning} type="button">
           {isRunning ? 'Pause' : 'Play'}
         </button>
