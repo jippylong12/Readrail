@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { chunkText, getChunkDurationMs } from '../lib/text/chunking'
-import type { DocumentRecord, ReaderMode } from '../types/domain'
+import type { BaselineAssessmentResult, DocumentRecord, ReaderMode } from '../types/domain'
 import { clampWpm, formatDuration } from '../lib/reading/pacing'
 import { ReaderControls } from './ReaderControls'
 
 type ReaderRailProps = {
+  baselineResult: BaselineAssessmentResult | null
   document: DocumentRecord | null
   defaultMode: ReaderMode
   defaultWpm: number
@@ -22,6 +23,7 @@ type ReaderRailProps = {
 }
 
 export function ReaderRail({
+  baselineResult,
   document,
   defaultMode,
   defaultWpm,
@@ -110,6 +112,7 @@ export function ReaderRail({
       </div>
 
       <ReaderControls
+        baselineResult={baselineResult}
         chunkSize={chunkSize}
         isRunning={isRunning}
         mode={mode}

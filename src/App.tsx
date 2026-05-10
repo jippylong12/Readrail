@@ -148,6 +148,7 @@ function App() {
       {route === 'reader' && (
         <div className="content-stack">
           <ReaderRail
+            baselineResult={baselineResult}
             defaultChunkSize={settings.reader.chunkSize}
             defaultMode={settings.reader.defaultMode}
             defaultWpm={settings.reader.defaultWpm}

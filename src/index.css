@@ -362,9 +362,7 @@ h2 {
 
 .reader-controls {
   display: grid;
-  grid-template-columns: auto minmax(220px, 1fr) 100px auto;
-  gap: 16px;
-  align-items: end;
+  gap: 12px;
   margin-bottom: 18px;
 }
 
@@ -373,6 +371,43 @@ h2 {
   gap: 6px;
   color: var(--muted);
   font-weight: 700;
+}
+
+.reader-control-strip {
+  display: grid;
+  grid-template-columns: minmax(240px, 0.75fr) minmax(220px, 1fr) 90px auto;
+  gap: 14px;
+  align-items: end;
+}
+
+.mode-picker {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 38px;
+  gap: 8px;
+  align-items: center;
+}
+
+.control-buttons {
+  justify-content: flex-start;
+}
+
+.reader-metrics {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  white-space: nowrap;
+}
+
+.reader-metrics span,
+.reader-metrics strong {
+  display: inline-block;
+}
+
+.mode-setup {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.72fr);
+  gap: 12px;
+  align-items: stretch;
 }
 
 .segmented {
@@ -397,6 +432,73 @@ h2 {
 .segmented button.active {
   background: var(--surface);
   color: var(--text);
+}
+
+.info-button {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--muted);
+  font-weight: 900;
+}
+
+.info-button[aria-expanded="true"] {
+  border-color: color-mix(in srgb, var(--primary) 45%, var(--line));
+  background: color-mix(in srgb, var(--primary) 10%, var(--surface));
+  color: var(--text);
+}
+
+.mode-guidance {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.mode-guidance article {
+  display: grid;
+  gap: 4px;
+  min-height: 94px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-muted);
+}
+
+.mode-guidance article.active {
+  border-color: color-mix(in srgb, var(--primary) 45%, var(--line));
+  background: color-mix(in srgb, var(--primary) 8%, var(--surface));
+}
+
+.mode-guidance article p,
+.mode-recommendation,
+.mode-warning {
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.mode-notes {
+  display: grid;
+  gap: 8px;
+}
+
+.mode-recommendation,
+.mode-warning {
+  padding: 10px;
+  border-radius: 8px;
+}
+
+.mode-recommendation {
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+}
+
+.mode-warning {
+  border-left: 4px solid var(--warning);
+  background: color-mix(in srgb, var(--warning) 9%, var(--surface));
 }
 
 .progress-track {
@@ -877,6 +979,17 @@ h2 {
   .onboarding-shell {
     align-items: start;
     padding: 16px;
+  }
+
+  .reader-control-strip,
+  .mode-setup,
+  .mode-guidance,
+  .mode-picker {
+    grid-template-columns: 1fr;
+  }
+
+  .mode-picker {
+    grid-template-columns: minmax(0, 1fr) 38px;
   }
 
   .onboarding-panel {
