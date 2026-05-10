@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { cleanReadingText } from '../lib/text/cleanup'
-import { chunkText, getChunkDurationMs } from '../lib/text/chunking'
+import { chunkText, getChunkDurationMs, tokenizeReadableWords } from '../lib/text/chunking'
 import { countWords, estimatePages, estimateReadingMinutes } from '../lib/text/wordCount'
 
 describe('text processing', () => {
@@ -16,6 +16,7 @@ describe('text processing', () => {
 
   it('counts words with apostrophes and hyphenated terms', () => {
     expect(countWords("Reader's evidence-aware practice works.")).toBe(4)
+    expect(countWords('Mara\u2019s evidence-aware practice works.')).toBe(4)
   })
 
   it('estimates pages and duration', () => {
@@ -26,8 +27,41 @@ describe('text processing', () => {
   it('chunks text and computes pace duration', () => {
     const chunks = chunkText('One two three four five six.', 3)
 
-    expect(chunks).toHaveLength(3)
+    expect(chunks).toHaveLength(2)
     expect(chunks[0].text).toBe('One two three')
     expect(getChunkDurationMs(3, 300)).toBe(600)
+  })
+
+  it('keeps contractions as single readable words', () => {
+    expect(tokenizeReadableWords("It's fine. Don't split can't, I'm sure you're ready; we'll go.")).toEqual([
+      "It's",
+      'fine.',
+      "Don't",
+      'split',
+      "can't,",
+      "I'm",
+      'sure',
+      "you're",
+      'ready;',
+      "we'll",
+      'go.',
+    ])
+  })
+
+  it('keeps possessives, quotes, and punctuation attached to words', () => {
+    expect(tokenizeReadableWords(`Mara's note said, "Don't stop."`)).toEqual([
+      "Mara's",
+      'note',
+      'said,',
+      '"Don\'t',
+      'stop."',
+    ])
+  })
+
+  it('does not create standalone punctuation chunks', () => {
+    const chunks = chunkText(`Wait... "I'm ready," Mara said.`, 1)
+
+    expect(chunks.map((chunk) => chunk.text)).toEqual(['Wait...', '"I\'m', 'ready,"', 'Mara', 'said.'])
+    expect(chunks.every((chunk) => /[\p{L}\p{N}]/u.test(chunk.text))).toBe(true)
   })
 })
