@@ -382,7 +382,7 @@ h2 {
   border-radius: 8px;
 }
 
-.document-row button:first-child {
+.document-row > button:first-child {
   border: 0;
   background: transparent;
   color: var(--text);
@@ -392,6 +392,63 @@ h2 {
 .document-row strong,
 .document-row span {
   display: block;
+}
+
+.document-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.document-title-edit,
+.document-edit-form {
+  display: grid;
+  gap: 12px;
+}
+
+.document-title-edit {
+  min-width: 0;
+}
+
+.button-row.compact {
+  justify-content: flex-start;
+}
+
+.reader-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.document-edit-form {
+  margin-bottom: 18px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-muted) 64%, var(--surface));
+}
+
+.document-edit-form textarea {
+  min-height: 260px;
+}
+
+.document-edit-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.form-message.error {
+  color: var(--danger);
+  font-weight: 800;
 }
 
 .reader-controls {
@@ -409,7 +466,7 @@ h2 {
 
 .reader-control-strip {
   display: grid;
-  grid-template-columns: minmax(240px, 0.75fr) minmax(140px, 0.5fr) minmax(220px, 1fr) 90px minmax(310px, auto);
+  grid-template-columns: minmax(220px, 0.75fr) minmax(120px, 0.5fr) minmax(160px, 1fr) 70px minmax(240px, auto);
   gap: 14px;
   align-items: end;
 }
@@ -1368,8 +1425,26 @@ h2 {
     min-width: 0;
   }
 
+  .shortcut-hint {
+    display: none;
+  }
+
   .document-row {
     grid-template-columns: 1fr;
+  }
+
+  .document-row-actions,
+  .reader-header-actions,
+  .document-edit-footer {
+    align-items: stretch;
+    justify-content: flex-start;
+  }
+
+  .document-row-actions .ghost-button,
+  .reader-header-actions .secondary-button,
+  .document-edit-footer .button-row,
+  .document-edit-footer .button-row button {
+    width: 100%;
   }
 }
 

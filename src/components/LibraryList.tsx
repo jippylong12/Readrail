@@ -5,12 +5,22 @@ type LibraryListProps = {
   documents: DocumentRecord[]
   activeDocumentId: string | null
   onSelect: (id: string) => void
+  onUpdateDocument: (id: string, updates: Partial<Pick<DocumentRecord, 'title' | 'content'>>) => void
   onArchive: (id: string) => void
   onOpenJourney: () => void
 }
 
-export function LibraryList({ documents, activeDocumentId, onSelect, onArchive, onOpenJourney }: LibraryListProps) {
+export function LibraryList({
+  documents,
+  activeDocumentId,
+  onSelect,
+  onUpdateDocument,
+  onArchive,
+  onOpenJourney,
+}: LibraryListProps) {
   const [query, setQuery] = useState('')
+  const [editingDocumentId, setEditingDocumentId] = useState<string | null>(null)
+  const [draftTitle, setDraftTitle] = useState('')
 
   const visibleDocuments = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase()
@@ -56,14 +66,56 @@ export function LibraryList({ documents, activeDocumentId, onSelect, onArchive, 
         <div className="document-list">
           {visibleDocuments.map((document) => (
             <article className={document.id === activeDocumentId ? 'document-row active' : 'document-row'} key={document.id}>
-              <button onClick={() => onSelect(document.id)} type="button">
-                <strong>{document.title}</strong>
-                <span>
-                  {document.wordCount.toLocaleString()} words - {document.estimatedPages} pages - {document.sourceType}
-                </span>
-              </button>
-              <div>
+              {editingDocumentId === document.id ? (
+                <form
+                  className="document-title-edit"
+                  onSubmit={(event) => {
+                    event.preventDefault()
+                    onUpdateDocument(document.id, { title: draftTitle })
+                    setEditingDocumentId(null)
+                  }}
+                >
+                  <label className="field">
+                    Title
+                    <input
+                      autoFocus
+                      onChange={(event) => setDraftTitle(event.target.value)}
+                      value={draftTitle}
+                    />
+                  </label>
+                  <div className="button-row compact">
+                    <button className="primary-button" type="submit">
+                      Save title
+                    </button>
+                    <button
+                      className="secondary-button"
+                      onClick={() => setEditingDocumentId(null)}
+                      type="button"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <button onClick={() => onSelect(document.id)} type="button">
+                  <strong>{document.title}</strong>
+                  <span>
+                    {document.wordCount.toLocaleString()} words - {document.estimatedPages} pages - {document.sourceType}
+                  </span>
+                </button>
+              )}
+              <div className="document-row-actions">
                 <span>{new Date(document.updatedAt).toLocaleDateString()}</span>
+                <button
+                  className="ghost-button"
+                  onClick={() => {
+                    setEditingDocumentId(document.id)
+                    setDraftTitle(document.title)
+                  }}
+                  type="button"
+                >
+                  Edit
+                </button>
                 <button className="ghost-button" onClick={() => onArchive(document.id)} type="button">
                   Archive
                 </button>

@@ -180,10 +180,11 @@ export const useAppStore = create<AppState>()(
                 updates.content !== undefined
                   ? cleanReadingText(updates.content, { preservePageBreaks: true })
                   : document.content
+              const title = updates.title !== undefined ? updates.title.trim() || 'Untitled reading' : document.title
               const wordCount = countWords(content)
               changedDocument = {
                 ...document,
-                ...updates,
+                title,
                 content,
                 wordCount,
                 estimatedPages: estimatePages(wordCount),

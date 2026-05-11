@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { chunkText, getChunkDurationMs } from '../lib/text/chunking'
 import type { BaselineAssessmentResult, DocumentRecord, PageLayout, ReaderMode } from '../types/domain'
 import { clampWpm, formatDuration } from '../lib/reading/pacing'
+import { cleanReadingText } from '../lib/text/cleanup'
 import { splitIntoPages, getActivePage } from '../lib/text/pages'
+import { countWords, estimatePages } from '../lib/text/wordCount'
 import { ReaderControls } from './ReaderControls'
 
 export const COMPREHENSION_TEST_THRESHOLD_WORDS = 1000
@@ -31,6 +33,7 @@ type ReaderRailProps = {
   onSegmentReset: (documentId: string, wordIndex: number) => void
   onSegmentStart: (documentId: string, segment: { startWordIndex: number; startedAt: string; targetWpm: number }) => void
   onStartTest: (input: ReaderSegmentInput) => void
+  onUpdateDocument?: (id: string, updates: Partial<Pick<DocumentRecord, 'title' | 'content'>>) => void
 }
 
 export function ReaderRail({
@@ -46,6 +49,7 @@ export function ReaderRail({
   onSegmentReset,
   onSegmentStart,
   onStartTest,
+  onUpdateDocument,
 }: ReaderRailProps) {
   const [mode, setMode] = useState<ReaderMode>(defaultMode)
   const [targetWpm, setTargetWpm] = useState(defaultWpm)
@@ -61,6 +65,10 @@ export function ReaderRail({
   const [segmentStartWordIndex, setSegmentStartWordIndex] = useState(initialSegmentStartWordIndex)
   const [segmentStartElapsedSeconds, setSegmentStartElapsedSeconds] = useState(0)
   const [suggestion, setSuggestion] = useState<'threshold' | null>(null)
+  const [isEditingDocument, setIsEditingDocument] = useState(false)
+  const [draftTitle, setDraftTitle] = useState(document?.title ?? '')
+  const [draftText, setDraftText] = useState(document?.content ?? '')
+  const [editError, setEditError] = useState<string | null>(null)
   const startedRef = useRef<number | null>(null)
 
   const chunks = useMemo(() => chunkText(document?.content ?? '', chunkSize), [chunkSize, document?.content])
@@ -68,6 +76,11 @@ export function ReaderRail({
   const currentWordIndex = activeChunk?.endWord ?? 0
   const untestedWordCount = Math.max(0, currentWordIndex - segmentStartWordIndex)
   const progress = chunks.length ? Math.round(((activeIndex + 1) / chunks.length) * 100) : 0
+  const cleanedDraftText = useMemo(
+    () => cleanReadingText(draftText, { preservePageBreaks: true }),
+    [draftText],
+  )
+  const draftWordCount = countWords(cleanedDraftText)
 
   useEffect(() => {
     if (!isRunning || !activeChunk) {
@@ -181,6 +194,46 @@ export function ReaderRail({
     onStartTest(buildSegment())
   }
 
+  function startDocumentEdit(): void {
+    if (!document) {
+      return
+    }
+
+    setIsRunning(false)
+    setIsFocusMode(false)
+    setSuggestion(null)
+    setDraftTitle(document.title)
+    setDraftText(document.content)
+    setEditError(null)
+    setIsEditingDocument(true)
+  }
+
+  function cancelDocumentEdit(): void {
+    setDraftTitle(document?.title ?? '')
+    setDraftText(document?.content ?? '')
+    setEditError(null)
+    setIsEditingDocument(false)
+  }
+
+  function saveDocumentEdit(event: FormEvent<HTMLFormElement>): void {
+    event.preventDefault()
+    if (!document || !onUpdateDocument) {
+      return
+    }
+
+    if (draftWordCount === 0) {
+      setEditError('Add reading text before saving.')
+      return
+    }
+
+    onUpdateDocument(document.id, {
+      title: draftTitle,
+      content: cleanedDraftText,
+    })
+    setEditError(null)
+    setIsEditingDocument(false)
+  }
+
   function pauseReading(): void {
     setIsRunning(false)
     setPauseCount((count) => count + 1)
@@ -207,11 +260,49 @@ export function ReaderRail({
           <span className="eyebrow">Reader</span>
           <h1>{document.title}</h1>
         </div>
-        <div className="reader-metrics">
-          <span>{formatDuration(elapsedSeconds)}</span>
-          <strong>{progress}%</strong>
+        <div className="reader-header-actions">
+          <div className="reader-metrics">
+            <span>{formatDuration(elapsedSeconds)}</span>
+            <strong>{progress}%</strong>
+          </div>
+          {onUpdateDocument && (
+            <button className="secondary-button" onClick={startDocumentEdit} type="button">
+              Edit
+            </button>
+          )}
         </div>
       </div>
+
+      {isEditingDocument && (
+        <form className="document-edit-form" onSubmit={saveDocumentEdit}>
+          <label className="field">
+            Title
+            <input
+              autoFocus
+              onChange={(event) => setDraftTitle(event.target.value)}
+              value={draftTitle}
+            />
+          </label>
+          <label className="field">
+            Text
+            <textarea onChange={(event) => setDraftText(event.target.value)} value={draftText} />
+          </label>
+          <div className="document-edit-footer">
+            <span>
+              {draftWordCount.toLocaleString()} words - {estimatePages(draftWordCount)} pages
+            </span>
+            <div className="button-row compact">
+              <button className="primary-button" type="submit">
+                Save changes
+              </button>
+              <button className="secondary-button" onClick={cancelDocumentEdit} type="button">
+                Cancel
+              </button>
+            </div>
+          </div>
+          {editError && <p className="form-message error">{editError}</p>}
+        </form>
+      )}
 
       <ReaderControls
         baselineResult={baselineResult}

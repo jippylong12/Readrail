@@ -56,6 +56,7 @@ function App() {
   const coaching = useAppStore((state) => state.coaching)
   const activeDocument = useAppStore(selectActiveDocument)
   const createDocument = useAppStore((state) => state.createDocument)
+  const updateDocument = useAppStore((state) => state.updateDocument)
   const archiveDocument = useAppStore((state) => state.archiveDocument)
   const setActiveDocument = useAppStore((state) => state.setActiveDocument)
   const completeSession = useAppStore((state) => state.completeSession)
@@ -304,6 +305,7 @@ function App() {
               setActiveDocument(id)
               setRoute('reader')
             }}
+            onUpdateDocument={updateDocument}
           />
         </div>
       )}
@@ -328,6 +330,7 @@ function App() {
             onStartTest={(input) => {
               void startQuizForSession(input)
             }}
+            onUpdateDocument={updateDocument}
           />
         </div>
       )}
