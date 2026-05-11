@@ -13,6 +13,7 @@ const documentRecord: DocumentRecord = {
   wordCount: 14,
   estimatedPages: 1,
   language: 'en',
+  structureVersion: 1,
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
   archivedAt: null,

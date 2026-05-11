@@ -4,6 +4,8 @@ import type {
   AppSettings,
   BaselineAssessmentResult,
   CoachingState,
+  DocumentChapterRecord,
+  DocumentPageRecord,
   DocumentRecord,
   OnboardingState,
   PageLayout,
@@ -17,6 +19,12 @@ import { calculateAdjustedWpm, calculateActualWpm } from '../lib/reading/pacing'
 import { cleanReadingText } from '../lib/text/cleanup'
 import { countWords, estimatePages } from '../lib/text/wordCount'
 import { saveDocumentToDatabase, saveSessionToDatabase } from '../lib/db/repository'
+import {
+  STRUCTURED_DOCUMENT_VERSION,
+  createDefaultDocumentStructure,
+  defaultDocumentPageId,
+  ensureStructuredDocumentCollections,
+} from './structuredDocuments'
 
 type CreateDocumentInput = {
   title: string
@@ -41,6 +49,8 @@ type CompleteSessionInput = {
 
 type AppState = {
   documents: DocumentRecord[]
+  documentChapters: DocumentChapterRecord[]
+  documentPages: DocumentPageRecord[]
   sessions: ReadingSession[]
   activeDocumentId: string | null
   settings: AppSettings
@@ -112,6 +122,8 @@ export const useAppStore = create<AppState>()(
   persist(
     (set) => ({
       documents: [],
+      documentChapters: [],
+      documentPages: [],
       sessions: [],
       activeDocumentId: null,
       settings: defaultSettings,
@@ -132,20 +144,78 @@ export const useAppStore = create<AppState>()(
           wordCount,
           estimatedPages: estimatePages(wordCount),
           language: 'en',
+          structureVersion: STRUCTURED_DOCUMENT_VERSION,
           createdAt: now,
           updatedAt: now,
           archivedAt: null,
         }
+        const structure = createDefaultDocumentStructure(document)
 
         set((state) => ({
           documents: [document, ...state.documents],
+          documentChapters: [structure.chapter, ...state.documentChapters],
+          documentPages: [structure.page, ...state.documentPages],
           activeDocumentId: document.id,
         }))
-        void saveDocumentToDatabase(document)
+        void saveDocumentToDatabase(document, {
+          chapters: [structure.chapter],
+          pages: [structure.page],
+        })
 
         return document
       },
       updateDocument: (id, updates) => {
+        const updatedAt = new Date().toISOString()
+        let changedDocument: DocumentRecord | null = null
+        let changedPage: DocumentPageRecord | null = null
+
+        set((state) => {
+          return {
+            documents: state.documents.map((document) => {
+              if (document.id !== id) {
+                return document
+              }
+
+              const content =
+                updates.content !== undefined
+                  ? cleanReadingText(updates.content, { preservePageBreaks: true })
+                  : document.content
+              const wordCount = countWords(content)
+              changedDocument = {
+                ...document,
+                ...updates,
+                content,
+                wordCount,
+                estimatedPages: estimatePages(wordCount),
+                updatedAt,
+              }
+              return changedDocument
+            }),
+            documentPages:
+              updates.content === undefined
+                ? state.documentPages
+                : state.documentPages.map((page) => {
+                    if (page.id !== defaultDocumentPageId(id)) {
+                      return page
+                    }
+
+                    const content = cleanReadingText(updates.content ?? '', { preservePageBreaks: true })
+                    changedPage = {
+                      ...page,
+                      text: content,
+                      wordCount: countWords(content),
+                      updatedAt,
+                    }
+                    return changedPage
+                  }),
+          }
+        })
+
+        if (changedDocument) {
+          void saveDocumentToDatabase(changedDocument, changedPage ? { pages: [changedPage] } : undefined)
+        }
+      },
+      archiveDocument: (id) => {
         const updatedAt = new Date().toISOString()
         let changedDocument: DocumentRecord | null = null
 
@@ -155,32 +225,15 @@ export const useAppStore = create<AppState>()(
               return document
             }
 
-            const content = updates.content ? cleanReadingText(updates.content, { preservePageBreaks: true }) : document.content
-            const wordCount = countWords(content)
-            changedDocument = {
-              ...document,
-              ...updates,
-              content,
-              wordCount,
-              estimatedPages: estimatePages(wordCount),
-              updatedAt,
-            }
+            changedDocument = { ...document, archivedAt: updatedAt, updatedAt }
             return changedDocument
           }),
+          activeDocumentId: state.activeDocumentId === id ? null : state.activeDocumentId,
         }))
 
         if (changedDocument) {
           void saveDocumentToDatabase(changedDocument)
         }
-      },
-      archiveDocument: (id) => {
-        const updatedAt = new Date().toISOString()
-        set((state) => ({
-          documents: state.documents.map((document) =>
-            document.id === id ? { ...document, archivedAt: updatedAt, updatedAt } : document,
-          ),
-          activeDocumentId: state.activeDocumentId === id ? null : state.activeDocumentId,
-        }))
       },
       setActiveDocument: (id) => set({ activeDocumentId: id }),
       completeSession: (input) => {
@@ -330,6 +383,8 @@ export const useAppStore = create<AppState>()(
       resetAllData: () =>
         set({
           documents: [],
+          documentChapters: [],
+          documentPages: [],
           sessions: [],
           activeDocumentId: null,
           onboarding: defaultOnboardingState,
@@ -341,7 +396,7 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: 'readrail-local-state',
-      version: 4,
+      version: 5,
       migrate: (persistedState: unknown, fromVersion: number) => {
         const state = persistedState as Record<string, unknown>
         // v1 → v2: seed defaultPageLayout for existing users
@@ -371,10 +426,23 @@ export const useAppStore = create<AppState>()(
             targetWpm: attempt.targetWpm ?? attempt.recommendedWpm ?? fallbackWpm,
           }))
         }
+        // v4 → v5: seed structured document children while preserving document identity.
+        if (fromVersion < 5) {
+          const structured = ensureStructuredDocumentCollections({
+            documents: state.documents as DocumentRecord[] | undefined,
+            documentChapters: state.documentChapters as DocumentChapterRecord[] | undefined,
+            documentPages: state.documentPages as DocumentPageRecord[] | undefined,
+          })
+          state.documents = structured.documents
+          state.documentChapters = structured.documentChapters
+          state.documentPages = structured.documentPages
+        }
         return state
       },
       partialize: (state) => ({
         documents: state.documents,
+        documentChapters: state.documentChapters,
+        documentPages: state.documentPages,
         sessions: state.sessions,
         activeDocumentId: state.activeDocumentId,
         settings: state.settings,

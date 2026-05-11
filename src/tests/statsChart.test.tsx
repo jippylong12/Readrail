@@ -12,6 +12,7 @@ const sampleDocument: DocumentRecord = {
   wordCount: 100,
   estimatedPages: 1,
   language: 'en',
+  structureVersion: 1,
   createdAt: '2026-05-01T00:00:00.000Z',
   updatedAt: '2026-05-01T00:00:00.000Z',
   archivedAt: null,

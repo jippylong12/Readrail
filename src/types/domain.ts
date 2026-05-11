@@ -80,9 +80,52 @@ export type DocumentRecord = {
   wordCount: number
   estimatedPages: number
   language: string
+  structureVersion: number
   createdAt: string
   updatedAt: string
   archivedAt: string | null
+}
+
+export type OcrReviewStatus = 'unreviewed' | 'reviewed' | 'needs_attention'
+
+export type OcrUncertainSpan = {
+  text: string
+  startIndex: number | null
+  endIndex: number | null
+  confidence: number | null
+  note: string | null
+}
+
+export type DocumentChapterRecord = {
+  id: string
+  documentId: string
+  title: string
+  sortOrder: number
+  createdAt: string
+  updatedAt: string
+}
+
+export type DocumentPageRecord = {
+  id: string
+  documentId: string
+  chapterId: string
+  sortOrder: number
+  pageNumber: number
+  sourcePageNumber: number | null
+  title: string | null
+  text: string
+  wordCount: number
+  reviewStatus: OcrReviewStatus
+  ocrConfidence: number | null
+  ocrNotes: string | null
+  uncertainSpans: OcrUncertainSpan[]
+  sourceFileId: string | null
+  sourceFileName: string | null
+  sourceKind: SourceFileRecord['kind'] | null
+  sourceLocalPath: string | null
+  sourceSha256: string | null
+  createdAt: string
+  updatedAt: string
 }
 
 export type ReadingSession = {

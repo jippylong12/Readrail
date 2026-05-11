@@ -13,6 +13,7 @@ const documentRecord: DocumentRecord = {
   wordCount: 400,
   estimatedPages: 2,
   language: 'en',
+  structureVersion: 1,
   createdAt: '2026-05-01T00:00:00.000Z',
   updatedAt: '2026-05-01T00:00:00.000Z',
   archivedAt: null,
