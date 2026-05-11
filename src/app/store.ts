@@ -27,6 +27,9 @@ import {
   defaultDocumentChapterId,
   defaultDocumentPageId,
   ensureStructuredDocumentCollections,
+  getOrderedDocumentChapters,
+  normalizeDocumentStructureOrder,
+  renderStructuredContent,
 } from './structuredDocuments'
 
 type CreateDocumentInput = {
@@ -38,6 +41,7 @@ type CreateDocumentInput = {
 export type OcrPageInput = {
   pageNumber: number
   text: string
+  title?: string | null
   reviewStatus: OcrReviewStatus
   sourcePageNumber: number | null
   ocrConfidence: number | null
@@ -81,7 +85,20 @@ type AppState = {
   coaching: CoachingState
   createDocument: (input: CreateDocumentInput) => DocumentRecord
   createOcrDocument: (input: CreateOcrDocumentInput) => DocumentRecord
-  appendOcrPagesToDocument: (documentId: string, pages: OcrPageInput[]) => DocumentRecord | null
+  appendOcrPagesToDocument: (
+    documentId: string,
+    pages: OcrPageInput[],
+    targetChapterId?: string | null,
+  ) => DocumentRecord | null
+  createChapter: (documentId: string, title?: string) => DocumentChapterRecord | null
+  renameChapter: (chapterId: string, title: string) => void
+  moveChapter: (documentId: string, chapterId: string, direction: -1 | 1) => void
+  deleteChapter: (chapterId: string) => boolean
+  movePage: (pageId: string, targetChapterId: string, targetIndex: number) => void
+  updatePageMetadata: (
+    pageId: string,
+    updates: Partial<Pick<DocumentPageRecord, 'sourcePageNumber' | 'title'>>,
+  ) => void
   updateDocument: (id: string, updates: Partial<Pick<DocumentRecord, 'title' | 'content'>>) => void
   archiveDocument: (id: string) => void
   setActiveDocument: (id: string | null) => void
@@ -115,6 +132,7 @@ const defaultSettings: AppSettings = {
   privacy: {
     retainSourceImages: false,
     confirmRemoteOcrEachTime: true,
+    stripImageMetadataBeforeOcr: true,
   },
   ocr: {
     modelId: 'gemini-3.1-flash-lite',
@@ -140,14 +158,6 @@ function buildDefaultCoachingState(recommendedWpm = defaultSettings.reader.defau
   }
 }
 
-function renderStructuredContentFromPages(pages: Array<Pick<DocumentPageRecord, 'sortOrder' | 'text'>>): string {
-  return [...pages]
-    .sort((left, right) => left.sortOrder - right.sortOrder)
-    .map((page) => page.text.trim())
-    .filter(Boolean)
-    .join('\n\n\f\n\n')
-}
-
 function buildOcrPages(
   documentId: string,
   chapterId: string,
@@ -165,7 +175,7 @@ function buildOcrPages(
       sortOrder: startSortOrder + index,
       pageNumber: startPageNumber + index,
       sourcePageNumber: page.sourcePageNumber ?? page.pageNumber ?? null,
-      title: null,
+      title: page.title?.trim() || null,
       text,
       wordCount: countWords(text),
       reviewStatus: page.reviewStatus,
@@ -181,6 +191,31 @@ function buildOcrPages(
       updatedAt: now,
     }
   })
+}
+
+function rebuildDocumentFromStructure(
+  document: DocumentRecord,
+  chapters: DocumentChapterRecord[],
+  pages: DocumentPageRecord[],
+  updatedAt: string,
+): {
+  document: DocumentRecord
+  chapters: DocumentChapterRecord[]
+  pages: DocumentPageRecord[]
+} {
+  const normalized = normalizeDocumentStructureOrder(document.id, chapters, pages, updatedAt)
+  const wordCount = normalized.pages.reduce((total, page) => total + page.wordCount, 0)
+  return {
+    chapters: normalized.chapters,
+    pages: normalized.pages,
+    document: {
+      ...document,
+      content: renderStructuredContent(document.id, normalized.chapters, normalized.pages),
+      wordCount,
+      estimatedPages: estimatePages(wordCount),
+      updatedAt,
+    },
+  }
 }
 
 export const useAppStore = create<AppState>()(
@@ -241,7 +276,7 @@ export const useAppStore = create<AppState>()(
           updatedAt: now,
         }
         const pages = buildOcrPages(documentId, chapter.id, input.pages, now)
-        const content = renderStructuredContentFromPages(pages)
+        const content = renderStructuredContent(documentId, [chapter], pages)
         const wordCount = pages.reduce((total, page) => total + page.wordCount, 0)
         const document: DocumentRecord = {
           id: documentId,
@@ -270,11 +305,13 @@ export const useAppStore = create<AppState>()(
 
         return document
       },
-      appendOcrPagesToDocument: (documentId, inputPages) => {
+      appendOcrPagesToDocument: (documentId, inputPages, targetChapterId) => {
         const now = new Date().toISOString()
         let changedDocument: DocumentRecord | null = null
         let changedChapter: DocumentChapterRecord | null = null
         let addedPages: DocumentPageRecord[] = []
+        let changedChapters: DocumentChapterRecord[] = []
+        let changedPages: DocumentPageRecord[] = []
 
         set((state) => {
           const document = state.documents.find((candidate) => candidate.id === documentId)
@@ -293,41 +330,396 @@ export const useAppStore = create<AppState>()(
             createdAt: document.createdAt,
             updatedAt: now,
           }
-          const targetChapter = documentChapters[documentChapters.length - 1] ?? fallbackChapter
+          const targetChapter =
+            documentChapters.find((chapter) => chapter.id === targetChapterId) ??
+            documentChapters[documentChapters.length - 1] ??
+            fallbackChapter
           changedChapter = documentChapters.length === 0 ? targetChapter : null
 
-          const existingPages = state.documentPages
-            .filter((page) => page.documentId === documentId)
+          const existingPages = state.documentPages.filter((page) => page.documentId === documentId)
+          const targetChapterPages = existingPages
+            .filter((page) => page.chapterId === targetChapter.id)
             .sort((left, right) => left.sortOrder - right.sortOrder)
-          const maxSortOrder = existingPages.reduce((max, page) => Math.max(max, page.sortOrder), -1)
+          const maxSortOrder = targetChapterPages.reduce((max, page) => Math.max(max, page.sortOrder), -1)
           const maxPageNumber = existingPages.reduce((max, page) => Math.max(max, page.pageNumber), 0)
           addedPages = buildOcrPages(documentId, targetChapter.id, inputPages, now, maxSortOrder + 1, maxPageNumber + 1)
           const nextPages = [...existingPages, ...addedPages]
-          const wordCount = nextPages.reduce((total, page) => total + page.wordCount, 0)
-          changedDocument = {
-            ...document,
-            content: renderStructuredContentFromPages(nextPages),
-            wordCount,
-            estimatedPages: estimatePages(wordCount),
-            updatedAt: now,
-          }
+          const rebuilt = rebuildDocumentFromStructure(
+            document,
+            [...documentChapters, ...(changedChapter ? [changedChapter] : [])],
+            nextPages,
+            now,
+          )
+          changedDocument = rebuilt.document
+          changedChapters = rebuilt.chapters
+          changedPages = rebuilt.pages
+          addedPages = rebuilt.pages.filter((page) => addedPages.some((addedPage) => addedPage.id === page.id))
 
           return {
-            documents: state.documents.map((candidate) => (candidate.id === documentId ? changedDocument! : candidate)),
-            documentChapters: changedChapter ? [changedChapter, ...state.documentChapters] : state.documentChapters,
-            documentPages: [...state.documentPages, ...addedPages],
+            documents: state.documents.map((candidate) => (candidate.id === documentId ? rebuilt.document : candidate)),
+            documentChapters: [
+              ...state.documentChapters.filter((chapter) => chapter.documentId !== documentId),
+              ...rebuilt.chapters,
+            ],
+            documentPages: [
+              ...state.documentPages.filter((page) => page.documentId !== documentId),
+              ...rebuilt.pages,
+            ],
             activeDocumentId: documentId,
           }
         })
 
         if (changedDocument) {
           void saveDocumentToDatabase(changedDocument, {
-            chapters: changedChapter ? [changedChapter] : undefined,
-            pages: addedPages,
+            chapters: changedChapter ? changedChapters : undefined,
+            pages: changedPages,
           })
         }
 
         return changedDocument
+      },
+      createChapter: (documentId, title) => {
+        const now = new Date().toISOString()
+        let changedDocument: DocumentRecord | null = null
+        let changedChapters: DocumentChapterRecord[] = []
+        let changedPages: DocumentPageRecord[] = []
+        let createdChapter: DocumentChapterRecord | null = null
+
+        set((state) => {
+          const document = state.documents.find((candidate) => candidate.id === documentId)
+          if (!document) {
+            return state
+          }
+
+          const currentChapters = state.documentChapters.filter((chapter) => chapter.documentId === documentId)
+          const documentPages = state.documentPages.filter((page) => page.documentId === documentId)
+          const newChapter: DocumentChapterRecord = {
+            id: crypto.randomUUID(),
+            documentId,
+            title: title?.trim() || `Chapter ${currentChapters.length + 1}`,
+            sortOrder: currentChapters.length,
+            createdAt: now,
+            updatedAt: now,
+          }
+          const rebuilt = rebuildDocumentFromStructure(document, [...currentChapters, newChapter], documentPages, now)
+          changedDocument = rebuilt.document
+          changedChapters = rebuilt.chapters
+          changedPages = rebuilt.pages
+          createdChapter = rebuilt.chapters.find((chapter) => chapter.id === newChapter.id) ?? newChapter
+
+          return {
+            documents: state.documents.map((candidate) => (candidate.id === documentId ? rebuilt.document : candidate)),
+            documentChapters: [
+              ...state.documentChapters.filter((chapter) => chapter.documentId !== documentId),
+              ...rebuilt.chapters,
+            ],
+            documentPages: [
+              ...state.documentPages.filter((page) => page.documentId !== documentId),
+              ...rebuilt.pages,
+            ],
+          }
+        })
+
+        if (changedDocument) {
+          void saveDocumentToDatabase(changedDocument, {
+            chapters: changedChapters,
+            pages: changedPages,
+          })
+        }
+
+        return createdChapter
+      },
+      renameChapter: (chapterId, title) => {
+        const now = new Date().toISOString()
+        let changedDocument: DocumentRecord | null = null
+        let changedChapters: DocumentChapterRecord[] = []
+        let changedPages: DocumentPageRecord[] = []
+
+        set((state) => {
+          const chapter = state.documentChapters.find((candidate) => candidate.id === chapterId)
+          if (!chapter) {
+            return state
+          }
+          const document = state.documents.find((candidate) => candidate.id === chapter.documentId)
+          if (!document) {
+            return state
+          }
+
+          const nextTitle = title.trim() || 'Untitled chapter'
+          const documentChapters = state.documentChapters
+            .filter((candidate) => candidate.documentId === chapter.documentId)
+            .map((candidate) =>
+              candidate.id === chapterId ? { ...candidate, title: nextTitle, updatedAt: now } : candidate,
+            )
+          const documentPages = state.documentPages.filter((page) => page.documentId === chapter.documentId)
+          const rebuilt = rebuildDocumentFromStructure(document, documentChapters, documentPages, now)
+          changedDocument = rebuilt.document
+          changedChapters = rebuilt.chapters
+          changedPages = rebuilt.pages
+
+          return {
+            documents: state.documents.map((candidate) => (candidate.id === document.id ? rebuilt.document : candidate)),
+            documentChapters: [
+              ...state.documentChapters.filter((candidate) => candidate.documentId !== document.id),
+              ...rebuilt.chapters,
+            ],
+            documentPages: [
+              ...state.documentPages.filter((page) => page.documentId !== document.id),
+              ...rebuilt.pages,
+            ],
+          }
+        })
+
+        if (changedDocument) {
+          void saveDocumentToDatabase(changedDocument, {
+            chapters: changedChapters,
+            pages: changedPages,
+          })
+        }
+      },
+      moveChapter: (documentId, chapterId, direction) => {
+        const now = new Date().toISOString()
+        let changedDocument: DocumentRecord | null = null
+        let changedChapters: DocumentChapterRecord[] = []
+        let changedPages: DocumentPageRecord[] = []
+
+        set((state) => {
+          const document = state.documents.find((candidate) => candidate.id === documentId)
+          if (!document) {
+            return state
+          }
+
+          const orderedChapters = getOrderedDocumentChapters(documentId, state.documentChapters)
+          const currentIndex = orderedChapters.findIndex((chapter) => chapter.id === chapterId)
+          const targetIndex = currentIndex + direction
+          if (currentIndex < 0 || targetIndex < 0 || targetIndex >= orderedChapters.length) {
+            return state
+          }
+
+          const nextChapters = [...orderedChapters]
+          const [movedChapter] = nextChapters.splice(currentIndex, 1)
+          nextChapters.splice(targetIndex, 0, movedChapter)
+          const reorderedChapters = nextChapters.map((chapter, index) => ({
+            ...chapter,
+            sortOrder: index,
+            updatedAt: now,
+          }))
+          const documentPages = state.documentPages.filter((page) => page.documentId === documentId)
+          const rebuilt = rebuildDocumentFromStructure(document, reorderedChapters, documentPages, now)
+          changedDocument = rebuilt.document
+          changedChapters = rebuilt.chapters
+          changedPages = rebuilt.pages
+
+          return {
+            documents: state.documents.map((candidate) => (candidate.id === documentId ? rebuilt.document : candidate)),
+            documentChapters: [
+              ...state.documentChapters.filter((chapter) => chapter.documentId !== documentId),
+              ...rebuilt.chapters,
+            ],
+            documentPages: [
+              ...state.documentPages.filter((page) => page.documentId !== documentId),
+              ...rebuilt.pages,
+            ],
+          }
+        })
+
+        if (changedDocument) {
+          void saveDocumentToDatabase(changedDocument, {
+            chapters: changedChapters,
+            pages: changedPages,
+          })
+        }
+      },
+      deleteChapter: (chapterId) => {
+        const now = new Date().toISOString()
+        let changedDocument: DocumentRecord | null = null
+        let changedChapters: DocumentChapterRecord[] = []
+        let changedPages: DocumentPageRecord[] = []
+        let deleted = false
+
+        set((state) => {
+          const chapter = state.documentChapters.find((candidate) => candidate.id === chapterId)
+          if (!chapter) {
+            return state
+          }
+          const document = state.documents.find((candidate) => candidate.id === chapter.documentId)
+          if (!document) {
+            return state
+          }
+
+          const orderedChapters = getOrderedDocumentChapters(chapter.documentId, state.documentChapters)
+          if (orderedChapters.length <= 1) {
+            return state
+          }
+
+          const chapterIndex = orderedChapters.findIndex((candidate) => candidate.id === chapterId)
+          const targetChapter = orderedChapters[chapterIndex - 1] ?? orderedChapters[chapterIndex + 1]
+          const targetChapterPageCount = state.documentPages.filter((page) => page.chapterId === targetChapter.id).length
+          const movedPages = state.documentPages
+            .filter((page) => page.chapterId === chapterId)
+            .sort((left, right) => left.sortOrder - right.sortOrder)
+            .map((page, index) => ({
+              ...page,
+              chapterId: targetChapter.id,
+              sortOrder: targetChapterPageCount + index,
+              updatedAt: now,
+            }))
+          const movedPageIds = new Set(movedPages.map((page) => page.id))
+          const documentPages = state.documentPages
+            .filter((page) => page.documentId === chapter.documentId && page.chapterId !== chapterId && !movedPageIds.has(page.id))
+            .concat(movedPages)
+          const documentChapters = orderedChapters.filter((candidate) => candidate.id !== chapterId)
+          const rebuilt = rebuildDocumentFromStructure(document, documentChapters, documentPages, now)
+          changedDocument = rebuilt.document
+          changedChapters = rebuilt.chapters
+          changedPages = rebuilt.pages
+          deleted = true
+
+          return {
+            documents: state.documents.map((candidate) => (candidate.id === document.id ? rebuilt.document : candidate)),
+            documentChapters: [
+              ...state.documentChapters.filter((candidate) => candidate.documentId !== document.id),
+              ...rebuilt.chapters,
+            ],
+            documentPages: [
+              ...state.documentPages.filter((page) => page.documentId !== document.id),
+              ...rebuilt.pages,
+            ],
+          }
+        })
+
+        if (changedDocument) {
+          void saveDocumentToDatabase(changedDocument, {
+            chapters: changedChapters,
+            pages: changedPages,
+          })
+        }
+
+        return deleted
+      },
+      movePage: (pageId, targetChapterId, targetIndex) => {
+        const now = new Date().toISOString()
+        let changedDocument: DocumentRecord | null = null
+        let changedChapters: DocumentChapterRecord[] = []
+        let changedPages: DocumentPageRecord[] = []
+
+        set((state) => {
+          const page = state.documentPages.find((candidate) => candidate.id === pageId)
+          const targetChapter = state.documentChapters.find((candidate) => candidate.id === targetChapterId)
+          if (!page || !targetChapter || page.documentId !== targetChapter.documentId) {
+            return state
+          }
+          const document = state.documents.find((candidate) => candidate.id === page.documentId)
+          if (!document) {
+            return state
+          }
+
+          const documentChapters = state.documentChapters.filter((chapter) => chapter.documentId === page.documentId)
+          const pagesByChapter = new Map<string, DocumentPageRecord[]>()
+          for (const chapter of documentChapters) {
+            pagesByChapter.set(
+              chapter.id,
+              state.documentPages
+                .filter((candidate) => candidate.chapterId === chapter.id)
+                .sort((left, right) => left.sortOrder - right.sortOrder),
+            )
+          }
+
+          const sourcePages = (pagesByChapter.get(page.chapterId) ?? []).filter((candidate) => candidate.id !== pageId)
+          pagesByChapter.set(page.chapterId, sourcePages)
+
+          const targetPages = [...(pagesByChapter.get(targetChapterId) ?? [])]
+          const normalizedTargetIndex = Math.max(0, Math.min(Math.round(targetIndex), targetPages.length))
+          targetPages.splice(normalizedTargetIndex, 0, {
+            ...page,
+            chapterId: targetChapterId,
+            updatedAt: now,
+          })
+          pagesByChapter.set(
+            targetChapterId,
+            targetPages.map((candidate, index) => ({ ...candidate, sortOrder: index })),
+          )
+
+          const documentPages = documentChapters.flatMap((chapter) => pagesByChapter.get(chapter.id) ?? [])
+          const rebuilt = rebuildDocumentFromStructure(document, documentChapters, documentPages, now)
+          changedDocument = rebuilt.document
+          changedChapters = rebuilt.chapters
+          changedPages = rebuilt.pages
+
+          return {
+            documents: state.documents.map((candidate) => (candidate.id === document.id ? rebuilt.document : candidate)),
+            documentChapters: [
+              ...state.documentChapters.filter((chapter) => chapter.documentId !== document.id),
+              ...rebuilt.chapters,
+            ],
+            documentPages: [
+              ...state.documentPages.filter((candidate) => candidate.documentId !== document.id),
+              ...rebuilt.pages,
+            ],
+          }
+        })
+
+        if (changedDocument) {
+          void saveDocumentToDatabase(changedDocument, {
+            chapters: changedChapters,
+            pages: changedPages,
+          })
+        }
+      },
+      updatePageMetadata: (pageId, updates) => {
+        const now = new Date().toISOString()
+        let changedDocument: DocumentRecord | null = null
+        let changedChapters: DocumentChapterRecord[] = []
+        let changedPages: DocumentPageRecord[] = []
+
+        set((state) => {
+          const page = state.documentPages.find((candidate) => candidate.id === pageId)
+          if (!page) {
+            return state
+          }
+          const document = state.documents.find((candidate) => candidate.id === page.documentId)
+          if (!document) {
+            return state
+          }
+
+          const documentChapters = state.documentChapters.filter((chapter) => chapter.documentId === page.documentId)
+          const documentPages = state.documentPages
+            .filter((candidate) => candidate.documentId === page.documentId)
+            .map((candidate) =>
+              candidate.id === pageId
+                ? {
+                    ...candidate,
+                    sourcePageNumber:
+                      updates.sourcePageNumber !== undefined ? updates.sourcePageNumber : candidate.sourcePageNumber,
+                    title: updates.title !== undefined ? updates.title?.trim() || null : candidate.title,
+                    updatedAt: now,
+                  }
+                : candidate,
+            )
+          const rebuilt = rebuildDocumentFromStructure(document, documentChapters, documentPages, now)
+          changedDocument = rebuilt.document
+          changedChapters = rebuilt.chapters
+          changedPages = rebuilt.pages
+
+          return {
+            documents: state.documents.map((candidate) => (candidate.id === document.id ? rebuilt.document : candidate)),
+            documentChapters: [
+              ...state.documentChapters.filter((chapter) => chapter.documentId !== document.id),
+              ...rebuilt.chapters,
+            ],
+            documentPages: [
+              ...state.documentPages.filter((candidate) => candidate.documentId !== document.id),
+              ...rebuilt.pages,
+            ],
+          }
+        })
+
+        if (changedDocument) {
+          void saveDocumentToDatabase(changedDocument, {
+            chapters: changedChapters,
+            pages: changedPages,
+          })
+        }
       },
       updateDocument: (id, updates) => {
         const updatedAt = new Date().toISOString()
@@ -565,10 +957,14 @@ export const useAppStore = create<AppState>()(
       version: 5,
       migrate: (persistedState: unknown, fromVersion: number) => {
         const state = persistedState as Record<string, unknown>
+        const settings = state.settings as AppSettings | undefined
+        if (settings?.privacy && settings.privacy.stripImageMetadataBeforeOcr === undefined) {
+          settings.privacy.stripImageMetadataBeforeOcr = defaultSettings.privacy.stripImageMetadataBeforeOcr
+        }
         // v1 → v2: seed defaultPageLayout for existing users
         if (fromVersion < 2) {
-          const settings = state.settings as Record<string, unknown> | undefined
-          const reader = settings?.reader as Record<string, unknown> | undefined
+          const migratedSettings = state.settings as Record<string, unknown> | undefined
+          const reader = migratedSettings?.reader as Record<string, unknown> | undefined
           if (reader && reader.defaultPageLayout === undefined) {
             reader.defaultPageLayout = 1
           }
@@ -579,7 +975,6 @@ export const useAppStore = create<AppState>()(
         }
         // v3 → v4: seed persistent coaching state and reviewable quiz metadata defaults.
         if (fromVersion < 4) {
-          const settings = state.settings as AppSettings | undefined
           const reader = settings?.reader
           const fallbackWpm = reader?.defaultWpm ?? defaultSettings.reader.defaultWpm
           state.coaching = state.coaching || buildDefaultCoachingState(fallbackWpm)

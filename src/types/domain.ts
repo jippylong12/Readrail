@@ -163,6 +163,7 @@ export type ReaderSettings = {
 export type PrivacySettings = {
   retainSourceImages: boolean
   confirmRemoteOcrEachTime: boolean
+  stripImageMetadataBeforeOcr: boolean
 }
 
 export type OcrSettings = {

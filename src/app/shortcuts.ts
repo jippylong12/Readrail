@@ -1,7 +1,7 @@
-import type { AppRoute } from './routes'
+import type { PrimaryRoute } from './routes'
 
 export type RouteShortcut = {
-  route: AppRoute
+  route: PrimaryRoute
   key: string
   display: string
   title: string
@@ -10,7 +10,7 @@ export type RouteShortcut = {
 
 export const ROUTE_SHORTCUTS: RouteShortcut[] = [
   {
-    route: 'library',
+    route: 'library-saved',
     key: 'l',
     display: '⌘L',
     title: 'Library (Command+L / Control+L)',
@@ -46,7 +46,7 @@ export const ROUTE_SHORTCUTS: RouteShortcut[] = [
   },
 ]
 
-export function getShortcutForRoute(route: AppRoute): RouteShortcut | undefined {
+export function getShortcutForRoute(route: PrimaryRoute): RouteShortcut | undefined {
   return ROUTE_SHORTCUTS.find((shortcut) => shortcut.route === route)
 }
 
@@ -66,7 +66,7 @@ export function isEditableShortcutTarget(target: EventTarget | null): boolean {
   return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement
 }
 
-export function getRouteForShortcutEvent(event: KeyboardEvent): AppRoute | null {
+export function getRouteForShortcutEvent(event: KeyboardEvent): PrimaryRoute | null {
   if (
     event.defaultPrevented ||
     event.altKey ||

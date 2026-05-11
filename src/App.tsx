@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { AppShell } from './components/AppShell'
+import { DocumentDetail } from './components/DocumentDetail'
 import { ImportPanel } from './components/ImportPanel'
 import { LibraryList } from './components/LibraryList'
 import { OnboardingJourney } from './components/OnboardingJourney'
@@ -11,7 +12,14 @@ import { ProgressPanel } from './components/ProgressPanel'
 import { SettingsPanel } from './components/SettingsPanel'
 import { StatsChart } from './components/StatsChart'
 import { GuidedTour } from './components/GuidedTour'
-import { type AppRoute } from './app/routes'
+import {
+  DEFAULT_ROUTE,
+  pathForRoute,
+  primaryRouteFor,
+  routeFromPath,
+  type PrimaryRoute,
+  type RouteState,
+} from './app/routes'
 import { getRouteForShortcutEvent } from './app/shortcuts'
 import { selectActiveDocument, useAppStore, type OcrPageInput } from './app/store'
 import { TOUR_DEFINITIONS, type TourId } from './app/tours'
@@ -20,8 +28,6 @@ import { getDatabase, isTauriRuntime } from './lib/db/migrations'
 import { generateQuizFromReading, type GeminiQuiz } from './lib/ai/geminiQuiz'
 import { buildGeneratedQuizAttempt, scoreGeneratedQuizQuestions } from './lib/reading/coaching'
 import type { DocumentRecord, ReaderMode } from './types/domain'
-
-type LibraryTab = 'import' | 'ocr' | 'saved'
 
 type PendingSession = {
   mode: ReaderMode
@@ -43,15 +49,14 @@ type PendingQuiz = {
 }
 
 function App() {
-  const [route, setRoute] = useState<AppRoute>('library')
-  const [libraryTab, setLibraryTab] = useState<LibraryTab>(() =>
-    useAppStore.getState().documents.some((document) => !document.archivedAt) ? 'saved' : 'import',
-  )
+  const [navigation, setNavigation] = useState<RouteState>(() => routeFromPath(window.location.pathname))
   const [pendingQuiz, setPendingQuiz] = useState<PendingQuiz | null>(null)
   const [hasGeminiKey, setHasGeminiKey] = useState(false)
   const [browserGeminiKey, setBrowserGeminiKey] = useState('')
   const [replayTourId, setReplayTourId] = useState<TourId | null>(null)
   const documents = useAppStore((state) => state.documents)
+  const documentChapters = useAppStore((state) => state.documentChapters)
+  const documentPages = useAppStore((state) => state.documentPages)
   const sessions = useAppStore((state) => state.sessions)
   const settings = useAppStore((state) => state.settings)
   const onboarding = useAppStore((state) => state.onboarding)
@@ -63,6 +68,12 @@ function App() {
   const createDocument = useAppStore((state) => state.createDocument)
   const createOcrDocument = useAppStore((state) => state.createOcrDocument)
   const appendOcrPagesToDocument = useAppStore((state) => state.appendOcrPagesToDocument)
+  const createChapter = useAppStore((state) => state.createChapter)
+  const renameChapter = useAppStore((state) => state.renameChapter)
+  const moveChapter = useAppStore((state) => state.moveChapter)
+  const deleteChapter = useAppStore((state) => state.deleteChapter)
+  const movePage = useAppStore((state) => state.movePage)
+  const updatePageMetadata = useAppStore((state) => state.updatePageMetadata)
   const updateDocument = useAppStore((state) => state.updateDocument)
   const archiveDocument = useAppStore((state) => state.archiveDocument)
   const setActiveDocument = useAppStore((state) => state.setActiveDocument)
@@ -79,6 +90,11 @@ function App() {
   const resetTour = useAppStore((state) => state.resetTour)
   const resetAllTours = useAppStore((state) => state.resetAllTours)
   const resetAllData = useAppStore((state) => state.resetAllData)
+  const route = navigation.route
+  const routedDocument = navigation.documentId
+    ? documents.find((document) => document.id === navigation.documentId) ?? null
+    : null
+  const displayedDocument = routedDocument ?? activeDocument
 
   useEffect(() => {
     document.documentElement.dataset.theme = settings.reader.theme
@@ -98,38 +114,73 @@ function App() {
     })
   }, [])
 
-  const routeTourId = route in TOUR_DEFINITIONS ? (route as TourId) : null
+  useEffect(() => {
+    const normalizedPath = pathForRoute(routeFromPath(window.location.pathname))
+    if (window.location.pathname !== normalizedPath) {
+      window.history.replaceState(null, '', normalizedPath)
+    }
+
+    function handlePopState(): void {
+      setNavigation(routeFromPath(window.location.pathname))
+    }
+
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [])
+
+  const navigate = useCallback((nextRoute: RouteState, options: { replace?: boolean } = {}): void => {
+    setReplayTourId(null)
+    setNavigation(nextRoute)
+    const nextPath = pathForRoute(nextRoute)
+    if (window.location.pathname === nextPath) {
+      return
+    }
+
+    if (options.replace) {
+      window.history.replaceState(null, '', nextPath)
+    } else {
+      window.history.pushState(null, '', nextPath)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (navigation.documentId) {
+      setActiveDocument(navigation.documentId)
+    }
+  }, [navigation.documentId, setActiveDocument])
+
+  const routeTourId = primaryRouteFor(route) in TOUR_DEFINITIONS ? (primaryRouteFor(route) as TourId) : null
   const activeTourId = replayTourId ?? (routeTourId && !completedTourIds.includes(routeTourId) ? routeTourId : null)
 
   const createAndOpenDocument = useCallback(
     (title: string, content: string, sourceType: 'paste' | 'text_file' | 'photo_ocr' = 'paste') => {
       const document = createDocument({ title, content, sourceType })
       setActiveDocument(document.id)
-      setRoute('reader')
+      navigate({ route: 'reader', documentId: document.id })
     },
-    [createDocument, setActiveDocument],
+    [createDocument, navigate, setActiveDocument],
   )
 
   const createAndOpenOcrDocument = useCallback(
     (title: string, pages: OcrPageInput[]) => {
       const document = createOcrDocument({ title, pages })
       setActiveDocument(document.id)
-      setRoute('reader')
+      navigate({ route: 'library-document', documentId: document.id })
     },
-    [createOcrDocument, setActiveDocument],
+    [createOcrDocument, navigate, setActiveDocument],
   )
 
   const appendAndOpenOcrPages = useCallback(
-    (documentId: string, pages: OcrPageInput[]) => {
-      const document = appendOcrPagesToDocument(documentId, pages)
+    (documentId: string, pages: OcrPageInput[], chapterId?: string | null) => {
+      const document = appendOcrPagesToDocument(documentId, pages, chapterId)
       if (!document) {
         return
       }
 
       setActiveDocument(document.id)
-      setRoute('reader')
+      navigate({ route: 'library-document', documentId: document.id })
     },
-    [appendOcrPagesToDocument, setActiveDocument],
+    [appendOcrPagesToDocument, navigate, setActiveDocument],
   )
 
   function exportFile(kind: 'json' | 'csv'): void {
@@ -146,16 +197,16 @@ function App() {
 
   function enterAppAfterSkip(): void {
     skipOnboarding()
-    setRoute('library')
+    navigate(DEFAULT_ROUTE)
   }
 
   function enterAppAfterIntro(): void {
     completeOnboardingIntro()
-    setRoute('library')
+    navigate(DEFAULT_ROUTE)
   }
 
   function replayTour(tourId: TourId = routeTourId ?? 'reader'): void {
-    setRoute(tourId)
+    navigate({ route: tourId, documentId: tourId === 'reader' ? displayedDocument?.id ?? null : null })
     resetTour(tourId)
     setReplayTourId(tourId)
   }
@@ -165,10 +216,15 @@ function App() {
     setReplayTourId(null)
   }
 
-  const changeRoute = useCallback((nextRoute: AppRoute): void => {
-    setReplayTourId(null)
-    setRoute(nextRoute)
-  }, [])
+  const changeRoute = useCallback(
+    (nextRoute: PrimaryRoute): void => {
+      navigate({
+        route: nextRoute,
+        documentId: nextRoute === 'reader' ? displayedDocument?.id ?? null : null,
+      })
+    },
+    [displayedDocument?.id, navigate],
+  )
 
   const handleGeminiKeyStateChange = useCallback((hasKey: boolean, apiKey?: string): void => {
     setHasGeminiKey(hasKey)
@@ -197,16 +253,17 @@ function App() {
 
   const startQuizForSession = useCallback(
     async (session: PendingSession): Promise<void> => {
-      if (!activeDocument) {
+      const currentDocument = displayedDocument
+      if (!currentDocument) {
         return
       }
 
-      const endWordIndex = Math.max(0, Math.min(session.endWordIndex || activeDocument.wordCount, activeDocument.wordCount))
+      const endWordIndex = Math.max(0, Math.min(session.endWordIndex || currentDocument.wordCount, currentDocument.wordCount))
       const startWordIndex = Math.max(0, Math.min(session.startWordIndex, endWordIndex))
       const wordsRead = Math.max(1, endWordIndex - startWordIndex)
       const normalizedSession = { ...session, startWordIndex, endWordIndex, wordsRead }
-      const quizDocument = activeDocument
-      setRoute('test')
+      const quizDocument = currentDocument
+      navigate({ route: 'test', documentId: null })
       setPendingQuiz({
         document: quizDocument,
         error: null,
@@ -240,12 +297,12 @@ function App() {
         })
       }
     },
-    [activeDocument, loadGeminiApiKey],
+    [displayedDocument, loadGeminiApiKey, navigate],
   )
 
   function cancelPendingQuiz(): void {
     setPendingQuiz(null)
-    setRoute('reader')
+    navigate({ route: 'reader', documentId: pendingQuiz?.document.id ?? displayedDocument?.id ?? null })
   }
 
   function saveQuizResult(answers: Record<string, string>): void {
@@ -278,7 +335,7 @@ function App() {
       }),
     )
     setPendingQuiz(null)
-    setRoute('progress')
+    navigate({ route: 'progress', documentId: null })
   }
 
   useEffect(() => {
@@ -313,21 +370,26 @@ function App() {
   }
 
   return (
-    <AppShell activeDocument={activeDocument} activeRoute={route} onReplayTour={() => replayTour()} onRouteChange={changeRoute}>
-      {route === 'library' && (
+    <AppShell
+      activeDocument={displayedDocument}
+      activeRoute={primaryRouteFor(route)}
+      onReplayTour={() => replayTour()}
+      onRouteChange={changeRoute}
+    >
+      {(route === 'library-import' || route === 'library-ocr' || route === 'library-saved') && (
         <div className="content-stack">
           <section className="library-tabs-panel" data-tour="library-tabs">
             <div className="segmented library-tabs" role="tablist" aria-label="Library sections">
               {([
-                ['import', 'Import'],
-                ['ocr', 'OCR'],
-                ['saved', 'Saved'],
+                ['library-import', 'Import'],
+                ['library-ocr', 'OCR'],
+                ['library-saved', 'Saved'],
               ] as const).map(([tabId, label]) => (
                 <button
-                  aria-selected={libraryTab === tabId}
-                  className={libraryTab === tabId ? 'active' : ''}
+                  aria-selected={route === tabId}
+                  className={route === tabId ? 'active' : ''}
                   key={tabId}
-                  onClick={() => setLibraryTab(tabId)}
+                  onClick={() => navigate({ route: tabId, documentId: null })}
                   role="tab"
                   type="button"
                 >
@@ -337,38 +399,74 @@ function App() {
             </div>
           </section>
 
-          {libraryTab === 'import' && (
+          {route === 'library-import' && (
             <ImportPanel
               defaultWpm={settings.reader.defaultWpm}
               onCreateDocument={(title, content, sourceType) => createAndOpenDocument(title, content, sourceType)}
             />
           )}
 
-          {libraryTab === 'ocr' && (
+          {route === 'library-ocr' && (
             <OcrReview
               documents={documents}
+              documentChapters={documentChapters}
               hasKey={hasGeminiKey}
               loadApiKey={() => loadGeminiApiKey('ocr')}
               onAppendPages={appendAndOpenOcrPages}
               onCreateDocument={createAndOpenOcrDocument}
               preservePageBreaks={settings.ocr.preservePageBreaks}
+              stripImageMetadataBeforeOcr={settings.privacy.stripImageMetadataBeforeOcr}
             />
           )}
 
-          {libraryTab === 'saved' && (
+          {route === 'library-saved' && (
             <LibraryList
-              activeDocumentId={activeDocument?.id ?? null}
+              activeDocumentId={displayedDocument?.id ?? null}
               documents={documents}
               onArchive={archiveDocument}
               onOpenJourney={reopenOnboarding}
-              onSelect={(id) => {
+              onOpenDocument={(id) => {
                 setActiveDocument(id)
-                setRoute('reader')
+                navigate({ route: 'library-document', documentId: id })
+              }}
+              onOpenReader={(id) => {
+                setActiveDocument(id)
+                navigate({ route: 'reader', documentId: id })
               }}
               onUpdateDocument={updateDocument}
             />
           )}
         </div>
+      )}
+
+      {route === 'library-document' && (
+        <DocumentDetail
+          chapters={documentChapters}
+          document={routedDocument}
+          documents={documents}
+          hasKey={hasGeminiKey}
+          loadApiKey={() => loadGeminiApiKey('ocr')}
+          onAppendPages={appendAndOpenOcrPages}
+          onBack={() => navigate({ route: 'library-saved', documentId: null })}
+          onCreateChapter={(documentId, title) => {
+            createChapter(documentId, title)
+          }}
+          onCreateDocument={createAndOpenOcrDocument}
+          onDeleteChapter={(chapterId) => {
+            deleteChapter(chapterId)
+          }}
+          onMoveChapter={moveChapter}
+          onMovePage={movePage}
+          onOpenReader={(documentId) => {
+            setActiveDocument(documentId)
+            navigate({ route: 'reader', documentId })
+          }}
+          onRenameChapter={renameChapter}
+          onUpdatePageMetadata={updatePageMetadata}
+          pages={documentPages}
+          preservePageBreaks={settings.ocr.preservePageBreaks}
+          stripImageMetadataBeforeOcr={settings.privacy.stripImageMetadataBeforeOcr}
+        />
       )}
 
       {route === 'reader' && (
@@ -379,13 +477,14 @@ function App() {
             defaultMode={settings.reader.defaultMode}
             defaultPageLayout={settings.reader.defaultPageLayout ?? 1}
             defaultWpm={coaching.recommendedWpm || settings.reader.defaultWpm}
-            document={activeDocument}
+            document={displayedDocument}
             fontSize={settings.reader.fontSize}
-            key={activeDocument?.id ?? 'empty-reader'}
+            key={displayedDocument?.id ?? 'empty-reader'}
             lineHeight={settings.reader.lineHeight}
             segmentStartWordIndex={
-              activeDocument ? coaching.lastResetWordIndexByDocument[activeDocument.id] ?? 0 : 0
+              displayedDocument ? coaching.lastResetWordIndexByDocument[displayedDocument.id] ?? 0 : 0
             }
+            onBackToLibrary={() => navigate({ route: 'library-saved', documentId: null })}
             onSegmentReset={resetCoachingSegment}
             onSegmentStart={(documentId, segment) => startCoachingSegment(documentId, segment)}
             onStartTest={(input) => {
@@ -419,7 +518,11 @@ function App() {
                 <strong>Return to the reader</strong>
                 <span>Open a reading and use Test to generate a comprehension quiz.</span>
               </div>
-              <button className="primary-button" onClick={() => setRoute('reader')} type="button">
+              <button
+                className="primary-button"
+                onClick={() => navigate({ route: 'reader', documentId: displayedDocument?.id ?? null })}
+                type="button"
+              >
                 Back to reader
               </button>
             </section>
@@ -433,7 +536,7 @@ function App() {
           documents={documents}
           onOpenReader={(documentId) => {
             setActiveDocument(documentId)
-            setRoute('reader')
+            navigate({ route: 'reader', documentId })
           }}
           quizAttempts={quizAttempts}
         />

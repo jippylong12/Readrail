@@ -164,6 +164,21 @@ export function SettingsPanel({
             />
             Retain OCR source images locally
           </label>
+          <label className="toggle">
+            <input
+              checked={settings.privacy.stripImageMetadataBeforeOcr}
+              onChange={(event) =>
+                onSettingsChange({
+                  privacy: { ...settings.privacy, stripImageMetadataBeforeOcr: event.target.checked },
+                })
+              }
+              type="checkbox"
+            />
+            Strip image metadata before OCR upload
+          </label>
+          <p className="settings-note">
+            Supported image files are re-encoded locally before Gemini OCR. PDFs and unsupported image formats are sent unchanged.
+          </p>
           <button className="danger-button" onClick={onResetData} type="button">
             Delete local app data
           </button>
@@ -184,10 +199,9 @@ export function SettingsPanel({
             Open learner journey
           </button>
           <div className="tour-replay-grid" aria-label="Replay walkthroughs">
-            {(['library', 'reader', 'progress', 'stats', 'settings'] as const).map((tourId) => (
+            {(['library-saved', 'reader', 'progress', 'stats', 'settings'] as const).map((tourId) => (
               <button className="secondary-button" key={tourId} onClick={() => onReplayTour(tourId)} type="button">
-                {tourId[0].toUpperCase()}
-                {tourId.slice(1)}
+                {tourId === 'library-saved' ? 'Library' : `${tourId[0].toUpperCase()}${tourId.slice(1)}`}
               </button>
             ))}
           </div>

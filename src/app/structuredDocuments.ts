@@ -16,6 +16,11 @@ export type StructuredDocumentCollections = {
   documentPages: DocumentPageRecord[]
 }
 
+export type NormalizedDocumentStructure = {
+  chapters: DocumentChapterRecord[]
+  pages: DocumentPageRecord[]
+}
+
 export function defaultDocumentChapterId(documentId: string): string {
   return `chapter:${documentId}:default`
 }
@@ -62,6 +67,86 @@ export function ensureStructuredDocumentCollections(
     documents,
     documentChapters,
     documentPages,
+  }
+}
+
+export function getOrderedDocumentChapters(
+  documentId: string,
+  chapters: DocumentChapterRecord[],
+): DocumentChapterRecord[] {
+  return chapters
+    .filter((chapter) => chapter.documentId === documentId)
+    .sort((left, right) => left.sortOrder - right.sortOrder || left.createdAt.localeCompare(right.createdAt))
+}
+
+export function getOrderedChapterPages(
+  chapterId: string,
+  pages: DocumentPageRecord[],
+): DocumentPageRecord[] {
+  return pages
+    .filter((page) => page.chapterId === chapterId)
+    .sort((left, right) => left.sortOrder - right.sortOrder || left.createdAt.localeCompare(right.createdAt))
+}
+
+export function getOrderedDocumentPages(
+  documentId: string,
+  chapters: DocumentChapterRecord[],
+  pages: DocumentPageRecord[],
+): DocumentPageRecord[] {
+  const orderedChapters = getOrderedDocumentChapters(documentId, chapters)
+  const chapterIds = new Set(orderedChapters.map((chapter) => chapter.id))
+  const orderedPages = orderedChapters.flatMap((chapter) => getOrderedChapterPages(chapter.id, pages))
+  const orphanPages = pages
+    .filter((page) => page.documentId === documentId && !chapterIds.has(page.chapterId))
+    .sort((left, right) => left.sortOrder - right.sortOrder || left.createdAt.localeCompare(right.createdAt))
+
+  return [...orderedPages, ...orphanPages]
+}
+
+export function renderStructuredContent(
+  documentId: string,
+  chapters: DocumentChapterRecord[],
+  pages: DocumentPageRecord[],
+): string {
+  return getOrderedDocumentPages(documentId, chapters, pages)
+    .map((page) => page.text.trim())
+    .filter(Boolean)
+    .join('\n\n\f\n\n')
+}
+
+export function normalizeDocumentStructureOrder(
+  documentId: string,
+  chapters: DocumentChapterRecord[],
+  pages: DocumentPageRecord[],
+  updatedAt: string,
+): NormalizedDocumentStructure {
+  const orderedChapters = getOrderedDocumentChapters(documentId, chapters)
+  const normalizedChapters = orderedChapters.map((chapter, chapterIndex) =>
+    chapter.sortOrder === chapterIndex ? chapter : { ...chapter, sortOrder: chapterIndex, updatedAt },
+  )
+
+  let nextPageNumber = 1
+  const normalizedPages = normalizedChapters.flatMap((chapter) =>
+    getOrderedChapterPages(chapter.id, pages).map((page, pageIndex) => {
+      const pageNumber = nextPageNumber
+      nextPageNumber += 1
+
+      if (page.sortOrder === pageIndex && page.pageNumber === pageNumber) {
+        return page
+      }
+
+      return {
+        ...page,
+        sortOrder: pageIndex,
+        pageNumber,
+        updatedAt,
+      }
+    }),
+  )
+
+  return {
+    chapters: normalizedChapters,
+    pages: normalizedPages,
   }
 }
 

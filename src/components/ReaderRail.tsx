@@ -30,6 +30,7 @@ type ReaderRailProps = {
   fontSize: number
   lineHeight: number
   segmentStartWordIndex: number
+  onBackToLibrary: () => void
   onSegmentReset: (documentId: string, wordIndex: number) => void
   onSegmentStart: (documentId: string, segment: { startWordIndex: number; startedAt: string; targetWpm: number }) => void
   onStartTest: (input: ReaderSegmentInput) => void
@@ -46,6 +47,7 @@ export function ReaderRail({
   fontSize,
   lineHeight,
   segmentStartWordIndex: initialSegmentStartWordIndex,
+  onBackToLibrary,
   onSegmentReset,
   onSegmentStart,
   onStartTest,
@@ -265,6 +267,9 @@ export function ReaderRail({
             <span>{formatDuration(elapsedSeconds)}</span>
             <strong>{progress}%</strong>
           </div>
+          <button className="secondary-button" onClick={onBackToLibrary} type="button">
+            Back to library
+          </button>
           {onUpdateDocument && (
             <button className="secondary-button" onClick={startDocumentEdit} type="button">
               Edit

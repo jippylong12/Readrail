@@ -305,6 +305,66 @@ h3 {
   gap: 14px;
 }
 
+.ocr-file-list {
+  display: grid;
+  gap: 10px;
+}
+
+.ocr-file-list-header {
+  display: grid;
+  gap: 4px;
+}
+
+.ocr-file-list-header span,
+.append-target-note,
+.document-detail-metrics {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.ocr-destination-panel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-muted) 52%, var(--surface));
+  padding: 14px;
+}
+
+.ocr-destination-panel strong,
+.ocr-destination-panel span {
+  display: block;
+}
+
+.ocr-destination-panel span:not(.eyebrow) {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.ocr-file-row,
+.ocr-file-controls,
+.document-detail-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.ocr-file-row {
+  justify-content: space-between;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-muted) 45%, var(--surface));
+  padding: 12px;
+}
+
+.ocr-file-controls {
+  justify-content: flex-end;
+}
+
 .ocr-warning-list {
   display: grid;
   gap: 6px;
@@ -550,6 +610,11 @@ h3 {
   gap: 10px;
 }
 
+.document-row-shell {
+  display: grid;
+  gap: 10px;
+}
+
 .document-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -581,13 +646,87 @@ h3 {
 }
 
 .document-title-edit,
-.document-edit-form {
+.document-edit-form,
+.document-organizer,
+.organizer-chapter-list,
+.organizer-page-list,
+.organizer-title-edit {
   display: grid;
   gap: 12px;
 }
 
 .document-title-edit {
   min-width: 0;
+}
+
+.document-organizer {
+  margin-left: 16px;
+  border-left: 3px solid color-mix(in srgb, var(--primary) 35%, var(--line));
+  padding: 4px 0 4px 16px;
+}
+
+.organizer-add-chapter {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.organizer-chapter {
+  display: grid;
+  gap: 12px;
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+
+.organizer-chapter-header,
+.organizer-page,
+.organizer-page-controls,
+.organizer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.organizer-chapter-header,
+.organizer-page {
+  justify-content: space-between;
+}
+
+.organizer-chapter-header h3,
+.organizer-page-summary {
+  min-width: 0;
+}
+
+.organizer-chapter-header span,
+.organizer-page-summary span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.organizer-page {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-muted) 45%, var(--surface));
+  padding: 12px;
+}
+
+.organizer-page-controls {
+  justify-content: flex-end;
+}
+
+.field.compact {
+  min-width: 120px;
+  gap: 4px;
+  font-size: 0.86rem;
+}
+
+.field.compact input,
+.field.compact select {
+  min-height: 38px;
+  padding: 8px 10px;
 }
 
 .button-row.compact {
@@ -1620,11 +1759,27 @@ h3 {
     grid-template-columns: 1fr;
   }
 
+  .document-organizer {
+    margin-left: 0;
+    padding-left: 12px;
+  }
+
+  .organizer-add-chapter {
+    grid-template-columns: 1fr;
+  }
+
   .document-row-actions,
   .reader-header-actions,
   .document-edit-footer,
   .ocr-page-header,
-  .ocr-save-actions {
+  .ocr-save-actions,
+  .ocr-destination-panel,
+  .ocr-file-row,
+  .ocr-file-controls,
+  .organizer-chapter-header,
+  .organizer-page,
+  .organizer-page-controls,
+  .organizer-actions {
     align-items: stretch;
     justify-content: flex-start;
   }
@@ -1635,6 +1790,12 @@ h3 {
   .document-edit-footer .button-row button,
   .ocr-save-actions .button-row,
   .ocr-save-actions .button-row button,
+  .ocr-file-controls button,
+  .ocr-file-controls .field,
+  .organizer-add-chapter button,
+  .organizer-page-controls button,
+  .organizer-page-controls .field,
+  .organizer-actions button,
   .append-target-field {
     width: 100%;
   }

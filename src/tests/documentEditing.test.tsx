@@ -88,7 +88,7 @@ function seedStore(document = buildDocument()): void {
     },
     tourProgress: {
       ...defaultTourProgressState,
-      completedTourIds: ['library', 'reader', 'stats', 'settings'],
+      completedTourIds: ['library-saved', 'reader', 'stats', 'settings'],
     },
     baselineResult: null,
     quizAttempts: [],
@@ -96,12 +96,13 @@ function seedStore(document = buildDocument()): void {
 }
 
 async function openReader(user: ReturnType<typeof userEvent.setup>): Promise<void> {
-  await user.click(screen.getByRole('button', { name: /Original Title/i }))
+  await user.click(screen.getByRole('button', { name: 'Read' }))
   expect(screen.getByRole('heading', { name: 'Original Title' })).toBeTruthy()
 }
 
 beforeEach(() => {
   window.localStorage.clear()
+  window.history.replaceState(null, '', '/library/saved')
   seedStore()
 })
 

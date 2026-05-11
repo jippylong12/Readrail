@@ -5,6 +5,7 @@ import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import App from '../App'
 import { getRouteForShortcutEvent, isEditableShortcutTarget } from '../app/shortcuts'
+import { createDefaultDocumentStructure } from '../app/structuredDocuments'
 import { defaultOnboardingState, defaultTourProgressState, useAppStore } from '../app/store'
 import type { DocumentRecord } from '../types/domain'
 
@@ -23,8 +24,11 @@ const activeDocument: DocumentRecord = {
 }
 
 function resetStore(): void {
+  const structure = createDefaultDocumentStructure(activeDocument)
   useAppStore.setState({
     documents: [activeDocument],
+    documentChapters: [structure.chapter],
+    documentPages: [structure.page],
     sessions: [],
     activeDocumentId: activeDocument.id,
     onboarding: {
@@ -34,7 +38,7 @@ function resetStore(): void {
     },
     tourProgress: {
       ...defaultTourProgressState,
-      completedTourIds: ['library', 'reader', 'stats', 'settings'],
+      completedTourIds: ['library-saved', 'reader', 'stats', 'settings'],
     },
     baselineResult: null,
   })
@@ -56,6 +60,7 @@ function dispatchSectionShortcut(key: string, modifier: 'meta' | 'control'): Key
 
 beforeEach(() => {
   window.localStorage.clear()
+  window.history.replaceState(null, '', '/library/saved')
   resetStore()
 })
 
@@ -73,14 +78,34 @@ describe('app section shortcuts', () => {
 
     await user.click(screen.getByRole('tab', { name: 'Import' }))
     expect(screen.getByRole('heading', { name: 'Paste or text file' })).toBeTruthy()
+    expect(window.location.pathname).toBe('/library/import')
 
     await user.click(screen.getByRole('tab', { name: 'OCR' }))
-    expect(screen.getByRole('heading', { name: 'Photos or scanned PDFs' })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Import pages from scans' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Library' }).classList.contains('active')).toBe(true)
+    expect(window.location.pathname).toBe('/library/ocr')
 
     await user.click(screen.getByRole('tab', { name: 'Saved' }))
     expect(screen.getByRole('heading', { name: 'Reading documents' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Library' }).classList.contains('active')).toBe(true)
+    expect(window.location.pathname).toBe('/library/saved')
+  })
+
+  it('routes saved documents, reader, and reader back navigation through URLs', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: /Shortcut test document/i }))
+    expect(screen.getByRole('heading', { name: activeDocument.title })).toBeTruthy()
+    expect(window.location.pathname).toBe('/library/documents/document-1')
+
+    await user.click(screen.getByRole('button', { name: 'Open reader' }))
+    expect(screen.getByRole('heading', { name: activeDocument.title })).toBeTruthy()
+    expect(window.location.pathname).toBe('/reader/document-1')
+
+    await user.click(screen.getByRole('button', { name: 'Back to library' }))
+    expect(screen.getByRole('heading', { name: 'Reading documents' })).toBeTruthy()
+    expect(window.location.pathname).toBe('/library/saved')
   })
 
   it('navigates primary sections with Command shortcuts', () => {
@@ -165,7 +190,7 @@ describe('app section shortcuts', () => {
   it('exposes visible and accessible shortcut hints on primary navigation', () => {
     render(<App />)
 
-    const statsButton = screen.getByRole('button', { name: /Stats/i })
+    const statsButton = screen.getByRole('button', { name: 'Stats' })
 
     expect(statsButton.getAttribute('aria-keyshortcuts')).toBe('Meta+S Control+S')
     expect(statsButton.getAttribute('title')).toBe('Stats (Command+S / Control+S)')

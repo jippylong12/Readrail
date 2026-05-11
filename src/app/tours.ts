@@ -1,6 +1,6 @@
-import type { AppRoute } from './routes'
+import type { PrimaryRoute } from './routes'
 
-export type TourId = Exclude<AppRoute, 'test'>
+export type TourId = PrimaryRoute
 
 export type TourStep = {
   target: string
@@ -15,8 +15,8 @@ export type TourDefinition = {
 }
 
 export const TOUR_DEFINITIONS: Record<TourId, TourDefinition> = {
-  library: {
-    id: 'library',
+  'library-saved': {
+    id: 'library-saved',
     title: 'Library walkthrough',
     steps: [
       {
@@ -121,7 +121,7 @@ export const TOUR_DEFINITIONS: Record<TourId, TourDefinition> = {
       {
         target: '[data-tour="settings-ocr"]',
         title: 'OCR and local data',
-        body: 'OCR privacy controls cover source image retention. Delete local app data resets documents, sessions, quizzes, tours, and onboarding state.',
+        body: 'OCR privacy controls cover source image retention and image metadata stripping before upload. Delete local app data resets documents, sessions, quizzes, tours, and onboarding state.',
       },
       {
         target: '[data-tour="settings-guidance"]',

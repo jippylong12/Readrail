@@ -9,7 +9,7 @@ import { ROUTES } from '../app/routes'
 import { TOUR_DEFINITIONS, type TourDefinition, type TourId } from '../app/tours'
 
 const tour: TourDefinition = {
-  id: 'library',
+  id: 'library-saved',
   title: 'Library walkthrough',
   steps: [
     {
@@ -71,7 +71,7 @@ describe('GuidedTour', () => {
   })
 
   it('defines one complete tour for each replayable route', () => {
-    const replayableRouteIds = ROUTES.map((route) => route.id).filter((routeId): routeId is TourId => routeId !== 'test')
+    const replayableRouteIds = ROUTES.map((route) => route.id) as TourId[]
 
     expect(Object.keys(TOUR_DEFINITIONS)).toEqual(replayableRouteIds)
 

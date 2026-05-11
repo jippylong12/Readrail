@@ -6,6 +6,8 @@ import {
   defaultDocumentChapterId,
   defaultDocumentPageId,
   ensureStructuredDocumentCollections,
+  getOrderedChapterPages,
+  getOrderedDocumentPages,
 } from '../app/structuredDocuments'
 import type { DocumentChapterRecord, DocumentPageRecord, DocumentRecord } from '../types/domain'
 
@@ -376,6 +378,148 @@ describe('structured document store behavior', () => {
     expect(state.coaching).toEqual(coaching)
     expect(state.activeDocumentId).toBe(document.id)
   })
+
+  it('appends OCR pages to the selected chapter when one is provided', () => {
+    const document = buildStructuredDocumentFixture()
+    const introduction = useAppStore.getState().documentChapters.find((chapter) => chapter.title === 'Introduction')!
+
+    useAppStore.getState().appendOcrPagesToDocument(
+      document.id,
+      [
+        buildOcrPageInput({
+          text: 'Inserted introduction scan.',
+          pageNumber: 23,
+        }),
+      ],
+      introduction.id,
+    )
+
+    const state = useAppStore.getState()
+    expect(getOrderedChapterPages(introduction.id, state.documentPages).map((page) => page.text)).toEqual([
+      'First introduction page.',
+      'Second introduction page.',
+      'Inserted introduction scan.',
+    ])
+    expect(getOrderedDocumentPages(document.id, state.documentChapters, state.documentPages).map((page) => page.text)).toEqual([
+      'First introduction page.',
+      'Second introduction page.',
+      'Inserted introduction scan.',
+      'Appendix page text.',
+    ])
+  })
+
+  it('moves pages within and across chapters while keeping metadata attached to the page', () => {
+    const document = buildStructuredDocumentFixture()
+    const state = useAppStore.getState()
+    const introduction = state.documentChapters.find((chapter) => chapter.title === 'Introduction')!
+    const appendix = state.documentChapters.find((chapter) => chapter.title === 'Appendix')!
+    const movedPage = state.documentPages.find((page) => page.id === 'page-intro-2')!
+
+    useAppStore.getState().movePage(movedPage.id, appendix.id, 0)
+
+    const nextState = useAppStore.getState()
+    const orderedPages = getOrderedDocumentPages(document.id, nextState.documentChapters, nextState.documentPages)
+    const moved = nextState.documentPages.find((page) => page.id === movedPage.id)!
+
+    expect(getOrderedChapterPages(introduction.id, nextState.documentPages).map((page) => page.id)).toEqual(['page-intro-1'])
+    expect(getOrderedChapterPages(appendix.id, nextState.documentPages).map((page) => page.id)).toEqual([
+      'page-intro-2',
+      'page-appendix-1',
+    ])
+    expect(orderedPages.map((page) => page.id)).toEqual(['page-intro-1', 'page-intro-2', 'page-appendix-1'])
+    expect(orderedPages.map((page) => page.pageNumber)).toEqual([1, 2, 3])
+    expect(moved).toMatchObject({
+      id: 'page-intro-2',
+      text: 'Second introduction page.',
+      reviewStatus: 'needs_attention',
+      ocrNotes: 'Preserve this note',
+      sourcePageNumber: 22,
+      sourceFileName: 'intro-2.png',
+      sourceKind: 'image',
+      createdAt: '2026-05-11T12:00:00.000Z',
+    })
+    expect(nextState.documents[0]).toMatchObject({
+      id: document.id,
+      content: ['First introduction page.', 'Second introduction page.', 'Appendix page text.'].join('\n\n\f\n\n'),
+      wordCount: 9,
+    })
+  })
+
+  it('reorders chapters and regenerates reader text in chapter/page order', () => {
+    const document = buildStructuredDocumentFixture()
+    const appendix = useAppStore.getState().documentChapters.find((chapter) => chapter.title === 'Appendix')!
+
+    useAppStore.getState().moveChapter(document.id, appendix.id, -1)
+
+    const state = useAppStore.getState()
+    const orderedChapters = state.documentChapters
+      .filter((chapter) => chapter.documentId === document.id)
+      .sort((left, right) => left.sortOrder - right.sortOrder)
+    const orderedPages = getOrderedDocumentPages(document.id, state.documentChapters, state.documentPages)
+
+    expect(orderedChapters.map((chapter) => chapter.title)).toEqual(['Appendix', 'Introduction'])
+    expect(orderedPages.map((page) => page.id)).toEqual(['page-appendix-1', 'page-intro-1', 'page-intro-2'])
+    expect(orderedPages.map((page) => page.pageNumber)).toEqual([1, 2, 3])
+    expect(state.documents[0].content).toBe(
+      ['Appendix page text.', 'First introduction page.', 'Second introduction page.'].join('\n\n\f\n\n'),
+    )
+  })
+
+  it('deletes a chapter by moving its pages to the nearest remaining chapter', () => {
+    const document = buildStructuredDocumentFixture()
+    const appendix = useAppStore.getState().documentChapters.find((chapter) => chapter.title === 'Appendix')!
+
+    const deleted = useAppStore.getState().deleteChapter(appendix.id)
+
+    const state = useAppStore.getState()
+    expect(deleted).toBe(true)
+    expect(state.documentChapters.filter((chapter) => chapter.documentId === document.id).map((chapter) => chapter.title)).toEqual([
+      'Introduction',
+    ])
+    expect(getOrderedDocumentPages(document.id, state.documentChapters, state.documentPages).map((page) => page.id)).toEqual([
+      'page-intro-1',
+      'page-intro-2',
+      'page-appendix-1',
+    ])
+    expect(state.documents[0].content).toContain('Appendix page text.')
+  })
+
+  it('creates, renames, and deletes empty chapters without changing page records', () => {
+    const document = useAppStore.getState().createDocument({
+      title: 'Single chapter book',
+      content: 'Only page text.',
+      sourceType: 'paste',
+    })
+
+    const chapter = useAppStore.getState().createChapter(document.id, 'Notes')!
+    useAppStore.getState().renameChapter(chapter.id, 'Reading notes')
+    const deleted = useAppStore.getState().deleteChapter(chapter.id)
+
+    const state = useAppStore.getState()
+    expect(deleted).toBe(true)
+    expect(state.documentChapters.filter((candidate) => candidate.documentId === document.id)).toHaveLength(1)
+    expect(state.documentPages.filter((page) => page.documentId === document.id)).toHaveLength(1)
+    expect(state.documents[0].content).toBe('Only page text.')
+  })
+
+  it('updates page labels and source page numbers without replacing the page', () => {
+    const document = buildStructuredDocumentFixture()
+
+    useAppStore.getState().updatePageMetadata('page-intro-1', {
+      title: 'Opening page',
+      sourcePageNumber: 101,
+    })
+
+    const state = useAppStore.getState()
+    const page = state.documentPages.find((candidate) => candidate.id === 'page-intro-1')!
+    expect(page).toMatchObject({
+      id: 'page-intro-1',
+      documentId: document.id,
+      title: 'Opening page',
+      sourcePageNumber: 101,
+      text: 'First introduction page.',
+    })
+  })
 })
 
 function buildOcrPageInput(overrides: Partial<OcrPageInput> = {}): OcrPageInput {
@@ -389,6 +533,115 @@ function buildOcrPageInput(overrides: Partial<OcrPageInput> = {}): OcrPageInput 
     uncertainSpans: [],
     sourceFileName: null,
     sourceKind: 'image',
+    ...overrides,
+  }
+}
+
+function buildStructuredDocumentFixture(): DocumentRecord {
+  const document: DocumentRecord = {
+    ...buildLegacyDocument({
+      id: 'structured-doc',
+      title: 'Structured book',
+      content: 'First introduction page.\n\n\f\n\nSecond introduction page.\n\n\f\n\nAppendix page text.',
+      wordCount: 9,
+      sourceType: 'photo_ocr',
+    }),
+    structureVersion: STRUCTURED_DOCUMENT_VERSION,
+  }
+  const chapters: DocumentChapterRecord[] = [
+    buildChapter({
+      id: 'chapter-intro',
+      documentId: document.id,
+      title: 'Introduction',
+      sortOrder: 0,
+    }),
+    buildChapter({
+      id: 'chapter-appendix',
+      documentId: document.id,
+      title: 'Appendix',
+      sortOrder: 1,
+    }),
+  ]
+  const pages: DocumentPageRecord[] = [
+    buildPage({
+      id: 'page-intro-1',
+      documentId: document.id,
+      chapterId: 'chapter-intro',
+      pageNumber: 1,
+      sortOrder: 0,
+      sourcePageNumber: 21,
+      text: 'First introduction page.',
+      wordCount: 3,
+    }),
+    buildPage({
+      id: 'page-intro-2',
+      documentId: document.id,
+      chapterId: 'chapter-intro',
+      pageNumber: 2,
+      sortOrder: 1,
+      sourcePageNumber: 22,
+      text: 'Second introduction page.',
+      wordCount: 3,
+      reviewStatus: 'needs_attention',
+      ocrNotes: 'Preserve this note',
+      sourceFileName: 'intro-2.png',
+    }),
+    buildPage({
+      id: 'page-appendix-1',
+      documentId: document.id,
+      chapterId: 'chapter-appendix',
+      pageNumber: 3,
+      sortOrder: 0,
+      sourcePageNumber: 99,
+      text: 'Appendix page text.',
+      wordCount: 3,
+    }),
+  ]
+
+  useAppStore.setState({
+    documents: [document],
+    documentChapters: chapters,
+    documentPages: pages,
+    activeDocumentId: document.id,
+  })
+
+  return document
+}
+
+function buildChapter(overrides: Partial<DocumentChapterRecord> = {}): DocumentChapterRecord {
+  return {
+    id: 'chapter-1',
+    documentId: 'structured-doc',
+    title: 'Chapter',
+    sortOrder: 0,
+    createdAt: '2026-05-11T12:00:00.000Z',
+    updatedAt: '2026-05-11T12:00:00.000Z',
+    ...overrides,
+  }
+}
+
+function buildPage(overrides: Partial<DocumentPageRecord> = {}): DocumentPageRecord {
+  return {
+    id: 'page-1',
+    documentId: 'structured-doc',
+    chapterId: 'chapter-1',
+    sortOrder: 0,
+    pageNumber: 1,
+    sourcePageNumber: null,
+    title: null,
+    text: 'Page text.',
+    wordCount: 2,
+    reviewStatus: 'reviewed',
+    ocrConfidence: 0.9,
+    ocrNotes: null,
+    uncertainSpans: [],
+    sourceFileId: null,
+    sourceFileName: null,
+    sourceKind: 'image',
+    sourceLocalPath: null,
+    sourceSha256: null,
+    createdAt: '2026-05-11T12:00:00.000Z',
+    updatedAt: '2026-05-11T12:00:00.000Z',
     ...overrides,
   }
 }

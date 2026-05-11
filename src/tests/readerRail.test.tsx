@@ -31,6 +31,7 @@ function renderReader(defaultMode: ReaderMode = 'rail') {
       fontSize={20}
       lineHeight={1.65}
       segmentStartWordIndex={0}
+      onBackToLibrary={vi.fn()}
       onSegmentReset={vi.fn()}
       onSegmentStart={vi.fn()}
       onStartTest={vi.fn()}
@@ -89,7 +90,8 @@ describe('ReaderRail focus mode', () => {
         fontSize={20}
         lineHeight={1.65}
         segmentStartWordIndex={0}
-        onSegmentReset={vi.fn()}
+        onBackToLibrary={vi.fn()}
+      onSegmentReset={vi.fn()}
         onSegmentStart={vi.fn()}
         onStartTest={onStartTest}
       />,
@@ -145,7 +147,8 @@ describe('ReaderRail comprehension prompts', () => {
         fontSize={20}
         lineHeight={1.65}
         segmentStartWordIndex={0}
-        onSegmentReset={onSegmentReset}
+        onBackToLibrary={vi.fn()}
+      onSegmentReset={onSegmentReset}
         onSegmentStart={vi.fn()}
         onStartTest={vi.fn()}
       />,
@@ -179,7 +182,8 @@ describe('ReaderRail comprehension prompts', () => {
         fontSize={20}
         lineHeight={1.65}
         segmentStartWordIndex={0}
-        onSegmentReset={onSegmentReset}
+        onBackToLibrary={vi.fn()}
+      onSegmentReset={onSegmentReset}
         onSegmentStart={vi.fn()}
         onStartTest={vi.fn()}
       />,
@@ -216,7 +220,8 @@ describe('ReaderRail comprehension prompts', () => {
         fontSize={20}
         lineHeight={1.65}
         segmentStartWordIndex={0}
-        onSegmentReset={vi.fn()}
+        onBackToLibrary={vi.fn()}
+      onSegmentReset={vi.fn()}
         onSegmentStart={vi.fn()}
         onStartTest={onStartTest}
       />,

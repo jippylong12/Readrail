@@ -1,12 +1,12 @@
-import type { AppRoute } from '../app/routes'
+import type { PrimaryRoute } from '../app/routes'
 import { ROUTES } from '../app/routes'
 import { getShortcutForRoute } from '../app/shortcuts'
 import type { DocumentRecord } from '../types/domain'
 
 type AppShellProps = {
-  activeRoute: AppRoute
+  activeRoute: PrimaryRoute
   activeDocument: DocumentRecord | null
-  onRouteChange: (route: AppRoute) => void
+  onRouteChange: (route: PrimaryRoute) => void
   onReplayTour: () => void
   children: React.ReactNode
 }
