@@ -10,6 +10,7 @@ import { SettingsPanel } from './components/SettingsPanel'
 import { StatsChart } from './components/StatsChart'
 import { GuidedTour } from './components/GuidedTour'
 import { type AppRoute } from './app/routes'
+import { getRouteForShortcutEvent } from './app/shortcuts'
 import { selectActiveDocument, useAppStore } from './app/store'
 import { TOUR_DEFINITIONS, type TourId } from './app/tours'
 import { exportProgressCsv, exportProgressJson } from './lib/db/export'
@@ -103,10 +104,30 @@ function App() {
     setReplayTourId(null)
   }
 
-  function changeRoute(nextRoute: AppRoute): void {
+  const changeRoute = useCallback((nextRoute: AppRoute): void => {
     setReplayTourId(null)
     setRoute(nextRoute)
-  }
+  }, [])
+
+  useEffect(() => {
+    if (onboarding.status === 'not_started') {
+      return undefined
+    }
+
+    function handleSectionShortcut(event: KeyboardEvent): void {
+      const shortcutRoute = getRouteForShortcutEvent(event)
+
+      if (!shortcutRoute) {
+        return
+      }
+
+      event.preventDefault()
+      changeRoute(shortcutRoute)
+    }
+
+    window.addEventListener('keydown', handleSectionShortcut)
+    return () => window.removeEventListener('keydown', handleSectionShortcut)
+  }, [changeRoute, onboarding.status])
 
   if (onboarding.status === 'not_started') {
     return (

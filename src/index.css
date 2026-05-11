@@ -153,6 +153,22 @@ button:disabled {
   text-align: left;
 }
 
+.nav-tab-label {
+  min-width: 0;
+  flex: 1;
+}
+
+.shortcut-hint {
+  margin-left: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 2px 6px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
 .nav-tab.active,
 .document-row.active {
   border-color: color-mix(in srgb, var(--primary) 35%, var(--line));

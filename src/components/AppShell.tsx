@@ -1,5 +1,6 @@
 import type { AppRoute } from '../app/routes'
 import { ROUTES } from '../app/routes'
+import { getShortcutForRoute } from '../app/shortcuts'
 import type { DocumentRecord } from '../types/domain'
 
 type AppShellProps = {
@@ -23,17 +24,28 @@ export function AppShell({ activeRoute, activeDocument, onRouteChange, onReplayT
         </div>
 
         <nav className="nav-tabs">
-          {ROUTES.map((route) => (
-            <button
-              className={route.id === activeRoute ? 'nav-tab active' : 'nav-tab'}
-              key={route.id}
-              onClick={() => onRouteChange(route.id)}
-              type="button"
-            >
-              <span aria-hidden="true">{route.icon}</span>
-              {route.label}
-            </button>
-          ))}
+          {ROUTES.map((route) => {
+            const shortcut = getShortcutForRoute(route.id)
+
+            return (
+              <button
+                aria-keyshortcuts={shortcut?.ariaKeyShortcuts}
+                className={route.id === activeRoute ? 'nav-tab active' : 'nav-tab'}
+                key={route.id}
+                onClick={() => onRouteChange(route.id)}
+                title={shortcut?.title}
+                type="button"
+              >
+                <span aria-hidden="true">{route.icon}</span>
+                <span className="nav-tab-label">{route.label}</span>
+                {shortcut && (
+                  <span aria-hidden="true" className="shortcut-hint">
+                    {shortcut.display}
+                  </span>
+                )}
+              </button>
+            )
+          })}
         </nav>
 
         <div className="session-card">
