@@ -63,6 +63,7 @@ describe('StatsChart coaching surface', () => {
         documents={[sampleDocument]}
         sessions={readingSessions}
         quizAttempts={[coachedAttempt, priorAttempt]}
+        hasGeminiKey
       />,
     )
 
@@ -82,6 +83,7 @@ describe('StatsChart coaching surface', () => {
         documents={[sampleDocument]}
         sessions={readingSessions}
         quizAttempts={[]}
+        hasGeminiKey
       />,
     )
 
@@ -96,9 +98,28 @@ describe('StatsChart coaching surface', () => {
         documents={[sampleDocument]}
         sessions={readingSessions}
         quizAttempts={[coachedAttempt]}
+        hasGeminiKey
       />,
     )
 
     expect(screen.getByText('One assessment recorded')).toBeTruthy()
+  })
+
+  it('shows coaching disabled state when the Gemini key is missing', () => {
+    render(
+      <StatsChart
+        baselineResult={baseline}
+        documents={[sampleDocument]}
+        sessions={readingSessions}
+        quizAttempts={[coachedAttempt, priorAttempt]}
+        hasGeminiKey={false}
+      />,
+    )
+
+    expect(screen.getByText('Coaching is disabled')).toBeTruthy()
+    expect(
+      screen.getByText(/Add a Gemini API key in Settings to enable generated quiz attempts and AI-based coaching recommendations/),
+    ).toBeTruthy()
+    expect(screen.queryByText('Great comprehension. Try a slightly higher pace.')).toBeNull()
   })
 })

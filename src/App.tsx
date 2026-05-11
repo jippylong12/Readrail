@@ -199,7 +199,13 @@ function App() {
 
       {route === 'stats' && (
         <div className="content-stack">
-          <StatsChart baselineResult={baselineResult} documents={documents} sessions={sessions} quizAttempts={quizAttempts} />
+          <StatsChart
+            baselineResult={baselineResult}
+            documents={documents}
+            sessions={sessions}
+            quizAttempts={quizAttempts}
+            hasGeminiKey={hasGeminiKey}
+          />
           <section className="panel export-panel" data-tour="export">
             <span className="eyebrow">Export</span>
             <h2>Progress backup</h2>

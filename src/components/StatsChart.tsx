@@ -7,13 +7,15 @@ type StatsChartProps = {
   documents: DocumentRecord[]
   sessions: ReadingSession[]
   quizAttempts: QuizAttempt[]
+  hasGeminiKey: boolean
 }
 
-export function StatsChart({ baselineResult, documents, sessions, quizAttempts }: StatsChartProps) {
+export function StatsChart({ baselineResult, documents, sessions, quizAttempts, hasGeminiKey }: StatsChartProps) {
   const summary = summarizeSessions(sessions)
   const trends = buildTrendRows(sessions)
-  const latestQuiz = quizAttempts[0]
-  const previousQuiz = quizAttempts[1]
+  const latestQuiz = hasGeminiKey ? quizAttempts[0] : null
+  const previousQuiz = hasGeminiKey ? quizAttempts[1] : null
+  const coachingAttempts = hasGeminiKey ? quizAttempts : []
   const latestSource = latestQuiz ? documents.find((document) => document.id === latestQuiz.documentId)?.title : null
 
   const speedDelta = latestQuiz && previousQuiz ? latestQuiz.recommendedWpm - previousQuiz.recommendedWpm : null
@@ -62,7 +64,14 @@ export function StatsChart({ baselineResult, documents, sessions, quizAttempts }
           </div>
         </div>
 
-        {latestQuiz ? (
+        {!hasGeminiKey ? (
+          <div className="empty-state">
+            <strong>Coaching is disabled</strong>
+            <span>
+              Add a Gemini API key in Settings to enable generated quiz attempts and AI-based coaching recommendations in this panel.
+            </span>
+          </div>
+        ) : latestQuiz ? (
           <>
             <p>{latestQuiz.explanation}</p>
             <div className="summary-grid">
@@ -89,7 +98,7 @@ export function StatsChart({ baselineResult, documents, sessions, quizAttempts }
                 </div>
               ) : (
                 <div className="summary-grid">
-                  {quizAttempts.slice(0, 5).map((attempt) => (
+                  {coachingAttempts.slice(0, 5).map((attempt) => (
                     <div className="metric" key={attempt.id}>
                       <span>{coachingAttemptDate(attempt.createdAt)}</span>
                       <strong>{attempt.kind === 'manual' ? 'Manual' : 'Generated'} </strong>
