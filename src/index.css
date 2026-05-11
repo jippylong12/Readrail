@@ -242,6 +242,7 @@ button:disabled {
 
 h1,
 h2,
+h3,
 p {
   margin: 0;
 }
@@ -253,6 +254,11 @@ h1 {
 
 h2 {
   font-size: 1.05rem;
+}
+
+h3 {
+  font-size: 0.98rem;
+  line-height: 1.25;
 }
 
 .field {
@@ -280,6 +286,11 @@ h2 {
   resize: vertical;
 }
 
+.field textarea.ocr-page-textarea {
+  min-height: 320px;
+  max-width: 100%;
+}
+
 .import-panel,
 .ocr-panel,
 .settings-grid,
@@ -287,6 +298,173 @@ h2 {
 .export-panel {
   display: grid;
   gap: 16px;
+}
+
+.ocr-page-list {
+  display: grid;
+  gap: 14px;
+}
+
+.ocr-warning-list {
+  display: grid;
+  gap: 6px;
+  border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--warning) 10%, var(--surface));
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 700;
+  padding: 10px 12px;
+}
+
+.ocr-progress {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-muted);
+  padding: 12px;
+}
+
+.ocr-progress-header,
+.ocr-progress-steps {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.ocr-progress-header span {
+  color: var(--muted);
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.ocr-progress-bar {
+  overflow: hidden;
+  height: 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--line) 62%, transparent);
+}
+
+.ocr-progress-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--primary);
+  transition: width 180ms ease;
+}
+
+.ocr-progress-steps {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+.ocr-progress-step {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 800;
+  padding: 4px 8px;
+}
+
+.ocr-progress-step.running {
+  border-color: color-mix(in srgb, var(--primary) 45%, var(--line));
+  color: var(--primary);
+}
+
+.ocr-progress-step.done {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  color: var(--accent);
+}
+
+.ocr-progress-step.failed {
+  border-color: color-mix(in srgb, var(--warning) 45%, var(--line));
+  color: var(--warning);
+}
+
+.ocr-file-dropzone {
+  display: grid;
+  gap: 8px;
+  min-height: 150px;
+  place-items: center;
+  border: 2px dashed color-mix(in srgb, var(--primary) 38%, var(--line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--primary) 6%, var(--surface-muted));
+  color: var(--text);
+  cursor: pointer;
+  padding: 22px;
+  text-align: center;
+}
+
+.ocr-file-dropzone span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.ocr-file-dropzone strong {
+  font-size: 1.08rem;
+}
+
+.ocr-file-dropzone input {
+  max-width: 340px;
+}
+
+.ocr-file-dropzone.disabled {
+  border-color: var(--line);
+  background: var(--surface-muted);
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+.ocr-page-card {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 14px;
+}
+
+.ocr-page-header,
+.ocr-save-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ocr-page-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.ocr-page-meta span {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-muted);
+  padding: 4px 8px;
+}
+
+.ocr-save-actions {
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+
+.ocr-save-actions > span {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.append-target-field {
+  min-width: min(260px, 100%);
 }
 
 .import-footer,
@@ -556,6 +734,15 @@ h2 {
 .segmented button.active {
   background: var(--surface);
   color: var(--text);
+}
+
+.library-tabs-panel {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.library-tabs {
+  width: min(100%, 420px);
 }
 
 .info-button {
@@ -1435,7 +1622,9 @@ h2 {
 
   .document-row-actions,
   .reader-header-actions,
-  .document-edit-footer {
+  .document-edit-footer,
+  .ocr-page-header,
+  .ocr-save-actions {
     align-items: stretch;
     justify-content: flex-start;
   }
@@ -1443,7 +1632,10 @@ h2 {
   .document-row-actions .ghost-button,
   .reader-header-actions .secondary-button,
   .document-edit-footer .button-row,
-  .document-edit-footer .button-row button {
+  .document-edit-footer .button-row button,
+  .ocr-save-actions .button-row,
+  .ocr-save-actions .button-row button,
+  .append-target-field {
     width: 100%;
   }
 }

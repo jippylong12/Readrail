@@ -7,6 +7,8 @@ import type {
   DocumentChapterRecord,
   DocumentPageRecord,
   DocumentRecord,
+  OcrReviewStatus,
+  OcrUncertainSpan,
   OnboardingState,
   PageLayout,
   ReaderMode,
@@ -22,6 +24,7 @@ import { saveDocumentToDatabase, saveSessionToDatabase } from '../lib/db/reposit
 import {
   STRUCTURED_DOCUMENT_VERSION,
   createDefaultDocumentStructure,
+  defaultDocumentChapterId,
   defaultDocumentPageId,
   ensureStructuredDocumentCollections,
 } from './structuredDocuments'
@@ -30,6 +33,23 @@ type CreateDocumentInput = {
   title: string
   content: string
   sourceType: SourceType
+}
+
+export type OcrPageInput = {
+  pageNumber: number
+  text: string
+  reviewStatus: OcrReviewStatus
+  sourcePageNumber: number | null
+  ocrConfidence: number | null
+  ocrNotes: string | null
+  uncertainSpans: OcrUncertainSpan[]
+  sourceFileName: string | null
+  sourceKind: DocumentPageRecord['sourceKind']
+}
+
+type CreateOcrDocumentInput = {
+  title: string
+  pages: OcrPageInput[]
 }
 
 type CompleteSessionInput = {
@@ -60,6 +80,8 @@ type AppState = {
   quizAttempts: QuizAttempt[]
   coaching: CoachingState
   createDocument: (input: CreateDocumentInput) => DocumentRecord
+  createOcrDocument: (input: CreateOcrDocumentInput) => DocumentRecord
+  appendOcrPagesToDocument: (documentId: string, pages: OcrPageInput[]) => DocumentRecord | null
   updateDocument: (id: string, updates: Partial<Pick<DocumentRecord, 'title' | 'content'>>) => void
   archiveDocument: (id: string) => void
   setActiveDocument: (id: string | null) => void
@@ -95,7 +117,7 @@ const defaultSettings: AppSettings = {
     confirmRemoteOcrEachTime: true,
   },
   ocr: {
-    modelId: 'gemini-2.5-flash-lite',
+    modelId: 'gemini-3.1-flash-lite',
     preservePageBreaks: true,
   },
 }
@@ -116,6 +138,49 @@ function buildDefaultCoachingState(recommendedWpm = defaultSettings.reader.defau
     lastResetWordIndexByDocument: {},
     activeSegmentByDocument: {},
   }
+}
+
+function renderStructuredContentFromPages(pages: Array<Pick<DocumentPageRecord, 'sortOrder' | 'text'>>): string {
+  return [...pages]
+    .sort((left, right) => left.sortOrder - right.sortOrder)
+    .map((page) => page.text.trim())
+    .filter(Boolean)
+    .join('\n\n\f\n\n')
+}
+
+function buildOcrPages(
+  documentId: string,
+  chapterId: string,
+  pages: OcrPageInput[],
+  now: string,
+  startSortOrder = 0,
+  startPageNumber = 1,
+): DocumentPageRecord[] {
+  return pages.map((page, index) => {
+    const text = cleanReadingText(page.text, { preservePageBreaks: true })
+    return {
+      id: crypto.randomUUID(),
+      documentId,
+      chapterId,
+      sortOrder: startSortOrder + index,
+      pageNumber: startPageNumber + index,
+      sourcePageNumber: page.sourcePageNumber ?? page.pageNumber ?? null,
+      title: null,
+      text,
+      wordCount: countWords(text),
+      reviewStatus: page.reviewStatus,
+      ocrConfidence: page.ocrConfidence,
+      ocrNotes: page.ocrNotes,
+      uncertainSpans: page.uncertainSpans,
+      sourceFileId: null,
+      sourceFileName: page.sourceFileName,
+      sourceKind: page.sourceKind,
+      sourceLocalPath: null,
+      sourceSha256: null,
+      createdAt: now,
+      updatedAt: now,
+    }
+  })
 }
 
 export const useAppStore = create<AppState>()(
@@ -163,6 +228,106 @@ export const useAppStore = create<AppState>()(
         })
 
         return document
+      },
+      createOcrDocument: (input) => {
+        const now = new Date().toISOString()
+        const documentId = crypto.randomUUID()
+        const chapter: DocumentChapterRecord = {
+          id: defaultDocumentChapterId(documentId),
+          documentId,
+          title: 'Main text',
+          sortOrder: 0,
+          createdAt: now,
+          updatedAt: now,
+        }
+        const pages = buildOcrPages(documentId, chapter.id, input.pages, now)
+        const content = renderStructuredContentFromPages(pages)
+        const wordCount = pages.reduce((total, page) => total + page.wordCount, 0)
+        const document: DocumentRecord = {
+          id: documentId,
+          title: input.title.trim() || 'Untitled OCR import',
+          sourceType: 'photo_ocr',
+          content,
+          wordCount,
+          estimatedPages: estimatePages(wordCount),
+          language: 'en',
+          structureVersion: STRUCTURED_DOCUMENT_VERSION,
+          createdAt: now,
+          updatedAt: now,
+          archivedAt: null,
+        }
+
+        set((state) => ({
+          documents: [document, ...state.documents],
+          documentChapters: [chapter, ...state.documentChapters],
+          documentPages: [...pages, ...state.documentPages],
+          activeDocumentId: document.id,
+        }))
+        void saveDocumentToDatabase(document, {
+          chapters: [chapter],
+          pages,
+        })
+
+        return document
+      },
+      appendOcrPagesToDocument: (documentId, inputPages) => {
+        const now = new Date().toISOString()
+        let changedDocument: DocumentRecord | null = null
+        let changedChapter: DocumentChapterRecord | null = null
+        let addedPages: DocumentPageRecord[] = []
+
+        set((state) => {
+          const document = state.documents.find((candidate) => candidate.id === documentId)
+          if (!document) {
+            return state
+          }
+
+          const documentChapters = state.documentChapters
+            .filter((chapter) => chapter.documentId === documentId)
+            .sort((left, right) => left.sortOrder - right.sortOrder)
+          const fallbackChapter: DocumentChapterRecord = {
+            id: defaultDocumentChapterId(documentId),
+            documentId,
+            title: 'Main text',
+            sortOrder: 0,
+            createdAt: document.createdAt,
+            updatedAt: now,
+          }
+          const targetChapter = documentChapters[documentChapters.length - 1] ?? fallbackChapter
+          changedChapter = documentChapters.length === 0 ? targetChapter : null
+
+          const existingPages = state.documentPages
+            .filter((page) => page.documentId === documentId)
+            .sort((left, right) => left.sortOrder - right.sortOrder)
+          const maxSortOrder = existingPages.reduce((max, page) => Math.max(max, page.sortOrder), -1)
+          const maxPageNumber = existingPages.reduce((max, page) => Math.max(max, page.pageNumber), 0)
+          addedPages = buildOcrPages(documentId, targetChapter.id, inputPages, now, maxSortOrder + 1, maxPageNumber + 1)
+          const nextPages = [...existingPages, ...addedPages]
+          const wordCount = nextPages.reduce((total, page) => total + page.wordCount, 0)
+          changedDocument = {
+            ...document,
+            content: renderStructuredContentFromPages(nextPages),
+            wordCount,
+            estimatedPages: estimatePages(wordCount),
+            updatedAt: now,
+          }
+
+          return {
+            documents: state.documents.map((candidate) => (candidate.id === documentId ? changedDocument! : candidate)),
+            documentChapters: changedChapter ? [changedChapter, ...state.documentChapters] : state.documentChapters,
+            documentPages: [...state.documentPages, ...addedPages],
+            activeDocumentId: documentId,
+          }
+        })
+
+        if (changedDocument) {
+          void saveDocumentToDatabase(changedDocument, {
+            chapters: changedChapter ? [changedChapter] : undefined,
+            pages: addedPages,
+          })
+        }
+
+        return changedDocument
       },
       updateDocument: (id, updates) => {
         const updatedAt = new Date().toISOString()

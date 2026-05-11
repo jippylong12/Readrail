@@ -13,13 +13,15 @@ import { StatsChart } from './components/StatsChart'
 import { GuidedTour } from './components/GuidedTour'
 import { type AppRoute } from './app/routes'
 import { getRouteForShortcutEvent } from './app/shortcuts'
-import { selectActiveDocument, useAppStore } from './app/store'
+import { selectActiveDocument, useAppStore, type OcrPageInput } from './app/store'
 import { TOUR_DEFINITIONS, type TourId } from './app/tours'
 import { exportProgressCsv, exportProgressJson } from './lib/db/export'
 import { getDatabase, isTauriRuntime } from './lib/db/migrations'
 import { generateQuizFromReading, type GeminiQuiz } from './lib/ai/geminiQuiz'
 import { buildGeneratedQuizAttempt, scoreGeneratedQuizQuestions } from './lib/reading/coaching'
 import type { DocumentRecord, ReaderMode } from './types/domain'
+
+type LibraryTab = 'import' | 'ocr' | 'saved'
 
 type PendingSession = {
   mode: ReaderMode
@@ -42,6 +44,9 @@ type PendingQuiz = {
 
 function App() {
   const [route, setRoute] = useState<AppRoute>('library')
+  const [libraryTab, setLibraryTab] = useState<LibraryTab>(() =>
+    useAppStore.getState().documents.some((document) => !document.archivedAt) ? 'saved' : 'import',
+  )
   const [pendingQuiz, setPendingQuiz] = useState<PendingQuiz | null>(null)
   const [hasGeminiKey, setHasGeminiKey] = useState(false)
   const [browserGeminiKey, setBrowserGeminiKey] = useState('')
@@ -56,6 +61,8 @@ function App() {
   const coaching = useAppStore((state) => state.coaching)
   const activeDocument = useAppStore(selectActiveDocument)
   const createDocument = useAppStore((state) => state.createDocument)
+  const createOcrDocument = useAppStore((state) => state.createOcrDocument)
+  const appendOcrPagesToDocument = useAppStore((state) => state.appendOcrPagesToDocument)
   const updateDocument = useAppStore((state) => state.updateDocument)
   const archiveDocument = useAppStore((state) => state.archiveDocument)
   const setActiveDocument = useAppStore((state) => state.setActiveDocument)
@@ -103,6 +110,28 @@ function App() {
     [createDocument, setActiveDocument],
   )
 
+  const createAndOpenOcrDocument = useCallback(
+    (title: string, pages: OcrPageInput[]) => {
+      const document = createOcrDocument({ title, pages })
+      setActiveDocument(document.id)
+      setRoute('reader')
+    },
+    [createOcrDocument, setActiveDocument],
+  )
+
+  const appendAndOpenOcrPages = useCallback(
+    (documentId: string, pages: OcrPageInput[]) => {
+      const document = appendOcrPagesToDocument(documentId, pages)
+      if (!document) {
+        return
+      }
+
+      setActiveDocument(document.id)
+      setRoute('reader')
+    },
+    [appendOcrPagesToDocument, setActiveDocument],
+  )
+
   function exportFile(kind: 'json' | 'csv'): void {
     const contents = kind === 'json' ? exportProgressJson(documents, sessions) : exportProgressCsv(sessions)
     const type = kind === 'json' ? 'application/json' : 'text/csv'
@@ -148,13 +177,13 @@ function App() {
     }
   }, [])
 
-  const loadGeminiApiKey = useCallback(async (): Promise<string | null> => {
+  const loadGeminiApiKey = useCallback(async (reason: 'ocr' | 'quiz'): Promise<string | null> => {
     if (!hasGeminiKey) {
       return null
     }
 
     if (isTauriRuntime()) {
-      const key = await invoke<string>('keychain_get_gemini_key_for_ocr', { reason: 'quiz' })
+      const key = await invoke<string>('keychain_get_gemini_key_for_ocr', { reason })
       return key.trim() || null
     }
 
@@ -163,7 +192,7 @@ function App() {
       return sessionKey
     }
 
-    return window.prompt('Gemini API key for this quiz run')?.trim() || null
+    return null
   }, [browserGeminiKey, hasGeminiKey])
 
   const startQuizForSession = useCallback(
@@ -187,7 +216,7 @@ function App() {
       })
 
       try {
-        const apiKey = await loadGeminiApiKey()
+        const apiKey = await loadGeminiApiKey('quiz')
         if (!apiKey) {
           throw new Error('Add a Gemini API key in Settings before testing comprehension.')
         }
@@ -287,26 +316,58 @@ function App() {
     <AppShell activeDocument={activeDocument} activeRoute={route} onReplayTour={() => replayTour()} onRouteChange={changeRoute}>
       {route === 'library' && (
         <div className="content-stack">
-          <ImportPanel
-            defaultWpm={settings.reader.defaultWpm}
-            onCreateDocument={(title, content, sourceType) => createAndOpenDocument(title, content, sourceType)}
-          />
-          <OcrReview
-            hasKey={hasGeminiKey}
-            onCreateDocument={(title, content) => createAndOpenDocument(title, content, 'photo_ocr')}
-            preservePageBreaks={settings.ocr.preservePageBreaks}
-          />
-          <LibraryList
-            activeDocumentId={activeDocument?.id ?? null}
-            documents={documents}
-            onArchive={archiveDocument}
-            onOpenJourney={reopenOnboarding}
-            onSelect={(id) => {
-              setActiveDocument(id)
-              setRoute('reader')
-            }}
-            onUpdateDocument={updateDocument}
-          />
+          <section className="library-tabs-panel" data-tour="library-tabs">
+            <div className="segmented library-tabs" role="tablist" aria-label="Library sections">
+              {([
+                ['import', 'Import'],
+                ['ocr', 'OCR'],
+                ['saved', 'Saved'],
+              ] as const).map(([tabId, label]) => (
+                <button
+                  aria-selected={libraryTab === tabId}
+                  className={libraryTab === tabId ? 'active' : ''}
+                  key={tabId}
+                  onClick={() => setLibraryTab(tabId)}
+                  role="tab"
+                  type="button"
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </section>
+
+          {libraryTab === 'import' && (
+            <ImportPanel
+              defaultWpm={settings.reader.defaultWpm}
+              onCreateDocument={(title, content, sourceType) => createAndOpenDocument(title, content, sourceType)}
+            />
+          )}
+
+          {libraryTab === 'ocr' && (
+            <OcrReview
+              documents={documents}
+              hasKey={hasGeminiKey}
+              loadApiKey={() => loadGeminiApiKey('ocr')}
+              onAppendPages={appendAndOpenOcrPages}
+              onCreateDocument={createAndOpenOcrDocument}
+              preservePageBreaks={settings.ocr.preservePageBreaks}
+            />
+          )}
+
+          {libraryTab === 'saved' && (
+            <LibraryList
+              activeDocumentId={activeDocument?.id ?? null}
+              documents={documents}
+              onArchive={archiveDocument}
+              onOpenJourney={reopenOnboarding}
+              onSelect={(id) => {
+                setActiveDocument(id)
+                setRoute('reader')
+              }}
+              onUpdateDocument={updateDocument}
+            />
+          )}
         </div>
       )}
 

@@ -20,14 +20,9 @@ export const TOUR_DEFINITIONS: Record<TourId, TourDefinition> = {
     title: 'Library walkthrough',
     steps: [
       {
-        target: '[data-tour="import"]',
-        title: 'Import reading material',
-        body: 'Paste text or import a local text file. Readrail cleans the text, saves it locally, and estimates practice time from your current reader pace.',
-      },
-      {
-        target: '[data-tour="ocr"]',
-        title: 'OCR entry point',
-        body: 'Photos and scanned PDFs can become reviewable text after you add your own Gemini key. Remote OCR is explicit before selected files are sent.',
+        target: '[data-tour="library-tabs"]',
+        title: 'Choose a library task',
+        body: 'Import, OCR, and saved readings are separated into tabs so each workflow has its own surface.',
       },
       {
         target: '[data-tour="library-list"]',
@@ -126,7 +121,7 @@ export const TOUR_DEFINITIONS: Record<TourId, TourDefinition> = {
       {
         target: '[data-tour="settings-ocr"]',
         title: 'OCR and local data',
-        body: 'OCR privacy controls cover remote confirmation and source image retention. Delete local app data resets documents, sessions, quizzes, tours, and onboarding state.',
+        body: 'OCR privacy controls cover source image retention. Delete local app data resets documents, sessions, quizzes, tours, and onboarding state.',
       },
       {
         target: '[data-tour="settings-guidance"]',

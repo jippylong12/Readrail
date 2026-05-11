@@ -166,7 +166,7 @@ export type PrivacySettings = {
 }
 
 export type OcrSettings = {
-  modelId: 'gemini-2.5-flash-lite'
+  modelId: 'gemini-3.1-flash-lite'
   preservePageBreaks: boolean
 }
 

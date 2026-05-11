@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest'
-import { useAppStore } from '../app/store'
+import { useAppStore, type OcrPageInput } from '../app/store'
 import {
   STRUCTURED_DOCUMENT_VERSION,
   defaultDocumentChapterId,
@@ -213,4 +213,182 @@ describe('structured document store behavior', () => {
       wordCount: 5,
     })
   })
+
+  it('creates a structured OCR document with one page record per reviewed page', () => {
+    const document = useAppStore.getState().createOcrDocument({
+      title: 'Reviewed scan',
+      pages: [
+        buildOcrPageInput({
+          pageNumber: 7,
+          text: 'First OCR page.',
+          sourceFileName: 'scan-7.png',
+          ocrConfidence: 0.91,
+        }),
+        buildOcrPageInput({
+          pageNumber: 8,
+          text: 'Second OCR page text.',
+          reviewStatus: 'needs_attention',
+          ocrNotes: 'Check margin text',
+        }),
+      ],
+    })
+
+    const state = useAppStore.getState()
+    const pages = state.documentPages
+      .filter((page) => page.documentId === document.id)
+      .sort((left, right) => left.sortOrder - right.sortOrder)
+
+    expect(document).toMatchObject({
+      title: 'Reviewed scan',
+      sourceType: 'photo_ocr',
+      wordCount: 7,
+      estimatedPages: 0,
+    })
+    expect(pages).toHaveLength(2)
+    expect(pages[0]).toMatchObject({
+      pageNumber: 1,
+      sourcePageNumber: 7,
+      sortOrder: 0,
+      text: 'First OCR page.',
+      wordCount: 3,
+      reviewStatus: 'reviewed',
+      ocrConfidence: 0.91,
+      sourceFileName: 'scan-7.png',
+      sourceKind: 'image',
+      sourceLocalPath: null,
+      sourceSha256: null,
+    })
+    expect(pages[1]).toMatchObject({
+      pageNumber: 2,
+      sourcePageNumber: 8,
+      sortOrder: 1,
+      text: 'Second OCR page text.',
+      wordCount: 4,
+      reviewStatus: 'needs_attention',
+      ocrNotes: 'Check margin text',
+    })
+    expect(state.activeDocumentId).toBe(document.id)
+    expect(document.content).toContain('First OCR page.')
+    expect(document.content).toContain('Second OCR page text.')
+  })
+
+  it('appends OCR pages after existing pages while preserving document data and history', () => {
+    const document = useAppStore.getState().createDocument({
+      title: 'Existing book',
+      content: 'Existing page text.',
+      sourceType: 'paste',
+    })
+    const session = {
+      id: 'session-1',
+      documentId: document.id,
+      mode: 'rail' as const,
+      targetWpm: 250,
+      actualWpm: 240,
+      adjustedWpm: 230,
+      wordsRead: 3,
+      durationSeconds: 1,
+      startPosition: 0,
+      endPosition: 3,
+      pauseCount: 0,
+      regressionCount: 0,
+      comprehensionScore: 90,
+      selfRating: null,
+      notes: '',
+      startedAt: '2026-05-11T12:00:00.000Z',
+      endedAt: '2026-05-11T12:00:01.000Z',
+    }
+    const quizAttempt = {
+      id: 'quiz-1',
+      documentId: document.id,
+      readingSessionId: session.id,
+      kind: 'generated' as const,
+      startWordIndex: 0,
+      endWordIndex: 3,
+      wordCount: 3,
+      durationSeconds: 1,
+      targetWpm: 250,
+      rawWpm: 240,
+      comprehensionPercent: 90,
+      adjustedWpm: 230,
+      recommendedWpm: 230,
+      explanation: 'Steady.',
+      questionResults: [],
+      questions: [],
+      createdAt: '2026-05-11T12:00:02.000Z',
+    }
+    const coaching = {
+      recommendedWpm: 230,
+      lastResetWordIndexByDocument: { [document.id]: 3 },
+      activeSegmentByDocument: {
+        [document.id]: {
+          startWordIndex: 3,
+          startedAt: null,
+          targetWpm: 230,
+        },
+      },
+    }
+    useAppStore.setState({
+      sessions: [session],
+      quizAttempts: [quizAttempt],
+      coaching,
+    })
+
+    const updated = useAppStore.getState().appendOcrPagesToDocument(document.id, [
+      buildOcrPageInput({
+        pageNumber: 3,
+        text: 'Appended OCR page.',
+        sourceFileName: 'scan-3.pdf',
+        sourceKind: 'pdf',
+      }),
+      buildOcrPageInput({
+        pageNumber: 4,
+        text: 'Final appended page.',
+      }),
+    ])
+
+    const state = useAppStore.getState()
+    const pages = state.documentPages
+      .filter((page) => page.documentId === document.id)
+      .sort((left, right) => left.sortOrder - right.sortOrder)
+
+    expect(updated).toMatchObject({
+      id: document.id,
+      title: 'Existing book',
+      sourceType: 'paste',
+      archivedAt: null,
+      wordCount: 9,
+    })
+    expect(pages.map((page) => page.pageNumber)).toEqual([1, 2, 3])
+    expect(pages.map((page) => page.sortOrder)).toEqual([0, 1, 2])
+    expect(pages[0].id).toBe(defaultDocumentPageId(document.id))
+    expect(pages[1]).toMatchObject({
+      text: 'Appended OCR page.',
+      sourcePageNumber: 3,
+      sourceFileName: 'scan-3.pdf',
+      sourceKind: 'pdf',
+    })
+    expect(pages[2]).toMatchObject({
+      text: 'Final appended page.',
+      sourcePageNumber: 4,
+    })
+    expect(state.sessions).toEqual([session])
+    expect(state.quizAttempts).toEqual([quizAttempt])
+    expect(state.coaching).toEqual(coaching)
+    expect(state.activeDocumentId).toBe(document.id)
+  })
 })
+
+function buildOcrPageInput(overrides: Partial<OcrPageInput> = {}): OcrPageInput {
+  return {
+    pageNumber: 1,
+    text: 'OCR page text.',
+    reviewStatus: 'reviewed',
+    sourcePageNumber: overrides.pageNumber ?? 1,
+    ocrConfidence: null,
+    ocrNotes: null,
+    uncertainSpans: [],
+    sourceFileName: null,
+    sourceKind: 'image',
+    ...overrides,
+  }
+}

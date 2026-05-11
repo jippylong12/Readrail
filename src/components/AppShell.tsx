@@ -36,7 +36,6 @@ export function AppShell({ activeRoute, activeDocument, onRouteChange, onReplayT
                 title={shortcut?.title}
                 type="button"
               >
-                <span aria-hidden="true">{route.icon}</span>
                 <span className="nav-tab-label">{route.label}</span>
                 {shortcut && (
                   <span aria-hidden="true" className="shortcut-hint">

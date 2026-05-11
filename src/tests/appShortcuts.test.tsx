@@ -64,10 +64,29 @@ afterEach(() => {
 })
 
 describe('app section shortcuts', () => {
+  it('keeps Import, OCR, and Saved as tabs inside the Library route', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    expect(screen.getByRole('button', { name: 'Library' }).classList.contains('active')).toBe(true)
+    expect(screen.getByRole('heading', { name: 'Reading documents' })).toBeTruthy()
+
+    await user.click(screen.getByRole('tab', { name: 'Import' }))
+    expect(screen.getByRole('heading', { name: 'Paste or text file' })).toBeTruthy()
+
+    await user.click(screen.getByRole('tab', { name: 'OCR' }))
+    expect(screen.getByRole('heading', { name: 'Photos or scanned PDFs' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Library' }).classList.contains('active')).toBe(true)
+
+    await user.click(screen.getByRole('tab', { name: 'Saved' }))
+    expect(screen.getByRole('heading', { name: 'Reading documents' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Library' }).classList.contains('active')).toBe(true)
+  })
+
   it('navigates primary sections with Command shortcuts', () => {
     render(<App />)
 
-    expect(screen.getByRole('heading', { name: 'Paste or text file' })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Reading documents' })).toBeTruthy()
 
     expect(dispatchSectionShortcut('r', 'meta').defaultPrevented).toBe(true)
     expect(screen.getByRole('heading', { name: activeDocument.title })).toBeTruthy()
@@ -79,7 +98,7 @@ describe('app section shortcuts', () => {
     expect(screen.getByRole('heading', { name: 'Privacy and defaults' })).toBeTruthy()
 
     expect(dispatchSectionShortcut('l', 'meta').defaultPrevented).toBe(true)
-    expect(screen.getByRole('heading', { name: 'Paste or text file' })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Reading documents' })).toBeTruthy()
   })
 
   it('navigates primary sections with Control shortcuts', () => {
@@ -95,13 +114,14 @@ describe('app section shortcuts', () => {
     expect(screen.getByRole('heading', { name: 'Privacy and defaults' })).toBeTruthy()
 
     expect(dispatchSectionShortcut('l', 'control').defaultPrevented).toBe(true)
-    expect(screen.getByRole('heading', { name: 'Paste or text file' })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Reading documents' })).toBeTruthy()
   })
 
   it('does not navigate or prevent defaults while editing fields', async () => {
     const user = userEvent.setup()
     render(<App />)
 
+    await user.click(screen.getByRole('tab', { name: 'Import' }))
     const titleInput = screen.getByLabelText('Title')
     await user.click(titleInput)
 

@@ -158,16 +158,6 @@ export function SettingsPanel({
           <h2>OCR and data</h2>
           <label className="toggle">
             <input
-              checked={settings.privacy.confirmRemoteOcrEachTime}
-              onChange={(event) =>
-                onSettingsChange({ privacy: { ...settings.privacy, confirmRemoteOcrEachTime: event.target.checked } })
-              }
-              type="checkbox"
-            />
-            Confirm before each remote OCR call
-          </label>
-          <label className="toggle">
-            <input
               checked={settings.privacy.retainSourceImages}
               onChange={(event) => onSettingsChange({ privacy: { ...settings.privacy, retainSourceImages: event.target.checked } })}
               type="checkbox"
