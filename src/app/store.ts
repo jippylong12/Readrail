@@ -7,6 +7,8 @@ import type {
   DocumentChapterRecord,
   DocumentPageRecord,
   DocumentRecord,
+  OcrJob,
+  OcrJobItem,
   OcrReviewStatus,
   OcrUncertainSpan,
   OnboardingState,
@@ -20,7 +22,7 @@ import type {
 import { calculateAdjustedWpm, calculateActualWpm } from '../lib/reading/pacing'
 import { cleanReadingText } from '../lib/text/cleanup'
 import { countWords, estimatePages } from '../lib/text/wordCount'
-import { saveDocumentToDatabase, saveSessionToDatabase } from '../lib/db/repository'
+import { saveDocumentToDatabase, saveOcrJobToDatabase, saveSessionToDatabase } from '../lib/db/repository'
 import {
   STRUCTURED_DOCUMENT_VERSION,
   createDefaultDocumentStructure,
@@ -75,6 +77,8 @@ type AppState = {
   documents: DocumentRecord[]
   documentChapters: DocumentChapterRecord[]
   documentPages: DocumentPageRecord[]
+  ocrJobs: OcrJob[]
+  ocrJobItems: OcrJobItem[]
   sessions: ReadingSession[]
   activeDocumentId: string | null
   settings: AppSettings
@@ -90,6 +94,7 @@ type AppState = {
     pages: OcrPageInput[],
     targetChapterId?: string | null,
   ) => DocumentRecord | null
+  saveOcrJob: (job: OcrJob, items: OcrJobItem[]) => void
   createChapter: (documentId: string, title?: string) => DocumentChapterRecord | null
   renameChapter: (chapterId: string, title: string) => void
   moveChapter: (documentId: string, chapterId: string, direction: -1 | 1) => void
@@ -224,6 +229,8 @@ export const useAppStore = create<AppState>()(
       documents: [],
       documentChapters: [],
       documentPages: [],
+      ocrJobs: [],
+      ocrJobItems: [],
       sessions: [],
       activeDocumentId: null,
       settings: defaultSettings,
@@ -377,6 +384,16 @@ export const useAppStore = create<AppState>()(
         }
 
         return changedDocument
+      },
+      saveOcrJob: (job, items) => {
+        set((state) => ({
+          ocrJobs: [job, ...state.ocrJobs.filter((candidate) => candidate.id !== job.id)],
+          ocrJobItems: [
+            ...state.ocrJobItems.filter((item) => item.jobId !== job.id),
+            ...items.sort((left, right) => left.orderIndex - right.orderIndex),
+          ],
+        }))
+        void saveOcrJobToDatabase(job, items)
       },
       createChapter: (documentId, title) => {
         const now = new Date().toISOString()
@@ -943,6 +960,8 @@ export const useAppStore = create<AppState>()(
           documents: [],
           documentChapters: [],
           documentPages: [],
+          ocrJobs: [],
+          ocrJobItems: [],
           sessions: [],
           activeDocumentId: null,
           onboarding: defaultOnboardingState,
@@ -954,7 +973,7 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: 'readrail-local-state',
-      version: 5,
+      version: 6,
       migrate: (persistedState: unknown, fromVersion: number) => {
         const state = persistedState as Record<string, unknown>
         const settings = state.settings as AppSettings | undefined
@@ -998,12 +1017,19 @@ export const useAppStore = create<AppState>()(
           state.documentChapters = structured.documentChapters
           state.documentPages = structured.documentPages
         }
+        // v5 -> v6: seed OCR job collections.
+        if (fromVersion < 6) {
+          state.ocrJobs = state.ocrJobs || []
+          state.ocrJobItems = state.ocrJobItems || []
+        }
         return state
       },
       partialize: (state) => ({
         documents: state.documents,
         documentChapters: state.documentChapters,
         documentPages: state.documentPages,
+        ocrJobs: state.ocrJobs,
+        ocrJobItems: state.ocrJobItems,
         sessions: state.sessions,
         activeDocumentId: state.activeDocumentId,
         settings: state.settings,

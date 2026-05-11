@@ -68,6 +68,7 @@ function App() {
   const createDocument = useAppStore((state) => state.createDocument)
   const createOcrDocument = useAppStore((state) => state.createOcrDocument)
   const appendOcrPagesToDocument = useAppStore((state) => state.appendOcrPagesToDocument)
+  const saveOcrJob = useAppStore((state) => state.saveOcrJob)
   const createChapter = useAppStore((state) => state.createChapter)
   const renameChapter = useAppStore((state) => state.renameChapter)
   const moveChapter = useAppStore((state) => state.moveChapter)
@@ -414,6 +415,7 @@ function App() {
               loadApiKey={() => loadGeminiApiKey('ocr')}
               onAppendPages={appendAndOpenOcrPages}
               onCreateDocument={createAndOpenOcrDocument}
+              onSaveOcrJob={saveOcrJob}
               preservePageBreaks={settings.ocr.preservePageBreaks}
               stripImageMetadataBeforeOcr={settings.privacy.stripImageMetadataBeforeOcr}
             />
@@ -462,6 +464,7 @@ function App() {
             navigate({ route: 'reader', documentId })
           }}
           onRenameChapter={renameChapter}
+          onSaveOcrJob={saveOcrJob}
           onUpdatePageMetadata={updatePageMetadata}
           pages={documentPages}
           preservePageBreaks={settings.ocr.preservePageBreaks}

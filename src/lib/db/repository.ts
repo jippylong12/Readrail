@@ -1,4 +1,11 @@
-import type { DocumentChapterRecord, DocumentPageRecord, DocumentRecord, ReadingSession } from '../../types/domain'
+import type {
+  DocumentChapterRecord,
+  DocumentPageRecord,
+  DocumentRecord,
+  OcrJob,
+  OcrJobItem,
+  ReadingSession,
+} from '../../types/domain'
 import { getDatabase } from './migrations'
 
 type StructuredDocumentRecords = {
@@ -145,4 +152,83 @@ export async function saveSessionToDatabase(session: ReadingSession): Promise<vo
       session.endedAt,
     ],
   )
+}
+
+export async function saveOcrJobToDatabase(job: OcrJob, items: OcrJobItem[]): Promise<void> {
+  const database = await getDatabase()
+  if (!database) {
+    return
+  }
+
+  await database.execute(
+    `INSERT INTO ocr_jobs (
+      id, document_id, target_chapter_id, status, model_id, input_file_count, prompt_version,
+      warnings_json, error_message, created_at, updated_at, completed_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+    ON CONFLICT(id) DO UPDATE SET
+      document_id = excluded.document_id,
+      target_chapter_id = excluded.target_chapter_id,
+      status = excluded.status,
+      input_file_count = excluded.input_file_count,
+      warnings_json = excluded.warnings_json,
+      error_message = excluded.error_message,
+      updated_at = excluded.updated_at,
+      completed_at = excluded.completed_at`,
+    [
+      job.id,
+      job.documentId,
+      job.targetChapterId,
+      job.status,
+      job.modelId,
+      job.inputFileCount,
+      job.promptVersion,
+      JSON.stringify(job.warnings),
+      job.errorMessage,
+      job.createdAt,
+      job.updatedAt,
+      job.completedAt,
+    ],
+  )
+
+  for (const item of items) {
+    await database.execute(
+      `INSERT INTO ocr_job_items (
+        id, job_id, order_index, source_file_name, source_file_type, source_file_size,
+        source_file_last_modified, source_page_number, title, status, ocr_text, pages_json,
+        warnings_json, failure_reason, created_at, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+      ON CONFLICT(id) DO UPDATE SET
+        order_index = excluded.order_index,
+        source_file_name = excluded.source_file_name,
+        source_file_type = excluded.source_file_type,
+        source_file_size = excluded.source_file_size,
+        source_file_last_modified = excluded.source_file_last_modified,
+        source_page_number = excluded.source_page_number,
+        title = excluded.title,
+        status = excluded.status,
+        ocr_text = excluded.ocr_text,
+        pages_json = excluded.pages_json,
+        warnings_json = excluded.warnings_json,
+        failure_reason = excluded.failure_reason,
+        updated_at = excluded.updated_at`,
+      [
+        item.id,
+        item.jobId,
+        item.orderIndex,
+        item.sourceFileName,
+        item.sourceFileType,
+        item.sourceFileSize,
+        item.sourceFileLastModified,
+        item.sourcePageNumber,
+        item.title,
+        item.status,
+        item.ocrText,
+        JSON.stringify(item.pages),
+        JSON.stringify(item.warnings),
+        item.failureReason,
+        item.createdAt,
+        item.updatedAt,
+      ],
+    )
+  }
 }

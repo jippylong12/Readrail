@@ -1,11 +1,19 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { runGeminiOcrFromFiles } from '../lib/ai/geminiOcr'
 import { stripImageMetadata } from '../lib/files/imageMetadata'
 import { cleanReadingText } from '../lib/text/cleanup'
 import { countWords } from '../lib/text/wordCount'
 import type { OcrPageInput } from '../app/store'
-import type { OcrPipelineProgress, OcrPipelineStage } from '../lib/ai/geminiOcr'
-import type { DocumentChapterRecord, DocumentRecord, OcrReviewStatus } from '../types/domain'
+import type { OcrPipelineProgress, OcrPipelineStage, OcrResultPage } from '../lib/ai/geminiOcr'
+import type {
+  DocumentChapterRecord,
+  DocumentRecord,
+  OcrJob,
+  OcrJobItem,
+  OcrJobItemPage,
+  OcrJobItemStatus,
+  OcrReviewStatus,
+} from '../types/domain'
 
 type OcrReviewProps = {
   hasKey: boolean
@@ -19,10 +27,7 @@ type OcrReviewProps = {
   loadApiKey: () => Promise<string | null>
   onCreateDocument: (title: string, pages: OcrPageInput[]) => void
   onAppendPages: (documentId: string, pages: OcrPageInput[], chapterId?: string | null) => void
-}
-
-type OcrPageDraft = OcrPageInput & {
-  id: string
+  onSaveOcrJob?: (job: OcrJob, items: OcrJobItem[]) => void
 }
 
 type OcrFileDraft = {
@@ -32,9 +37,21 @@ type OcrFileDraft = {
   sourcePageNumber: number | null
 }
 
+type OcrJobItemDraft = OcrJobItem & {
+  file: File
+}
+
+type OcrJobDraft = {
+  job: OcrJob
+  items: OcrJobItemDraft[]
+  titleGuess: string | null
+}
+
 type OcrStageState = OcrPipelineProgress['status'] | 'pending'
 
 const MAX_OCR_FILES = 25
+const OCR_PROMPT_VERSION = 'structured-import-v1'
+const OCR_MODEL_ID = 'gemini-3.1-flash-lite'
 
 const ocrProgressSteps: Array<{ stage: OcrPipelineStage; label: string }> = [
   { stage: 'ocr', label: 'OCR' },
@@ -60,10 +77,12 @@ export function OcrReview({
   loadApiKey,
   onCreateDocument,
   onAppendPages,
+  onSaveOcrJob,
 }: OcrReviewProps) {
   const [fileDrafts, setFileDrafts] = useState<OcrFileDraft[]>([])
+  const [jobDraft, setJobDraft] = useState<OcrJobDraft | null>(null)
+  const latestJobDraftRef = useRef<OcrJobDraft | null>(null)
   const [status, setStatus] = useState<'idle' | 'running' | 'review' | 'failed'>('idle')
-  const [pageDrafts, setPageDrafts] = useState<OcrPageDraft[]>([])
   const [title, setTitle] = useState('')
   const [appendDocumentId, setAppendDocumentId] = useState('')
   const [appendChapterId, setAppendChapterId] = useState(appendTargetChapterId ?? '')
@@ -71,6 +90,7 @@ export function OcrReview({
   const [error, setError] = useState('')
   const [progressMessage, setProgressMessage] = useState('')
   const [progressState, setProgressState] = useState<Record<OcrPipelineStage, OcrStageState>>(initialProgressState)
+  const replacementInputs = useRef<Record<string, HTMLInputElement | null>>({})
   const availableDocuments = documents.filter((document) => !document.archivedAt)
   const appendTargetDocument = appendTargetDocumentId
     ? availableDocuments.find((document) => document.id === appendTargetDocumentId) ?? null
@@ -87,19 +107,15 @@ export function OcrReview({
     appendTargetChapters.find((chapter) => chapter.id === selectedAppendChapterId) ??
     appendTargetChapters[appendTargetChapters.length - 1] ??
     null
-  const completedProgressSteps = ocrProgressSteps.filter(({ stage }) =>
-    ['done', 'failed'].includes(progressState[stage]),
-  ).length
-  const progressPercent =
-    status === 'review' ? 100 : Math.round((completedProgressSteps / ocrProgressSteps.length) * 100)
+  const jobItems = useMemo(() => jobDraft?.items ?? [], [jobDraft])
+  const pagesForSave = useMemo(() => buildReviewedPages(jobItems, preservePageBreaks), [jobItems, preservePageBreaks])
+  const hasBlockingItems = jobItems.some((item) => item.status === 'queued' || item.status === 'running' || item.status === 'failed')
+  const isReviewAvailable = Boolean(jobDraft) && (status === 'running' || status === 'review')
   const totalWords = useMemo(
-    () =>
-      pageDrafts.reduce(
-        (total, page) => total + countWords(cleanReadingText(page.text, { preservePageBreaks })),
-        0,
-      ),
-    [pageDrafts, preservePageBreaks],
+    () => pagesForSave.reduce((total, page) => total + countWords(cleanReadingText(page.text, { preservePageBreaks })), 0),
+    [pagesForSave, preservePageBreaks],
   )
+  const progressPercent = calculateProgressPercent(status, jobItems, progressState)
 
   function resetProgress(): void {
     setProgressMessage('')
@@ -114,6 +130,18 @@ export function OcrReview({
     }))
   }
 
+  function commitJob(nextJobDraftOrUpdater: OcrJobDraft | ((currentJobDraft: OcrJobDraft | null) => OcrJobDraft)): OcrJobDraft {
+    const nextJobDraft =
+      typeof nextJobDraftOrUpdater === 'function'
+        ? nextJobDraftOrUpdater(latestJobDraftRef.current)
+        : nextJobDraftOrUpdater
+    const savedItems = nextJobDraft.items.map(stripRuntimeFile)
+    latestJobDraftRef.current = nextJobDraft
+    setJobDraft(nextJobDraft)
+    onSaveOcrJob?.(nextJobDraft.job, savedItems)
+    return nextJobDraft
+  }
+
   async function startOcr(selectedDrafts = fileDrafts): Promise<void> {
     if (!selectedDrafts.length || !hasKey) {
       return
@@ -125,7 +153,6 @@ export function OcrReview({
     resetProgress()
     setProgressMessage(stripImageMetadataBeforeOcr ? 'Preparing images and removing metadata.' : 'Preparing OCR.')
     setFileDrafts(selectedDrafts)
-    setPageDrafts([])
 
     try {
       const apiKey = await loadApiKey()
@@ -133,40 +160,228 @@ export function OcrReview({
         throw new Error('Add a Gemini API key in Settings before running OCR.')
       }
 
-      const preparedFiles = await prepareFilesForOcr(selectedDrafts.map((draft) => draft.file), stripImageMetadataBeforeOcr)
-      const result = await runGeminiOcrFromFiles(apiKey, preparedFiles.files, { onProgress: updateProgress })
-      const selectedFiles = preparedFiles.files
-      setTitle(result.titleGuess ?? selectedFiles[0]?.name.replace(/\.[^.]+$/, '') ?? 'OCR import')
-      setWarnings([...preparedFiles.warnings, ...result.warnings])
-      setPageDrafts(
-        result.pages.map((page, index) => {
-          const fileDraft = selectedDrafts[index] ?? (selectedDrafts.length === 1 ? selectedDrafts[0] : null)
-          const sourceFile = fileDraft?.file ?? selectedFiles[index] ?? (selectedFiles.length === 1 ? selectedFiles[0] : null)
-          return {
-            id: `ocr-page-${page.pageNumber}-${index}`,
-            pageNumber: index + 1,
-            title: fileDraft?.title || null,
-            text: page.text,
-            reviewStatus: inferReviewStatus(page.uncertainSpans.length, page.confidence, page.notes),
-            sourcePageNumber:
-              page.sourcePageNumber ??
-              (selectedDrafts.length === result.pages.length ? fileDraft?.sourcePageNumber : null) ??
-              page.pageNumber,
-            ocrConfidence: page.confidence,
-            ocrNotes: page.notes,
-            uncertainSpans: page.uncertainSpans,
-            sourceFileName: page.sourceFileName ?? sourceFile?.name ?? null,
-            sourceKind: sourceFile ? inferSourceKind(sourceFile) : null,
-          }
-        }),
-      )
+      const initialJob = commitJob(createJobDraft(selectedDrafts, appendTargetDocumentId ?? null, selectedAppendChapterId))
+      let currentJob = initialJob
+      for (const item of initialJob.items.sort((left, right) => left.orderIndex - right.orderIndex)) {
+        currentJob = await processJobItem(currentJob, item.id, apiKey)
+      }
+
+      const finalizedJob = finalizeJobAfterProcessing(currentJob)
+      commitJob(finalizedJob)
+      setTitle((currentTitle) => currentTitle || inferDocumentTitle(finalizedJob, selectedDrafts))
+      setWarnings(finalizedJob.job.warnings)
       setAppendDocumentId(appendTargetDocumentId ?? availableDocuments[0]?.id ?? '')
       setAppendChapterId(selectedAppendChapterId ?? '')
       setProgressMessage('Ready for review.')
       setStatus('review')
     } catch (ocrError) {
-      setError(ocrError instanceof Error ? ocrError.message : 'OCR failed')
+      const message = formatErrorMessage(ocrError)
+      setError(message)
       setStatus('failed')
+      const currentJob = latestJobDraftRef.current
+      if (currentJob) {
+        commitJob({
+          ...currentJob,
+          job: {
+            ...currentJob.job,
+            status: 'failed',
+            errorMessage: message,
+            updatedAt: new Date().toISOString(),
+            completedAt: new Date().toISOString(),
+          },
+        })
+      }
+    }
+  }
+
+  async function retryJobItem(itemId: string, sourceJobDraft = jobDraft): Promise<void> {
+    if (!sourceJobDraft || !hasKey) {
+      return
+    }
+
+    setStatus('running')
+    setError('')
+    resetProgress()
+    setProgressMessage(stripImageMetadataBeforeOcr ? 'Preparing images and removing metadata.' : 'Preparing OCR.')
+
+    try {
+      const apiKey = await loadApiKey()
+      if (!apiKey) {
+        throw new Error('Add a Gemini API key in Settings before running OCR.')
+      }
+
+      const runningJob = commitJob({
+        ...sourceJobDraft,
+        job: {
+          ...sourceJobDraft.job,
+          status: 'running',
+          errorMessage: null,
+          completedAt: null,
+          updatedAt: new Date().toISOString(),
+        },
+      })
+      const retriedJob = await processJobItem(runningJob, itemId, apiKey)
+      const finalizedJob = finalizeJobAfterProcessing(retriedJob)
+      commitJob(finalizedJob)
+      setWarnings(finalizedJob.job.warnings)
+      setProgressMessage('Ready for review.')
+      setStatus('review')
+    } catch (retryError) {
+      setError(formatErrorMessage(retryError))
+      setStatus('review')
+    }
+  }
+
+  async function replaceJobItemFile(itemId: string, file: File): Promise<void> {
+    if (!jobDraft) {
+      return
+    }
+
+    const replacedAt = new Date().toISOString()
+    const replacedJob = commitJob({
+      ...jobDraft,
+      job: { ...jobDraft.job, status: 'review', errorMessage: null, completedAt: null, updatedAt: replacedAt },
+      items: jobDraft.items.map((item) =>
+        item.id === itemId
+          ? {
+              ...item,
+              file,
+              sourceFileName: file.name,
+              sourceFileType: file.type,
+              sourceFileSize: file.size,
+              sourceFileLastModified: file.lastModified,
+              status: 'queued',
+              ocrText: null,
+              pages: [],
+              warnings: [],
+              failureReason: null,
+              updatedAt: replacedAt,
+            }
+          : item,
+      ),
+    })
+    setJobDraft(replacedJob)
+    await retryJobItem(itemId, replacedJob)
+  }
+
+  function skipJobItem(itemId: string): void {
+    if (!jobDraft) {
+      return
+    }
+
+    const skippedAt = new Date().toISOString()
+    const skippedJob = commitJob((currentJob) => {
+      const baseJob = currentJob ?? jobDraft
+      return finalizeJobAfterProcessing({
+        ...baseJob,
+        items: baseJob.items.map((item) =>
+          item.id === itemId
+            ? {
+                ...item,
+                status: 'skipped',
+                pages: [],
+                ocrText: null,
+                updatedAt: skippedAt,
+              }
+            : item,
+        ),
+      })
+    })
+    setWarnings(skippedJob.job.warnings)
+  }
+
+  async function processJobItem(currentJob: OcrJobDraft, itemId: string, apiKey: string): Promise<OcrJobDraft> {
+    const startedAt = new Date().toISOString()
+    const runningJob = commitJob((latestJob) => {
+      const baseJob = latestJob ?? currentJob
+      return {
+        ...baseJob,
+        job: { ...baseJob.job, status: 'running', errorMessage: null, updatedAt: startedAt },
+        items: baseJob.items.map((item) =>
+          item.id === itemId
+            ? { ...item, status: 'running', failureReason: null, warnings: [], pages: [], ocrText: null, updatedAt: startedAt }
+            : item,
+        ),
+      }
+    })
+
+    resetProgress()
+    const activeItem = runningJob.items.find((item) => item.id === itemId)
+    if (!activeItem) {
+      return runningJob
+    }
+    const itemProgressPrefix = `Processing item ${activeItem.orderIndex + 1} of ${runningJob.items.length}`
+    setProgressMessage(`${itemProgressPrefix}.`)
+
+    try {
+      const preparedFiles = await prepareFilesForOcr([activeItem.file], stripImageMetadataBeforeOcr)
+      const result = await runGeminiOcrFromFiles(apiKey, preparedFiles.files, {
+        onProgress: (progress) =>
+          updateProgress({
+            ...progress,
+            message: `${itemProgressPrefix}: ${progress.message}`,
+          }),
+      })
+      const selectedFile = preparedFiles.files[0] ?? activeItem.file
+      const finishedAt = new Date().toISOString()
+      const pages = result.pages.map((page, pageIndex) =>
+        buildJobItemPage(page, activeItem, selectedFile, pageIndex, result.pages.length),
+      )
+      const itemWarnings = [...preparedFiles.warnings, ...result.warnings]
+
+      const reviewedJob = commitJob((latestJob) => {
+        const baseJob = latestJob ?? runningJob
+        return {
+          ...baseJob,
+          titleGuess: baseJob.titleGuess ?? result.titleGuess,
+          job: {
+            ...baseJob.job,
+            warnings: uniqueStrings([...baseJob.job.warnings, ...itemWarnings]),
+            updatedAt: finishedAt,
+          },
+          items: baseJob.items.map((item) =>
+            item.id === itemId
+              ? {
+                  ...item,
+                  status: 'review',
+                  pages,
+                  ocrText: pages.map((page) => page.text).join('\n\n\f\n\n'),
+                  warnings: itemWarnings,
+                  failureReason: null,
+                  updatedAt: finishedAt,
+                }
+              : item,
+          ),
+        }
+      })
+      setTitle((currentTitle) => currentTitle || result.titleGuess || inferDocumentTitle(reviewedJob, fileDrafts))
+      return reviewedJob
+    } catch (itemError) {
+      const failedAt = new Date().toISOString()
+      const failureReason = formatErrorMessage(itemError)
+      return commitJob((latestJob) => {
+        const baseJob = latestJob ?? runningJob
+        return {
+          ...baseJob,
+          job: {
+            ...baseJob.job,
+            warnings: uniqueStrings([...baseJob.job.warnings, `${activeItem.sourceFileName}: ${failureReason}`]),
+            updatedAt: failedAt,
+          },
+          items: baseJob.items.map((item) =>
+            item.id === itemId
+              ? {
+                  ...item,
+                  status: 'failed',
+                  failureReason,
+                  pages: [],
+                  ocrText: null,
+                  updatedAt: failedAt,
+                }
+              : item,
+          ),
+        }
+      })
     }
   }
 
@@ -181,15 +396,11 @@ export function OcrReview({
         sourcePageNumber: sourcePageStart + index,
       })),
     )
+    setJobDraft(null)
+    latestJobDraftRef.current = null
     setError('')
     setWarnings(selectedFiles.length > MAX_OCR_FILES ? [`Only the first ${MAX_OCR_FILES} files will be processed.`] : [])
     resetProgress()
-    setPageDrafts([])
-    if (!limitedFiles.length) {
-      setStatus('idle')
-      return
-    }
-
     setStatus('idle')
   }
 
@@ -212,23 +423,55 @@ export function OcrReview({
     })
   }
 
-  function updatePageDraft(pageId: string, updates: Partial<OcrPageDraft>): void {
-    setPageDrafts((pages) => pages.map((page) => (page.id === pageId ? { ...page, ...updates } : page)))
+  function updatePageDraft(pageId: string, updates: Partial<OcrJobItemPage>): void {
+    if (!jobDraft) {
+      return
+    }
+
+    const updatedAt = new Date().toISOString()
+    commitJob({
+      ...jobDraft,
+      job: { ...jobDraft.job, updatedAt },
+      items: jobDraft.items.map((item) => ({
+        ...item,
+        pages: item.pages.map((page) => (pageKey(item, page) === pageId ? { ...page, ...updates } : page)),
+        updatedAt: item.pages.some((page) => pageKey(item, page) === pageId) ? updatedAt : item.updatedAt,
+      })),
+    })
   }
 
-  function toReviewedPages(): OcrPageInput[] {
-    return pageDrafts.map((page) => ({
-      pageNumber: page.pageNumber,
-      title: page.title,
-      text: preservePageBreaks ? page.text : page.text.replace(/\f/g, '\n'),
-      reviewStatus: page.reviewStatus,
-      sourcePageNumber: page.sourcePageNumber,
-      ocrConfidence: page.ocrConfidence,
-      ocrNotes: page.ocrNotes?.trim() || null,
-      uncertainSpans: page.uncertainSpans,
-      sourceFileName: page.sourceFileName,
-      sourceKind: page.sourceKind,
-    }))
+  function handleCreateDocument(): void {
+    if (!jobDraft) {
+      return
+    }
+    markJobSaved()
+    onCreateDocument(title, pagesForSave)
+  }
+
+  function handleAppendPages(): void {
+    if (!jobDraft) {
+      return
+    }
+    markJobSaved()
+    onAppendPages(appendTargetDocumentId ?? appendDocumentId, pagesForSave, selectedAppendChapterId)
+  }
+
+  function markJobSaved(): void {
+    if (!jobDraft) {
+      return
+    }
+
+    const savedAt = new Date().toISOString()
+    commitJob({
+      ...jobDraft,
+      job: {
+        ...jobDraft.job,
+        status: 'saved',
+        errorMessage: null,
+        updatedAt: savedAt,
+        completedAt: savedAt,
+      },
+    })
   }
 
   return (
@@ -379,7 +622,7 @@ export function OcrReview({
         </div>
       )}
 
-      {status === 'review' ? (
+      {isReviewAvailable ? (
         <>
           {!appendTargetDocumentId && (
             <label className="field">
@@ -387,7 +630,7 @@ export function OcrReview({
               <input onChange={(event) => setTitle(event.target.value)} value={title} />
             </label>
           )}
-          {pageDrafts.length === 0 ? (
+          {jobItems.length === 0 ? (
             <div className="empty-state">
               <strong>No OCR pages returned</strong>
               <span>Try another file or edit the scan before running OCR again.</span>
@@ -401,90 +644,159 @@ export function OcrReview({
                   ))}
                 </div>
               )}
-              {pageDrafts.map((page, index) => {
-                const cleanedText = cleanReadingText(page.text, { preservePageBreaks })
-                const wordCount = countWords(cleanedText)
-                return (
-                  <article className="ocr-page-card" key={page.id}>
+              {jobItems
+                .sort((left, right) => left.orderIndex - right.orderIndex)
+                .map((item) => (
+                  <article className="ocr-job-item" key={item.id}>
                     <div className="ocr-page-header">
                       <div>
-                        <span className="eyebrow">Page {index + 1}</span>
-                        <h3>{page.sourceFileName ?? `Source page ${page.sourcePageNumber ?? index + 1}`}</h3>
+                        <span className="eyebrow">Item {item.orderIndex + 1}</span>
+                        <h3>{item.sourceFileName}</h3>
                       </div>
-                      <span className="status-pill">
-                        {wordCount.toLocaleString()} words
+                      <span className={`status-pill ${item.status === 'review' ? 'ok' : ''}`}>
+                        {formatItemStatus(item.status)}
                       </span>
                     </div>
                     <div className="ocr-page-meta">
-                      <span>Source page {page.sourcePageNumber ?? index + 1}</span>
-                      {page.sourceFileName && <span>{page.sourceFileName}</span>}
-                      {page.ocrConfidence !== null && <span>{Math.round(page.ocrConfidence * 100)}% confidence</span>}
-                      {page.uncertainSpans.length > 0 && (
-                        <span>{page.uncertainSpans.length} uncertain span(s)</span>
-                      )}
+                      <span>Source page {item.sourcePageNumber ?? item.orderIndex + 1}</span>
+                      {item.title && <span>{item.title}</span>}
+                      {item.warnings.map((warning) => (
+                        <span key={warning}>{warning}</span>
+                      ))}
                     </div>
-                    <label className="field">
-                      Review status
-                      <select
-                        onChange={(event) =>
-                          updatePageDraft(page.id, { reviewStatus: event.target.value as OcrReviewStatus })
-                        }
-                        value={page.reviewStatus}
-                      >
-                        <option value="reviewed">Reviewed</option>
-                        <option value="needs_attention">Needs attention</option>
-                        <option value="unreviewed">Unreviewed</option>
-                      </select>
-                    </label>
-                    <label className="field">
-                      Page title (optional)
-                      <input
-                        onChange={(event) => updatePageDraft(page.id, { title: event.target.value })}
-                        placeholder="Shown in organizer"
-                        value={page.title ?? ''}
-                      />
-                    </label>
-                    <label className="field">
-                      Notes
-                      <input
-                        onChange={(event) => updatePageDraft(page.id, { ocrNotes: event.target.value })}
-                        placeholder="OCR notes or review notes"
-                        value={page.ocrNotes ?? ''}
-                      />
-                    </label>
-                    <label className="field">
-                      Source page number
-                      <input
-                        inputMode="numeric"
-                        onChange={(event) =>
-                          updatePageDraft(page.id, { sourcePageNumber: normalizeSourcePageNumber(event.target.value) })
-                        }
-                        placeholder="Optional"
-                        type="text"
-                        value={page.sourcePageNumber ?? ''}
-                      />
-                    </label>
-                    <label className="field">
-                      Page text
-                      <textarea
-                        className="ocr-page-textarea"
-                        onChange={(event) => updatePageDraft(page.id, { text: event.target.value })}
-                        value={page.text}
-                      />
-                    </label>
+
+                    {item.status === 'failed' && (
+                      <div className="ocr-warning-list" role="alert">
+                        <span>{item.failureReason ?? 'OCR failed for this item.'}</span>
+                        <div className="button-row">
+                          <button className="secondary-button" onClick={() => void retryJobItem(item.id)} type="button">
+                            Retry
+                          </button>
+                          <button className="ghost-button" onClick={() => skipJobItem(item.id)} type="button">
+                            Skip
+                          </button>
+                          <button
+                            className="ghost-button"
+                            onClick={() => replacementInputs.current[item.id]?.click()}
+                            type="button"
+                          >
+                            Replace file
+                          </button>
+                          <input
+                            accept="image/*,application/pdf"
+                            aria-label={`Replacement file for ${item.sourceFileName}`}
+                            className="visually-hidden"
+                            onChange={(event) => {
+                              const replacement = event.target.files?.[0]
+                              event.target.value = ''
+                              if (replacement) {
+                                void replaceJobItemFile(item.id, replacement)
+                              }
+                            }}
+                            ref={(element) => {
+                              replacementInputs.current[item.id] = element
+                            }}
+                            type="file"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {item.status === 'skipped' && (
+                      <div className="empty-state">
+                        <strong>Skipped</strong>
+                        <span>This item will not be included when pages are saved.</span>
+                      </div>
+                    )}
+
+                    {item.pages.map((page, pageIndex) => {
+                      const cleanedText = cleanReadingText(page.text, { preservePageBreaks })
+                      const wordCount = countWords(cleanedText)
+                      const pageId = pageKey(item, page)
+                      return (
+                        <article className="ocr-page-card" key={pageId}>
+                          <div className="ocr-page-header">
+                            <div>
+                              <span className="eyebrow">Page {page.pageNumber}</span>
+                              <h3>{page.sourceFileName ?? `Source page ${page.sourcePageNumber ?? pageIndex + 1}`}</h3>
+                            </div>
+                            <span className="status-pill">{wordCount.toLocaleString()} words</span>
+                          </div>
+                          <div className="ocr-page-meta">
+                            <span>Source page {page.sourcePageNumber ?? pageIndex + 1}</span>
+                            {page.sourceFileName && <span>{page.sourceFileName}</span>}
+                            {page.ocrConfidence !== null && <span>{Math.round(page.ocrConfidence * 100)}% confidence</span>}
+                            {page.uncertainSpans.length > 0 && (
+                              <span>{page.uncertainSpans.length} uncertain span(s)</span>
+                            )}
+                          </div>
+                          <label className="field">
+                            Review status
+                            <select
+                              onChange={(event) =>
+                                updatePageDraft(pageId, { reviewStatus: event.target.value as OcrReviewStatus })
+                              }
+                              value={page.reviewStatus}
+                            >
+                              <option value="reviewed">Reviewed</option>
+                              <option value="needs_attention">Needs attention</option>
+                              <option value="unreviewed">Unreviewed</option>
+                            </select>
+                          </label>
+                          <label className="field">
+                            Page title (optional)
+                            <input
+                              onChange={(event) => updatePageDraft(pageId, { title: event.target.value })}
+                              placeholder="Shown in organizer"
+                              value={page.title ?? ''}
+                            />
+                          </label>
+                          <label className="field">
+                            Notes
+                            <input
+                              onChange={(event) => updatePageDraft(pageId, { ocrNotes: event.target.value })}
+                              placeholder="OCR notes or review notes"
+                              value={page.ocrNotes ?? ''}
+                            />
+                          </label>
+                          <label className="field">
+                            Source page number
+                            <input
+                              inputMode="numeric"
+                              onChange={(event) =>
+                                updatePageDraft(pageId, { sourcePageNumber: normalizeSourcePageNumber(event.target.value) })
+                              }
+                              placeholder="Optional"
+                              type="text"
+                              value={page.sourcePageNumber ?? ''}
+                            />
+                          </label>
+                          <label className="field">
+                            Page text
+                            <textarea
+                              className="ocr-page-textarea"
+                              onChange={(event) => updatePageDraft(pageId, { text: event.target.value })}
+                              value={page.text}
+                            />
+                          </label>
+                        </article>
+                      )
+                    })}
                   </article>
-                )
-              })}
+                ))}
             </div>
           )}
           <div className="ocr-save-actions">
-            <span>{totalWords.toLocaleString()} total words across {pageDrafts.length} page(s)</span>
+            <span>
+              {totalWords.toLocaleString()} total words across {pagesForSave.length} page(s)
+              {hasBlockingItems ? ' - finish or resolve all items before saving' : ''}
+            </span>
             <div className="button-row">
               {!appendTargetDocumentId && (
                 <button
                   className="primary-button"
-                  disabled={totalWords === 0}
-                  onClick={() => onCreateDocument(title, toReviewedPages())}
+                  disabled={totalWords === 0 || hasBlockingItems}
+                  onClick={handleCreateDocument}
                   type="button"
                 >
                   Create document from pages
@@ -517,10 +829,8 @@ export function OcrReview({
               )}
               <button
                 className={appendTargetDocumentId ? 'primary-button' : 'secondary-button'}
-                disabled={totalWords === 0 || !(appendTargetDocumentId ?? appendDocumentId)}
-                onClick={() =>
-                  onAppendPages(appendTargetDocumentId ?? appendDocumentId, toReviewedPages(), selectedAppendChapterId)
-                }
+                disabled={totalWords === 0 || hasBlockingItems || !(appendTargetDocumentId ?? appendDocumentId)}
+                onClick={handleAppendPages}
                 type="button"
               >
                 {appendTargetDocumentId ? 'Add reviewed pages' : 'Append pages'}
@@ -546,6 +856,161 @@ export function OcrReview({
   )
 }
 
+function createJobDraft(
+  fileDrafts: OcrFileDraft[],
+  documentId: string | null,
+  targetChapterId: string | null,
+): OcrJobDraft {
+  const now = new Date().toISOString()
+  const jobId = crypto.randomUUID()
+  return {
+    job: {
+      id: jobId,
+      documentId,
+      targetChapterId,
+      status: 'queued',
+      modelId: OCR_MODEL_ID,
+      inputFileCount: fileDrafts.length,
+      promptVersion: OCR_PROMPT_VERSION,
+      warnings: [],
+      errorMessage: null,
+      createdAt: now,
+      updatedAt: now,
+      completedAt: null,
+    },
+    titleGuess: null,
+    items: fileDrafts.map((draft, index) => ({
+      id: crypto.randomUUID(),
+      jobId,
+      orderIndex: index,
+      sourceFileName: draft.file.name,
+      sourceFileType: draft.file.type,
+      sourceFileSize: draft.file.size,
+      sourceFileLastModified: draft.file.lastModified,
+      sourcePageNumber: draft.sourcePageNumber,
+      title: draft.title.trim() || null,
+      status: 'queued',
+      ocrText: null,
+      pages: [],
+      warnings: [],
+      failureReason: null,
+      createdAt: now,
+      updatedAt: now,
+      file: draft.file,
+    })),
+  }
+}
+
+function finalizeJobAfterProcessing(jobDraft: OcrJobDraft): OcrJobDraft {
+  const now = new Date().toISOString()
+  const hasRunningItems = jobDraft.items.some((item) => item.status === 'queued' || item.status === 'running')
+  const hasReviewItems = jobDraft.items.some((item) => item.status === 'review')
+  const hasFailedItems = jobDraft.items.some((item) => item.status === 'failed')
+  const status: OcrJob['status'] = hasRunningItems ? 'running' : hasReviewItems || hasFailedItems ? 'review' : 'failed'
+
+  return {
+    ...jobDraft,
+    job: {
+      ...jobDraft.job,
+      status,
+      errorMessage: hasReviewItems || hasFailedItems ? null : 'No OCR pages returned.',
+      updatedAt: now,
+      completedAt: hasRunningItems ? null : now,
+    },
+  }
+}
+
+function buildJobItemPage(
+  page: OcrResultPage,
+  item: OcrJobItemDraft,
+  sourceFile: File,
+  pageIndex: number,
+  itemPageCount: number,
+): OcrJobItemPage {
+  return {
+    pageNumber: pageIndex + 1,
+    title: itemPageCount === 1 ? item.title : item.title ? `${item.title} ${pageIndex + 1}` : null,
+    text: page.text,
+    reviewStatus: inferReviewStatus(page.uncertainSpans.length, page.confidence, page.notes),
+    sourcePageNumber:
+      page.sourcePageNumber ??
+      (itemPageCount === 1 && item.sourcePageNumber !== null ? item.sourcePageNumber : null) ??
+      page.pageNumber,
+    ocrConfidence: page.confidence,
+    ocrNotes: page.notes,
+    uncertainSpans: page.uncertainSpans,
+    sourceFileName: page.sourceFileName ?? item.sourceFileName,
+    sourceKind: inferSourceKind(sourceFile),
+  }
+}
+
+function buildReviewedPages(items: OcrJobItemDraft[], preservePageBreaks: boolean): OcrPageInput[] {
+  let nextPageNumber = 1
+  return items
+    .filter((item) => item.status === 'review')
+    .sort((left, right) => left.orderIndex - right.orderIndex)
+    .flatMap((item) =>
+      item.pages.map((page) => {
+        const reviewedPage: OcrPageInput = {
+          pageNumber: nextPageNumber,
+          title: page.title,
+          text: preservePageBreaks ? page.text : page.text.replace(/\f/g, '\n'),
+          reviewStatus: page.reviewStatus,
+          sourcePageNumber: page.sourcePageNumber,
+          ocrConfidence: page.ocrConfidence,
+          ocrNotes: page.ocrNotes?.trim() || null,
+          uncertainSpans: page.uncertainSpans,
+          sourceFileName: page.sourceFileName,
+          sourceKind: page.sourceKind,
+        }
+        nextPageNumber += 1
+        return reviewedPage
+      }),
+    )
+}
+
+function calculateProgressPercent(
+  status: 'idle' | 'running' | 'review' | 'failed',
+  items: OcrJobItemDraft[],
+  progressState: Record<OcrPipelineStage, OcrStageState>,
+): number {
+  if (status === 'review') {
+    return 100
+  }
+  if (!items.length) {
+    return 0
+  }
+
+  const completedItems = items.filter((item) => item.status === 'review' || item.status === 'failed' || item.status === 'skipped').length
+  const runningItem = items.some((item) => item.status === 'running') ? 1 : 0
+  const completedStages = ocrProgressSteps.filter(({ stage }) => ['done', 'failed'].includes(progressState[stage])).length
+  const runningProgress = runningItem ? completedStages / ocrProgressSteps.length : 0
+  return Math.round(((completedItems + runningProgress) / items.length) * 100)
+}
+
+function inferDocumentTitle(jobDraft: OcrJobDraft, fallbackDrafts: OcrFileDraft[]): string {
+  if (jobDraft.titleGuess) {
+    return jobDraft.titleGuess
+  }
+
+  const firstReviewItem = jobDraft.items.find((item) => item.status === 'review')
+  return firstReviewItem?.sourceFileName.replace(/\.[^.]+$/, '') ?? fallbackDrafts[0]?.file.name.replace(/\.[^.]+$/, '') ?? 'OCR import'
+}
+
+function pageKey(item: OcrJobItem, page: OcrJobItemPage): string {
+  return `${item.id}:page:${page.pageNumber}`
+}
+
+function stripRuntimeFile(item: OcrJobItemDraft): OcrJobItem {
+  const serializableItem = { ...item } as Partial<OcrJobItemDraft>
+  delete serializableItem.file
+  return serializableItem as OcrJobItem
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return Array.from(new Set(values.filter(Boolean)))
+}
+
 function formatStageStatus(status: OcrStageState): string {
   if (status === 'done') {
     return 'done'
@@ -558,6 +1023,21 @@ function formatStageStatus(status: OcrStageState): string {
   }
 
   return 'waiting'
+}
+
+function formatItemStatus(status: OcrJobItemStatus): string {
+  switch (status) {
+    case 'queued':
+      return 'Queued'
+    case 'running':
+      return 'Running'
+    case 'review':
+      return 'Ready'
+    case 'failed':
+      return 'Failed'
+    case 'skipped':
+      return 'Skipped'
+  }
 }
 
 function normalizeSourcePageNumber(value: string): number | null {
@@ -607,4 +1087,8 @@ function inferSourceKind(file: File): OcrPageInput['sourceKind'] {
   }
 
   return null
+}
+
+function formatErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'OCR failed'
 }

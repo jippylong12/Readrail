@@ -9,7 +9,7 @@ import {
   getOrderedChapterPages,
   getOrderedDocumentPages,
 } from '../app/structuredDocuments'
-import type { DocumentChapterRecord, DocumentPageRecord, DocumentRecord } from '../types/domain'
+import type { DocumentChapterRecord, DocumentPageRecord, DocumentRecord, OcrJob, OcrJobItem } from '../types/domain'
 
 type LegacyDocumentRecord = Omit<DocumentRecord, 'structureVersion'>
 
@@ -169,6 +169,8 @@ describe('structured document store behavior', () => {
       documents: [],
       documentChapters: [],
       documentPages: [],
+      ocrJobs: [],
+      ocrJobItems: [],
       sessions: [],
       activeDocumentId: null,
     })
@@ -520,6 +522,82 @@ describe('structured document store behavior', () => {
       text: 'First introduction page.',
     })
   })
+
+  it('stores OCR import jobs with ordered item metadata, warnings, and target structure', () => {
+    const document = buildStructuredDocumentFixture()
+    const chapter = useAppStore.getState().documentChapters.find((candidate) => candidate.documentId === document.id)!
+    const job: OcrJob = {
+      id: 'ocr-job-1',
+      documentId: document.id,
+      targetChapterId: chapter.id,
+      status: 'review',
+      modelId: 'gemini-3.1-flash-lite',
+      inputFileCount: 2,
+      promptVersion: 'structured-import-v1',
+      warnings: ['bad-page.png: OCR failed'],
+      errorMessage: null,
+      createdAt: '2026-05-11T12:00:00.000Z',
+      updatedAt: '2026-05-11T12:00:05.000Z',
+      completedAt: '2026-05-11T12:00:05.000Z',
+    }
+    const items: OcrJobItem[] = [
+      buildOcrJobItem({
+        id: 'ocr-item-2',
+        jobId: job.id,
+        orderIndex: 1,
+        sourceFileName: 'bad-page.png',
+        sourcePageNumber: 158,
+        status: 'failed',
+        failureReason: 'OCR failed',
+      }),
+      buildOcrJobItem({
+        id: 'ocr-item-1',
+        jobId: job.id,
+        orderIndex: 0,
+        sourceFileName: 'good-page.png',
+        sourcePageNumber: 157,
+        pages: [
+          {
+            pageNumber: 1,
+            sourcePageNumber: 157,
+            title: 'Opening',
+            text: 'Recovered OCR text.',
+            reviewStatus: 'reviewed',
+            ocrConfidence: 0.9,
+            ocrNotes: null,
+            uncertainSpans: [],
+            sourceFileName: 'good-page.png',
+            sourceKind: 'image',
+          },
+        ],
+        ocrText: 'Recovered OCR text.',
+      }),
+    ]
+
+    useAppStore.getState().saveOcrJob(job, items)
+
+    const state = useAppStore.getState()
+    expect(state.ocrJobs[0]).toMatchObject({
+      id: 'ocr-job-1',
+      documentId: document.id,
+      targetChapterId: chapter.id,
+      status: 'review',
+      warnings: ['bad-page.png: OCR failed'],
+    })
+    expect(state.ocrJobItems.filter((item) => item.jobId === job.id).map((item) => item.orderIndex)).toEqual([0, 1])
+    expect(state.ocrJobItems[0]).toMatchObject({
+      sourceFileName: 'good-page.png',
+      sourcePageNumber: 157,
+      status: 'review',
+      ocrText: 'Recovered OCR text.',
+    })
+    expect(state.ocrJobItems[1]).toMatchObject({
+      sourceFileName: 'bad-page.png',
+      sourcePageNumber: 158,
+      status: 'failed',
+      failureReason: 'OCR failed',
+    })
+  })
 })
 
 function buildOcrPageInput(overrides: Partial<OcrPageInput> = {}): OcrPageInput {
@@ -606,6 +684,28 @@ function buildStructuredDocumentFixture(): DocumentRecord {
   })
 
   return document
+}
+
+function buildOcrJobItem(overrides: Partial<OcrJobItem> = {}): OcrJobItem {
+  return {
+    id: 'ocr-item-1',
+    jobId: 'ocr-job-1',
+    orderIndex: 0,
+    sourceFileName: 'scan.png',
+    sourceFileType: 'image/png',
+    sourceFileSize: 12,
+    sourceFileLastModified: 1_779_000_000_000,
+    sourcePageNumber: 1,
+    title: null,
+    status: 'review',
+    ocrText: null,
+    pages: [],
+    warnings: [],
+    failureReason: null,
+    createdAt: '2026-05-11T12:00:00.000Z',
+    updatedAt: '2026-05-11T12:00:00.000Z',
+    ...overrides,
+  }
 }
 
 function buildChapter(overrides: Partial<DocumentChapterRecord> = {}): DocumentChapterRecord {

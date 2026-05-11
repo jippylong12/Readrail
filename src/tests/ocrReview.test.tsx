@@ -141,7 +141,7 @@ describe('OcrReview', () => {
     expect(screen.getByText('Page 2')).toBeTruthy()
     expect(screen.getByText('62% confidence')).toBeTruthy()
     expect(screen.getByText('1 uncertain span(s)')).toBeTruthy()
-    expect(screen.getByText('Cleaner pass removed a repeated header.')).toBeTruthy()
+    expect(screen.getAllByText('Cleaner pass removed a repeated header.').length).toBeGreaterThan(0)
     expect(screen.getByDisplayValue('Low light')).toBeTruthy()
 
     const pageTextareas = screen.getAllByLabelText('Page text')
@@ -207,7 +207,7 @@ describe('OcrReview', () => {
     await user.click(screen.getByRole('button', { name: 'Process 1 page(s)' }))
 
     await waitFor(() =>
-      expect(screen.getByText('Removing page numbers, headers, footers, and scan artifacts.')).toBeTruthy(),
+      expect(screen.getByText('Processing item 1 of 1: Removing page numbers, headers, footers, and scan artifacts.')).toBeTruthy(),
     )
     expect(screen.getByRole('progressbar').getAttribute('aria-valuenow')).toBe('33')
     expect(screen.getByText('OCR: done')).toBeTruthy()
@@ -263,30 +263,37 @@ describe('OcrReview', () => {
   it('processes files in the user-defined order with staged source metadata', async () => {
     const user = userEvent.setup()
     const onCreateDocument = vi.fn()
-    runGeminiOcrFromFilesMock.mockResolvedValue({
-      titleGuess: 'Ordered pages',
-      pages: [
-        {
-          pageNumber: 1,
-          sourcePageNumber: null,
-          text: 'Second file text.',
-          confidence: null,
-          notes: null,
-          sourceFileName: null,
-          uncertainSpans: [],
-        },
-        {
-          pageNumber: 2,
-          sourcePageNumber: null,
-          text: 'First file text.',
-          confidence: null,
-          notes: null,
-          sourceFileName: null,
-          uncertainSpans: [],
-        },
-      ],
-      warnings: [],
-    })
+    runGeminiOcrFromFilesMock
+      .mockResolvedValueOnce({
+        titleGuess: 'Ordered pages',
+        pages: [
+          {
+            pageNumber: 1,
+            sourcePageNumber: null,
+            text: 'Second file text.',
+            confidence: null,
+            notes: null,
+            sourceFileName: null,
+            uncertainSpans: [],
+          },
+        ],
+        warnings: [],
+      })
+      .mockResolvedValueOnce({
+        titleGuess: null,
+        pages: [
+          {
+            pageNumber: 1,
+            sourcePageNumber: null,
+            text: 'First file text.',
+            confidence: null,
+            notes: null,
+            sourceFileName: null,
+            uncertainSpans: [],
+          },
+        ],
+        warnings: [],
+      })
     const { container } = render(
       <OcrReview
         documents={[]}
@@ -311,7 +318,7 @@ describe('OcrReview', () => {
     await user.click(screen.getByRole('button', { name: 'Process 2 page(s)' }))
 
     await waitFor(() => expect(screen.getByDisplayValue('Ordered pages')).toBeTruthy())
-    expect(runGeminiOcrFromFilesMock.mock.calls[0][1].map((file) => file.name)).toEqual(['page-b.png', 'page-a.png'])
+    expect(runGeminiOcrFromFilesMock.mock.calls.map((call) => call[1][0]?.name)).toEqual(['page-b.png', 'page-a.png'])
 
     await user.click(screen.getByRole('button', { name: 'Create document from pages' }))
     expect(onCreateDocument).toHaveBeenCalledWith('Ordered pages', [
@@ -325,6 +332,87 @@ describe('OcrReview', () => {
         sourcePageNumber: 10,
         text: 'First file text.',
       }),
+    ])
+  })
+
+  it('allows reviewing completed items while later OCR items keep running', async () => {
+    const user = userEvent.setup()
+    const onCreateDocument = vi.fn()
+    let resolveSecondOcr!: (value: OcrResult) => void
+    const secondOcrPromise = new Promise<OcrResult>((resolve) => {
+      resolveSecondOcr = resolve
+    })
+    runGeminiOcrFromFilesMock
+      .mockResolvedValueOnce({
+        titleGuess: 'Background import',
+        pages: [
+          {
+            pageNumber: 1,
+            sourcePageNumber: null,
+            text: 'First item ready.',
+            confidence: null,
+            notes: null,
+            sourceFileName: null,
+            uncertainSpans: [],
+          },
+        ],
+        warnings: [],
+      })
+      .mockImplementationOnce(async (_apiKey, _files, options) => {
+        options?.onProgress?.({ stage: 'ocr', status: 'running', message: 'Reading scans with Gemini OCR.' })
+        return secondOcrPromise
+      })
+    const { container } = render(
+      <OcrReview
+        documents={[]}
+        hasKey
+        loadApiKey={vi.fn().mockResolvedValue('browser-key')}
+        onAppendPages={vi.fn()}
+        onCreateDocument={onCreateDocument}
+        preservePageBreaks
+        stripImageMetadataBeforeOcr={false}
+      />,
+    )
+
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]')
+    await user.upload(input!, [
+      new File(['first'], 'first-page.png', { type: 'image/png' }),
+      new File(['second'], 'second-page.png', { type: 'image/png' }),
+    ])
+    await user.click(screen.getByRole('button', { name: 'Process 2 page(s)' }))
+
+    await waitFor(() => expect(screen.getByDisplayValue('First item ready.')).toBeTruthy())
+    expect(screen.getByText('Processing item 2 of 2: Reading scans with Gemini OCR.')).toBeTruthy()
+    expect(screen.getByText('Running')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Create document from pages' })).toHaveProperty('disabled', true)
+
+    await user.clear(screen.getByDisplayValue('First item ready.'))
+    await user.type(screen.getByLabelText('Page text'), 'Edited while second runs.')
+
+    resolveSecondOcr({
+      titleGuess: null,
+      pages: [
+        {
+          pageNumber: 1,
+          sourcePageNumber: null,
+          text: 'Second item finished.',
+          confidence: null,
+          notes: null,
+          sourceFileName: null,
+          uncertainSpans: [],
+        },
+      ],
+      warnings: [],
+    })
+
+    await waitFor(() => expect(screen.getByDisplayValue('Second item finished.')).toBeTruthy())
+    expect(screen.getByDisplayValue('Edited while second runs.')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Create document from pages' })).toHaveProperty('disabled', false)
+
+    await user.click(screen.getByRole('button', { name: 'Create document from pages' }))
+    expect(onCreateDocument).toHaveBeenCalledWith('Background import', [
+      expect.objectContaining({ sourceFileName: 'first-page.png', text: 'Edited while second runs.' }),
+      expect.objectContaining({ sourceFileName: 'second-page.png', text: 'Second item finished.' }),
     ])
   })
 
@@ -370,6 +458,216 @@ describe('OcrReview', () => {
     await waitFor(() => expect(screen.getByDisplayValue('Metadata safe scan')).toBeTruthy())
     expect(stripImageMetadataMock.mock.calls[0][0]).toMatchObject({ name: 'scan.jpg' })
     expect(runGeminiOcrFromFilesMock.mock.calls[0][1]).toEqual([strippedFile])
+  })
+
+  it('keeps successful OCR items when another file fails and allows skipping the failed item', async () => {
+    const user = userEvent.setup()
+    const onCreateDocument = vi.fn()
+    const onSaveOcrJob = vi.fn()
+    runGeminiOcrFromFilesMock
+      .mockResolvedValueOnce({
+        titleGuess: 'Partial import',
+        pages: [
+          {
+            pageNumber: 1,
+            sourcePageNumber: null,
+            text: 'Successful page text.',
+            confidence: null,
+            notes: null,
+            sourceFileName: null,
+            uncertainSpans: [],
+          },
+        ],
+        warnings: [],
+      })
+      .mockRejectedValueOnce(new Error('Gemini could not read the scan.'))
+    const { container } = render(
+      <OcrReview
+        documents={[]}
+        hasKey
+        loadApiKey={vi.fn().mockResolvedValue('browser-key')}
+        onAppendPages={vi.fn()}
+        onCreateDocument={onCreateDocument}
+        onSaveOcrJob={onSaveOcrJob}
+        preservePageBreaks
+        stripImageMetadataBeforeOcr={false}
+      />,
+    )
+
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]')
+    await user.upload(input!, [
+      new File(['good'], 'good-page.png', { type: 'image/png' }),
+      new File(['bad'], 'bad-page.png', { type: 'image/png' }),
+    ])
+    await user.click(screen.getByRole('button', { name: 'Process 2 page(s)' }))
+
+    await waitFor(() => expect(screen.getByText('Successful page text.')).toBeTruthy())
+    expect(screen.getByText('Gemini could not read the scan.')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Skip' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Replace file' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Create document from pages' })).toHaveProperty('disabled', true)
+
+    await user.click(screen.getByRole('button', { name: 'Skip' }))
+    await user.click(screen.getByRole('button', { name: 'Create document from pages' }))
+
+    expect(onCreateDocument).toHaveBeenCalledWith('Partial import', [
+      expect.objectContaining({
+        sourceFileName: 'good-page.png',
+        sourcePageNumber: 1,
+        text: 'Successful page text.',
+      }),
+    ])
+    const lastSavedJob = onSaveOcrJob.mock.calls.at(-1)
+    expect(lastSavedJob?.[0]).toMatchObject({ status: 'saved', inputFileCount: 2 })
+    expect(lastSavedJob?.[1].map((item: { status: string }) => item.status)).toEqual(['review', 'skipped'])
+  })
+
+  it('retries only the failed OCR item without losing successful pages', async () => {
+    const user = userEvent.setup()
+    const onCreateDocument = vi.fn()
+    runGeminiOcrFromFilesMock
+      .mockResolvedValueOnce({
+        titleGuess: 'Retry import',
+        pages: [
+          {
+            pageNumber: 1,
+            sourcePageNumber: null,
+            text: 'Already successful.',
+            confidence: null,
+            notes: null,
+            sourceFileName: null,
+            uncertainSpans: [],
+          },
+        ],
+        warnings: [],
+      })
+      .mockRejectedValueOnce(new Error('Temporary OCR failure.'))
+      .mockResolvedValueOnce({
+        titleGuess: null,
+        pages: [
+          {
+            pageNumber: 1,
+            sourcePageNumber: null,
+            text: 'Recovered page.',
+            confidence: null,
+            notes: null,
+            sourceFileName: null,
+            uncertainSpans: [],
+          },
+        ],
+        warnings: [],
+      })
+    const { container } = render(
+      <OcrReview
+        documents={[]}
+        hasKey
+        loadApiKey={vi.fn().mockResolvedValue('browser-key')}
+        onAppendPages={vi.fn()}
+        onCreateDocument={onCreateDocument}
+        preservePageBreaks
+        stripImageMetadataBeforeOcr={false}
+      />,
+    )
+
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]')
+    await user.upload(input!, [
+      new File(['good'], 'good-page.png', { type: 'image/png' }),
+      new File(['bad'], 'bad-page.png', { type: 'image/png' }),
+    ])
+    await user.click(screen.getByRole('button', { name: 'Process 2 page(s)' }))
+
+    await waitFor(() => expect(screen.getByText('Temporary OCR failure.')).toBeTruthy())
+    await user.click(screen.getByRole('button', { name: 'Retry' }))
+
+    await waitFor(() => expect(screen.getByText('Recovered page.')).toBeTruthy())
+    expect(screen.getByText('Already successful.')).toBeTruthy()
+    expect(runGeminiOcrFromFilesMock.mock.calls.map((call) => call[1][0]?.name)).toEqual([
+      'good-page.png',
+      'bad-page.png',
+      'bad-page.png',
+    ])
+
+    await user.click(screen.getByRole('button', { name: 'Create document from pages' }))
+    expect(onCreateDocument).toHaveBeenCalledWith('Retry import', [
+      expect.objectContaining({ sourceFileName: 'good-page.png', text: 'Already successful.' }),
+      expect.objectContaining({ sourceFileName: 'bad-page.png', text: 'Recovered page.' }),
+    ])
+  })
+
+  it('replaces only a failed OCR item and keeps successful item state', async () => {
+    const user = userEvent.setup()
+    const onCreateDocument = vi.fn()
+    runGeminiOcrFromFilesMock
+      .mockResolvedValueOnce({
+        titleGuess: 'Replace import',
+        pages: [
+          {
+            pageNumber: 1,
+            sourcePageNumber: null,
+            text: 'Kept page text.',
+            confidence: null,
+            notes: null,
+            sourceFileName: null,
+            uncertainSpans: [],
+          },
+        ],
+        warnings: [],
+      })
+      .mockRejectedValueOnce(new Error('Unreadable original.'))
+      .mockResolvedValueOnce({
+        titleGuess: null,
+        pages: [
+          {
+            pageNumber: 1,
+            sourcePageNumber: null,
+            text: 'Replacement page text.',
+            confidence: null,
+            notes: null,
+            sourceFileName: null,
+            uncertainSpans: [],
+          },
+        ],
+        warnings: [],
+      })
+    const { container } = render(
+      <OcrReview
+        documents={[]}
+        hasKey
+        loadApiKey={vi.fn().mockResolvedValue('browser-key')}
+        onAppendPages={vi.fn()}
+        onCreateDocument={onCreateDocument}
+        preservePageBreaks
+        stripImageMetadataBeforeOcr={false}
+      />,
+    )
+
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]')
+    await user.upload(input!, [
+      new File(['good'], 'good-page.png', { type: 'image/png' }),
+      new File(['bad'], 'bad-page.png', { type: 'image/png' }),
+    ])
+    await user.click(screen.getByRole('button', { name: 'Process 2 page(s)' }))
+
+    await waitFor(() => expect(screen.getByText('Unreadable original.')).toBeTruthy())
+    await user.upload(
+      screen.getByLabelText('Replacement file for bad-page.png'),
+      new File(['replacement'], 'replacement-page.png', { type: 'image/png' }),
+    )
+
+    await waitFor(() => expect(screen.getByText('Replacement page text.')).toBeTruthy())
+    expect(screen.getByText('Kept page text.')).toBeTruthy()
+    expect(runGeminiOcrFromFilesMock.mock.calls.map((call) => call[1][0]?.name)).toEqual([
+      'good-page.png',
+      'bad-page.png',
+      'replacement-page.png',
+    ])
+
+    await user.click(screen.getByRole('button', { name: 'Create document from pages' }))
+    expect(onCreateDocument).toHaveBeenCalledWith('Replace import', [
+      expect.objectContaining({ sourceFileName: 'good-page.png', text: 'Kept page text.' }),
+      expect.objectContaining({ sourceFileName: 'replacement-page.png', text: 'Replacement page text.' }),
+    ])
   })
 
   it('appends reviewed OCR pages to an existing document', async () => {
@@ -427,30 +725,37 @@ describe('OcrReview', () => {
   it('shows the target chapter when adding pages from a document route', async () => {
     const user = userEvent.setup()
     const onAppendPages = vi.fn()
-    runGeminiOcrFromFilesMock.mockResolvedValue({
-      titleGuess: 'Chapter append',
-      pages: [
-        {
-          pageNumber: 1,
-          sourcePageNumber: null,
-          text: 'Chapter target page',
-          confidence: null,
-          notes: null,
-          sourceFileName: null,
-          uncertainSpans: [],
-        },
-        {
-          pageNumber: 2,
-          sourcePageNumber: null,
-          text: 'Next chapter target page',
-          confidence: null,
-          notes: null,
-          sourceFileName: null,
-          uncertainSpans: [],
-        },
-      ],
-      warnings: [],
-    })
+    runGeminiOcrFromFilesMock
+      .mockResolvedValueOnce({
+        titleGuess: 'Chapter append',
+        pages: [
+          {
+            pageNumber: 1,
+            sourcePageNumber: null,
+            text: 'Chapter target page',
+            confidence: null,
+            notes: null,
+            sourceFileName: null,
+            uncertainSpans: [],
+          },
+        ],
+        warnings: [],
+      })
+      .mockResolvedValueOnce({
+        titleGuess: null,
+        pages: [
+          {
+            pageNumber: 1,
+            sourcePageNumber: null,
+            text: 'Next chapter target page',
+            confidence: null,
+            notes: null,
+            sourceFileName: null,
+            uncertainSpans: [],
+          },
+        ],
+        warnings: [],
+      })
     const { container } = render(
       <OcrReview
         appendTargetChapterId="chapter-1"

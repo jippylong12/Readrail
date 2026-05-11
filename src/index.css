@@ -481,6 +481,7 @@ h3 {
   cursor: not-allowed;
 }
 
+.ocr-job-item,
 .ocr-page-card {
   display: grid;
   gap: 12px;
@@ -488,6 +489,14 @@ h3 {
   border-radius: 8px;
   background: var(--surface);
   padding: 14px;
+}
+
+.ocr-job-item {
+  background: color-mix(in srgb, var(--surface-muted) 36%, var(--surface));
+}
+
+.ocr-job-item .ocr-page-card {
+  background: var(--surface);
 }
 
 .ocr-page-header,
@@ -525,6 +534,16 @@ h3 {
 
 .append-target-field {
   min-width: min(260px, 100%);
+}
+
+.visually-hidden {
+  position: absolute;
+  overflow: hidden;
+  width: 1px;
+  height: 1px;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .import-footer,

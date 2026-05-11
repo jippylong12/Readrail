@@ -24,6 +24,7 @@ export async function getDatabase(): Promise<SqlDatabase | null> {
         await database.execute(statement)
       }
       await runStructuredDocumentSqliteMigration(database)
+      await runOcrJobSqliteMigration(database)
 
       return database
     })
@@ -99,4 +100,18 @@ async function runStructuredDocumentSqliteMigration(database: SqlDatabase): Prom
       SELECT 1 FROM document_pages WHERE document_pages.document_id = documents.id
     )`,
   )
+}
+
+async function runOcrJobSqliteMigration(database: SqlDatabase): Promise<void> {
+  const ocrJobColumns = await database.select<TableColumn[]>('PRAGMA table_info(ocr_jobs)')
+  if (!ocrJobColumns.some((column) => column.name === 'target_chapter_id')) {
+    await database.execute('ALTER TABLE ocr_jobs ADD COLUMN target_chapter_id TEXT REFERENCES document_chapters(id)')
+  }
+  if (!ocrJobColumns.some((column) => column.name === 'warnings_json')) {
+    await database.execute("ALTER TABLE ocr_jobs ADD COLUMN warnings_json TEXT NOT NULL DEFAULT '[]'")
+  }
+  if (!ocrJobColumns.some((column) => column.name === 'updated_at')) {
+    await database.execute("ALTER TABLE ocr_jobs ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''")
+    await database.execute("UPDATE ocr_jobs SET updated_at = created_at WHERE updated_at = ''")
+  }
 }

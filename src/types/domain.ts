@@ -202,13 +202,50 @@ export type SourceFileRecord = {
 export type OcrJob = {
   id: string
   documentId: string | null
+  targetChapterId: string | null
   status: 'queued' | 'running' | 'review' | 'saved' | 'failed' | 'cancelled'
   modelId: string
   inputFileCount: number
   promptVersion: string
+  warnings: string[]
   errorMessage: string | null
   createdAt: string
+  updatedAt: string
   completedAt: string | null
+}
+
+export type OcrJobItemStatus = 'queued' | 'running' | 'review' | 'failed' | 'skipped'
+
+export type OcrJobItemPage = {
+  pageNumber: number
+  sourcePageNumber: number | null
+  title: string | null
+  text: string
+  reviewStatus: OcrReviewStatus
+  ocrConfidence: number | null
+  ocrNotes: string | null
+  uncertainSpans: OcrUncertainSpan[]
+  sourceFileName: string | null
+  sourceKind: SourceFileRecord['kind'] | null
+}
+
+export type OcrJobItem = {
+  id: string
+  jobId: string
+  orderIndex: number
+  sourceFileName: string
+  sourceFileType: string
+  sourceFileSize: number
+  sourceFileLastModified: number
+  sourcePageNumber: number | null
+  title: string | null
+  status: OcrJobItemStatus
+  ocrText: string | null
+  pages: OcrJobItemPage[]
+  warnings: string[]
+  failureReason: string | null
+  createdAt: string
+  updatedAt: string
 }
 
 export type QuizAttempt = {
