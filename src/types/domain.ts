@@ -87,6 +87,7 @@ export type DocumentRecord = {
 }
 
 export type OcrReviewStatus = 'unreviewed' | 'reviewed' | 'needs_attention'
+export type OcrJobPageReviewStatus = OcrReviewStatus | 'skipped'
 
 export type OcrUncertainSpan = {
   text: string
@@ -221,7 +222,7 @@ export type OcrJobItemPage = {
   sourcePageNumber: number | null
   title: string | null
   text: string
-  reviewStatus: OcrReviewStatus
+  reviewStatus: OcrJobPageReviewStatus
   ocrConfidence: number | null
   ocrNotes: string | null
   uncertainSpans: OcrUncertainSpan[]

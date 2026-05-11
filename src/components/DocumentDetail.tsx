@@ -1,5 +1,7 @@
+import { useEffect } from 'react'
 import { DocumentOrganizer } from './DocumentOrganizer'
 import { OcrReview } from './OcrReview'
+import { getOrderedChapterPages, getOrderedDocumentChapters } from '../app/structuredDocuments'
 import type { OcrPageInput } from '../app/store'
 import type { DocumentChapterRecord, DocumentPageRecord, DocumentRecord, OcrJob, OcrJobItem } from '../types/domain'
 
@@ -12,7 +14,15 @@ type DocumentDetailProps = {
   preservePageBreaks: boolean
   stripImageMetadataBeforeOcr: boolean
   loadApiKey: () => Promise<string | null>
+  routeChapterId?: string | null
+  routePageNumber?: number | null
   onBack: () => void
+  onDocumentViewChange: (
+    documentId: string,
+    chapterId: string | null,
+    pageNumber: number,
+    options?: { replace?: boolean },
+  ) => void
   onOpenReader: (documentId: string) => void
   onCreateChapter: (documentId: string, title?: string) => void
   onRenameChapter: (chapterId: string, title: string) => void
@@ -37,7 +47,10 @@ export function DocumentDetail({
   preservePageBreaks,
   stripImageMetadataBeforeOcr,
   loadApiKey,
+  routeChapterId,
+  routePageNumber,
   onBack,
+  onDocumentViewChange,
   onOpenReader,
   onCreateChapter,
   onRenameChapter,
@@ -49,6 +62,24 @@ export function DocumentDetail({
   onCreateDocument,
   onSaveOcrJob,
 }: DocumentDetailProps) {
+  const documentChapters = document ? chapters.filter((chapter) => chapter.documentId === document.id) : []
+  const documentPages = document ? pages.filter((page) => page.documentId === document.id) : []
+  const orderedChapters = document ? getOrderedDocumentChapters(document.id, documentChapters) : []
+  const selectedChapter =
+    orderedChapters.find((chapter) => chapter.id === routeChapterId) ?? orderedChapters[0] ?? null
+  const selectedChapterPages = selectedChapter ? getOrderedChapterPages(selectedChapter.id, documentPages) : []
+  const pageCount = Math.max(1, Math.ceil(selectedChapterPages.length / DOCUMENT_DETAIL_PAGE_SIZE))
+  const selectedPageNumber = Math.min(Math.max(1, routePageNumber ?? 1), pageCount)
+
+  useEffect(() => {
+    if (!document || !selectedChapter) {
+      return
+    }
+    if (routeChapterId !== selectedChapter.id || routePageNumber !== selectedPageNumber) {
+      onDocumentViewChange(document.id, selectedChapter.id, selectedPageNumber, { replace: true })
+    }
+  }, [document, onDocumentViewChange, routeChapterId, routePageNumber, selectedChapter, selectedPageNumber])
+
   if (!document) {
     return (
       <section className="panel">
@@ -65,8 +96,6 @@ export function DocumentDetail({
     )
   }
 
-  const documentChapters = chapters.filter((chapter) => chapter.documentId === document.id)
-  const documentPages = pages.filter((page) => page.documentId === document.id)
   const nextSourcePageNumber =
     documentPages.reduce((highestPageNumber, page) => {
       const candidate = page.sourcePageNumber ?? page.pageNumber
@@ -105,15 +134,20 @@ export function DocumentDetail({
           </div>
         </div>
         <DocumentOrganizer
-          chapters={documentChapters}
+          chapters={orderedChapters}
           document={document}
           onCreateChapter={onCreateChapter}
           onDeleteChapter={onDeleteChapter}
           onMoveChapter={onMoveChapter}
           onMovePage={onMovePage}
+          onSelectChapter={(chapterId) => onDocumentViewChange(document.id, chapterId, 1)}
+          onSelectPage={(pageNumber) => onDocumentViewChange(document.id, selectedChapter?.id ?? null, pageNumber)}
           onRenameChapter={onRenameChapter}
           onUpdatePageMetadata={onUpdatePageMetadata}
           pages={documentPages}
+          pageNumber={selectedPageNumber}
+          pagesPerPage={DOCUMENT_DETAIL_PAGE_SIZE}
+          selectedChapterId={selectedChapter?.id ?? null}
         />
       </section>
 
@@ -134,3 +168,5 @@ export function DocumentDetail({
     </div>
   )
 }
+
+const DOCUMENT_DETAIL_PAGE_SIZE = 8

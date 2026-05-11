@@ -4,10 +4,11 @@ import userEvent from '@testing-library/user-event'
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import App from '../App'
+import { pathForRoute, routeFromPath } from '../app/routes'
 import { getRouteForShortcutEvent, isEditableShortcutTarget } from '../app/shortcuts'
 import { createDefaultDocumentStructure } from '../app/structuredDocuments'
 import { defaultOnboardingState, defaultTourProgressState, useAppStore } from '../app/store'
-import type { DocumentRecord } from '../types/domain'
+import type { DocumentChapterRecord, DocumentPageRecord, DocumentRecord } from '../types/domain'
 
 const activeDocument: DocumentRecord = {
   id: 'document-1',
@@ -35,6 +36,67 @@ function resetStore(): void {
       ...defaultOnboardingState,
       status: 'skipped',
       skippedAt: new Date().toISOString(),
+    },
+    tourProgress: {
+      ...defaultTourProgressState,
+      completedTourIds: ['library-saved', 'reader', 'stats', 'settings'],
+    },
+    baselineResult: null,
+  })
+}
+
+function buildChapter(id: string, title: string, sortOrder: number): DocumentChapterRecord {
+  return {
+    id,
+    documentId: activeDocument.id,
+    title,
+    sortOrder,
+    createdAt: activeDocument.createdAt,
+    updatedAt: activeDocument.updatedAt,
+  }
+}
+
+function buildPage(chapterId: string, pageNumber: number, sortOrder: number, title: string): DocumentPageRecord {
+  return {
+    id: `page-${chapterId}-${pageNumber}`,
+    documentId: activeDocument.id,
+    chapterId,
+    sortOrder,
+    pageNumber,
+    sourcePageNumber: pageNumber,
+    title,
+    text: `${title} text.`,
+    wordCount: 3,
+    reviewStatus: 'reviewed',
+    ocrConfidence: null,
+    ocrNotes: null,
+    uncertainSpans: [],
+    sourceFileId: null,
+    sourceFileName: null,
+    sourceKind: null,
+    sourceLocalPath: null,
+    sourceSha256: null,
+    createdAt: activeDocument.createdAt,
+    updatedAt: activeDocument.updatedAt,
+  }
+}
+
+function seedMultiChapterDocument(): void {
+  const chapterOne = buildChapter('chapter-1', 'Chapter One', 0)
+  const chapterTwo = buildChapter('chapter-2', 'Chapter Two', 1)
+  useAppStore.setState({
+    documents: [activeDocument],
+    documentChapters: [chapterOne, chapterTwo],
+    documentPages: [
+      ...Array.from({ length: 3 }, (_, index) => buildPage(chapterOne.id, index + 1, index, `Chapter One page ${index + 1}`)),
+      ...Array.from({ length: 10 }, (_, index) => buildPage(chapterTwo.id, index + 4, index, `Chapter Two page ${index + 1}`)),
+    ],
+    sessions: [],
+    activeDocumentId: activeDocument.id,
+    onboarding: {
+      ...defaultOnboardingState,
+      status: 'skipped',
+      skippedAt: activeDocument.createdAt,
     },
     tourProgress: {
       ...defaultTourProgressState,
@@ -97,7 +159,7 @@ describe('app section shortcuts', () => {
 
     await user.click(screen.getByRole('button', { name: /Shortcut test document/i }))
     expect(screen.getByRole('heading', { name: activeDocument.title })).toBeTruthy()
-    expect(window.location.pathname).toBe('/library/documents/document-1')
+    expect(window.location.pathname).toBe('/library/documents/document-1/chapters/chapter%3Adocument-1%3Adefault')
 
     await user.click(screen.getByRole('button', { name: 'Open reader' }))
     expect(screen.getByRole('heading', { name: activeDocument.title })).toBeTruthy()
@@ -106,6 +168,31 @@ describe('app section shortcuts', () => {
     await user.click(screen.getByRole('button', { name: 'Back to library' }))
     expect(screen.getByRole('heading', { name: 'Reading documents' })).toBeTruthy()
     expect(window.location.pathname).toBe('/library/saved')
+  })
+
+  it('deep-links document detail to selected chapters and paginated pages', async () => {
+    const user = userEvent.setup()
+    seedMultiChapterDocument()
+    window.history.replaceState(null, '', '/library/documents/document-1/chapters/chapter-2/pages/2')
+    render(<App />)
+
+    expect(screen.getByRole('heading', { name: activeDocument.title })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Chapter Two/i }).getAttribute('aria-current')).toBe('page')
+    expect(screen.getByText((_, element) => element?.textContent === 'Page 2 of 2 - showing 9-10 of 10')).toBeTruthy()
+    expect(screen.getByText('Chapter Two page 9')).toBeTruthy()
+    expect(screen.queryByText('Chapter Two page 1')).toBeNull()
+    expect(window.location.pathname).toBe('/library/documents/document-1/chapters/chapter-2/pages/2')
+
+    await user.click(screen.getByRole('button', { name: 'Previous page' }))
+    expect(window.location.pathname).toBe('/library/documents/document-1/chapters/chapter-2')
+    expect(screen.getByText((_, element) => element?.textContent === 'Page 1 of 2 - showing 1-8 of 10')).toBeTruthy()
+    expect(screen.getByText('Chapter Two page 1')).toBeTruthy()
+
+    await user.click(screen.getByRole('button', { name: /Chapter One/i }))
+    expect(window.location.pathname).toBe('/library/documents/document-1/chapters/chapter-1')
+    expect(screen.getByText((_, element) => element?.textContent === 'Page 1 of 1 - showing 1-3 of 3')).toBeTruthy()
+    expect(screen.getByText('Chapter One page 1')).toBeTruthy()
+    expect(screen.getByLabelText('Label for page 1')).toBeTruthy()
   })
 
   it('navigates primary sections with Command shortcuts', () => {
@@ -204,6 +291,29 @@ describe('app section shortcuts', () => {
     expect(screen.getByRole('heading', { name: 'Start with a baseline before the full app.' })).toBeTruthy()
     expect(dispatchSectionShortcut('s', 'control').defaultPrevented).toBe(false)
     expect(screen.getByRole('heading', { name: 'Start with a baseline before the full app.' })).toBeTruthy()
+  })
+})
+
+describe('route helpers', () => {
+  it('parses and builds document chapter/page routes', () => {
+    expect(routeFromPath('/library/documents/document-1/chapters/chapter-2/pages/3')).toEqual({
+      route: 'library-document',
+      documentId: 'document-1',
+      chapterId: 'chapter-2',
+      pageNumber: 3,
+    })
+    expect(pathForRoute({
+      route: 'library-document',
+      documentId: 'document-1',
+      chapterId: 'chapter-2',
+      pageNumber: 3,
+    })).toBe('/library/documents/document-1/chapters/chapter-2/pages/3')
+    expect(pathForRoute({
+      route: 'library-document',
+      documentId: 'document-1',
+      chapterId: 'chapter-2',
+      pageNumber: 1,
+    })).toBe('/library/documents/document-1/chapters/chapter-2')
   })
 })
 

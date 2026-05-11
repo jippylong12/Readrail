@@ -16,6 +16,8 @@ export type PrimaryRoute = 'library-saved' | 'reader' | 'progress' | 'stats' | '
 export type RouteState = {
   route: AppRoute
   documentId: string | null
+  chapterId?: string | null
+  pageNumber?: number | null
 }
 
 export type RouteDefinition = {
@@ -48,7 +50,13 @@ export function routeFromPath(pathname: string): RouteState {
       return { route: 'library-ocr', documentId: null }
     }
     if (segments[1] === 'documents' && segments[2]) {
-      return { route: 'library-document', documentId: segments[2] }
+      const pageNumber = segments[5] === 'pages' && segments[6] ? Number(segments[6]) : null
+      return {
+        route: 'library-document',
+        documentId: segments[2],
+        chapterId: segments[3] === 'chapters' ? segments[4] ?? null : null,
+        pageNumber: pageNumber !== null && Number.isFinite(pageNumber) ? Math.max(1, Math.round(pageNumber)) : null,
+      }
     }
     return { route: 'library-saved', documentId: null }
   }
@@ -83,7 +91,16 @@ export function pathForRoute(routeState: RouteState): string {
     case 'library-ocr':
       return '/library/ocr'
     case 'library-document':
-      return routeState.documentId ? `/library/documents/${encodeURIComponent(routeState.documentId)}` : '/library/saved'
+      if (!routeState.documentId) {
+        return '/library/saved'
+      }
+      if (routeState.chapterId) {
+        const chapterPath = `/library/documents/${encodeURIComponent(routeState.documentId)}/chapters/${encodeURIComponent(routeState.chapterId)}`
+        return routeState.pageNumber && routeState.pageNumber > 1
+          ? `${chapterPath}/pages/${encodeURIComponent(routeState.pageNumber.toString())}`
+          : chapterPath
+      }
+      return `/library/documents/${encodeURIComponent(routeState.documentId)}`
     case 'reader':
       return routeState.documentId ? `/reader/${encodeURIComponent(routeState.documentId)}` : '/reader'
     case 'test':

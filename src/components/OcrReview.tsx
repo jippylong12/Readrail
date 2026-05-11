@@ -12,6 +12,7 @@ import type {
   OcrJobItem,
   OcrJobItemPage,
   OcrJobItemStatus,
+  OcrJobPageReviewStatus,
   OcrReviewStatus,
 } from '../types/domain'
 
@@ -48,6 +49,27 @@ type OcrJobDraft = {
 }
 
 type OcrStageState = OcrPipelineProgress['status'] | 'pending'
+type OcrReviewEntryStatus = 'pending' | 'approved' | 'needs_attention' | 'skipped' | 'failed'
+
+type OcrReviewPageEntry = {
+  id: string
+  type: 'page'
+  item: OcrJobItemDraft
+  page: OcrJobItemPage
+  pageIndex: number
+  status: OcrReviewEntryStatus
+}
+
+type OcrReviewItemEntry = {
+  id: string
+  type: 'item'
+  item: OcrJobItemDraft
+  status: OcrReviewEntryStatus
+}
+
+type OcrReviewEntry = OcrReviewPageEntry | OcrReviewItemEntry
+
+type OcrReviewSummary = Record<OcrReviewEntryStatus, number>
 
 const MAX_OCR_FILES = 25
 const OCR_PROMPT_VERSION = 'structured-import-v1'
@@ -86,6 +108,7 @@ export function OcrReview({
   const [title, setTitle] = useState('')
   const [appendDocumentId, setAppendDocumentId] = useState('')
   const [appendChapterId, setAppendChapterId] = useState(appendTargetChapterId ?? '')
+  const [focusedReviewId, setFocusedReviewId] = useState<string | null>(null)
   const [warnings, setWarnings] = useState<string[]>([])
   const [error, setError] = useState('')
   const [progressMessage, setProgressMessage] = useState('')
@@ -108,13 +131,26 @@ export function OcrReview({
     appendTargetChapters[appendTargetChapters.length - 1] ??
     null
   const jobItems = useMemo(() => jobDraft?.items ?? [], [jobDraft])
+  const reviewEntries = useMemo(() => buildReviewEntries(jobItems), [jobItems])
+  const focusedReviewEntry =
+    reviewEntries.find((entry) => entry.id === focusedReviewId) ?? reviewEntries[0] ?? null
+  const focusedReviewIndex = focusedReviewEntry
+    ? reviewEntries.findIndex((entry) => entry.id === focusedReviewEntry.id)
+    : -1
+  const reviewSummary = useMemo(() => summarizeReviewEntries(reviewEntries), [reviewEntries])
   const pagesForSave = useMemo(() => buildReviewedPages(jobItems, preservePageBreaks), [jobItems, preservePageBreaks])
   const hasBlockingItems = jobItems.some((item) => item.status === 'queued' || item.status === 'running' || item.status === 'failed')
+  const hasUnapprovedPages = jobItems.some(
+    (item) =>
+      item.status === 'review' &&
+      item.pages.some((page) => page.reviewStatus !== 'reviewed' && page.reviewStatus !== 'skipped'),
+  )
   const isReviewAvailable = Boolean(jobDraft) && (status === 'running' || status === 'review')
   const totalWords = useMemo(
     () => pagesForSave.reduce((total, page) => total + countWords(cleanReadingText(page.text, { preservePageBreaks })), 0),
     [pagesForSave, preservePageBreaks],
   )
+  const canSavePages = totalWords > 0 && !hasBlockingItems && !hasUnapprovedPages
   const progressPercent = calculateProgressPercent(status, jobItems, progressState)
 
   function resetProgress(): void {
@@ -223,6 +259,8 @@ export function OcrReview({
       const retriedJob = await processJobItem(runningJob, itemId, apiKey)
       const finalizedJob = finalizeJobAfterProcessing(retriedJob)
       commitJob(finalizedJob)
+      const retriedItem = finalizedJob.items.find((item) => item.id === itemId)
+      setFocusedReviewId(retriedItem?.pages[0] ? pageKey(retriedItem, retriedItem.pages[0]) : itemId)
       setWarnings(finalizedJob.job.warnings)
       setProgressMessage('Ready for review.')
       setStatus('review')
@@ -398,6 +436,7 @@ export function OcrReview({
     )
     setJobDraft(null)
     latestJobDraftRef.current = null
+    setFocusedReviewId(null)
     setError('')
     setWarnings(selectedFiles.length > MAX_OCR_FILES ? [`Only the first ${MAX_OCR_FILES} files will be processed.`] : [])
     resetProgress()
@@ -630,13 +669,13 @@ export function OcrReview({
               <input onChange={(event) => setTitle(event.target.value)} value={title} />
             </label>
           )}
-          {jobItems.length === 0 ? (
+          {reviewEntries.length === 0 ? (
             <div className="empty-state">
               <strong>No OCR pages returned</strong>
               <span>Try another file or edit the scan before running OCR again.</span>
             </div>
           ) : (
-            <div className="ocr-page-list">
+            <div className="ocr-review-carousel">
               {warnings.length > 0 && (
                 <div className="ocr-warning-list" role="status">
                   {warnings.map((warning) => (
@@ -644,158 +683,149 @@ export function OcrReview({
                   ))}
                 </div>
               )}
-              {jobItems
-                .sort((left, right) => left.orderIndex - right.orderIndex)
-                .map((item) => (
-                  <article className="ocr-job-item" key={item.id}>
-                    <div className="ocr-page-header">
-                      <div>
-                        <span className="eyebrow">Item {item.orderIndex + 1}</span>
-                        <h3>{item.sourceFileName}</h3>
-                      </div>
-                      <span className={`status-pill ${item.status === 'review' ? 'ok' : ''}`}>
-                        {formatItemStatus(item.status)}
-                      </span>
-                    </div>
-                    <div className="ocr-page-meta">
-                      <span>Source page {item.sourcePageNumber ?? item.orderIndex + 1}</span>
-                      {item.title && <span>{item.title}</span>}
-                      {item.warnings.map((warning) => (
-                        <span key={warning}>{warning}</span>
-                      ))}
-                    </div>
-
-                    {item.status === 'failed' && (
-                      <div className="ocr-warning-list" role="alert">
-                        <span>{item.failureReason ?? 'OCR failed for this item.'}</span>
-                        <div className="button-row">
-                          <button className="secondary-button" onClick={() => void retryJobItem(item.id)} type="button">
-                            Retry
-                          </button>
-                          <button className="ghost-button" onClick={() => skipJobItem(item.id)} type="button">
-                            Skip
-                          </button>
-                          <button
-                            className="ghost-button"
-                            onClick={() => replacementInputs.current[item.id]?.click()}
-                            type="button"
-                          >
-                            Replace file
-                          </button>
-                          <input
-                            accept="image/*,application/pdf"
-                            aria-label={`Replacement file for ${item.sourceFileName}`}
-                            className="visually-hidden"
-                            onChange={(event) => {
-                              const replacement = event.target.files?.[0]
-                              event.target.value = ''
-                              if (replacement) {
-                                void replaceJobItemFile(item.id, replacement)
-                              }
-                            }}
-                            ref={(element) => {
-                              replacementInputs.current[item.id] = element
-                            }}
-                            type="file"
-                          />
-                        </div>
-                      </div>
-                    )}
-
-                    {item.status === 'skipped' && (
-                      <div className="empty-state">
-                        <strong>Skipped</strong>
-                        <span>This item will not be included when pages are saved.</span>
-                      </div>
-                    )}
-
-                    {item.pages.map((page, pageIndex) => {
-                      const cleanedText = cleanReadingText(page.text, { preservePageBreaks })
-                      const wordCount = countWords(cleanedText)
-                      const pageId = pageKey(item, page)
-                      return (
-                        <article className="ocr-page-card" key={pageId}>
-                          <div className="ocr-page-header">
-                            <div>
-                              <span className="eyebrow">Page {page.pageNumber}</span>
-                              <h3>{page.sourceFileName ?? `Source page ${page.sourcePageNumber ?? pageIndex + 1}`}</h3>
-                            </div>
-                            <span className="status-pill">{wordCount.toLocaleString()} words</span>
-                          </div>
-                          <div className="ocr-page-meta">
-                            <span>Source page {page.sourcePageNumber ?? pageIndex + 1}</span>
-                            {page.sourceFileName && <span>{page.sourceFileName}</span>}
-                            {page.ocrConfidence !== null && <span>{Math.round(page.ocrConfidence * 100)}% confidence</span>}
-                            {page.uncertainSpans.length > 0 && (
-                              <span>{page.uncertainSpans.length} uncertain span(s)</span>
-                            )}
-                          </div>
-                          <label className="field">
-                            Review status
-                            <select
-                              onChange={(event) =>
-                                updatePageDraft(pageId, { reviewStatus: event.target.value as OcrReviewStatus })
-                              }
-                              value={page.reviewStatus}
-                            >
-                              <option value="reviewed">Reviewed</option>
-                              <option value="needs_attention">Needs attention</option>
-                              <option value="unreviewed">Unreviewed</option>
-                            </select>
-                          </label>
-                          <label className="field">
-                            Page title (optional)
-                            <input
-                              onChange={(event) => updatePageDraft(pageId, { title: event.target.value })}
-                              placeholder="Shown in organizer"
-                              value={page.title ?? ''}
-                            />
-                          </label>
-                          <label className="field">
-                            Notes
-                            <input
-                              onChange={(event) => updatePageDraft(pageId, { ocrNotes: event.target.value })}
-                              placeholder="OCR notes or review notes"
-                              value={page.ocrNotes ?? ''}
-                            />
-                          </label>
-                          <label className="field">
-                            Source page number
-                            <input
-                              inputMode="numeric"
-                              onChange={(event) =>
-                                updatePageDraft(pageId, { sourcePageNumber: normalizeSourcePageNumber(event.target.value) })
-                              }
-                              placeholder="Optional"
-                              type="text"
-                              value={page.sourcePageNumber ?? ''}
-                            />
-                          </label>
-                          <label className="field">
-                            Page text
-                            <textarea
-                              className="ocr-page-textarea"
-                              onChange={(event) => updatePageDraft(pageId, { text: event.target.value })}
-                              value={page.text}
-                            />
-                          </label>
-                        </article>
-                      )
-                    })}
-                  </article>
+              <div className="ocr-review-summary" aria-label="OCR page review overview">
+                {(['pending', 'approved', 'needs_attention', 'skipped', 'failed'] as OcrReviewEntryStatus[]).map(
+                  (entryStatus) => (
+                    <span className={`ocr-review-count ${entryStatus}`} key={entryStatus}>
+                      {formatReviewEntryStatus(entryStatus)} {reviewSummary[entryStatus]}
+                    </span>
+                  ),
+                )}
+              </div>
+              <div className="ocr-review-strip" aria-label="OCR review pages">
+                {reviewEntries.map((entry, index) => (
+                  <button
+                    aria-current={focusedReviewEntry?.id === entry.id ? 'page' : undefined}
+                    className={`ocr-review-step ${entry.status} ${focusedReviewEntry?.id === entry.id ? 'active' : ''}`}
+                    key={entry.id}
+                    onClick={() => setFocusedReviewId(entry.id)}
+                    type="button"
+                  >
+                    <span>{index + 1}</span>
+                    <strong>{formatReviewEntryStatus(entry.status)}</strong>
+                  </button>
                 ))}
+              </div>
+              {focusedReviewEntry && (
+                <article className="ocr-job-item">
+                  <div className="ocr-page-header">
+                    <div>
+                      <span className="eyebrow">
+                        Review {focusedReviewIndex + 1} of {reviewEntries.length}
+                      </span>
+                      <h3>{formatReviewEntryTitle(focusedReviewEntry)}</h3>
+                    </div>
+                    <span className={`status-pill ${focusedReviewEntry.status === 'approved' ? 'ok' : ''}`}>
+                      {formatReviewEntryStatus(focusedReviewEntry.status)}
+                    </span>
+                  </div>
+                  <div className="ocr-review-nav">
+                    <button
+                      className="ghost-button"
+                      disabled={focusedReviewIndex <= 0}
+                      onClick={() => setFocusedReviewId(reviewEntries[focusedReviewIndex - 1]?.id ?? null)}
+                      type="button"
+                    >
+                      Previous
+                    </button>
+                    <button
+                      className="ghost-button"
+                      disabled={focusedReviewIndex < 0 || focusedReviewIndex >= reviewEntries.length - 1}
+                      onClick={() => setFocusedReviewId(reviewEntries[focusedReviewIndex + 1]?.id ?? null)}
+                      type="button"
+                    >
+                      Next
+                    </button>
+                  </div>
+                  {focusedReviewEntry.type === 'item' ? (
+                    <>
+                      <div className="ocr-page-meta">
+                        <span>Item {focusedReviewEntry.item.orderIndex + 1}</span>
+                        <span>Source page {focusedReviewEntry.item.sourcePageNumber ?? focusedReviewEntry.item.orderIndex + 1}</span>
+                        {focusedReviewEntry.item.title && <span>{focusedReviewEntry.item.title}</span>}
+                        {focusedReviewEntry.item.warnings.map((warning) => (
+                          <span key={warning}>{warning}</span>
+                        ))}
+                      </div>
+                      {focusedReviewEntry.item.status === 'failed' && (
+                        <div className="ocr-warning-list" role="alert">
+                          <span>{focusedReviewEntry.item.failureReason ?? 'OCR failed for this item.'}</span>
+                          <div className="button-row">
+                            <button
+                              className="secondary-button"
+                              onClick={() => void retryJobItem(focusedReviewEntry.item.id)}
+                              type="button"
+                            >
+                              Retry
+                            </button>
+                            <button
+                              className="ghost-button"
+                              onClick={() => skipJobItem(focusedReviewEntry.item.id)}
+                              type="button"
+                            >
+                              Skip
+                            </button>
+                            <button
+                              className="ghost-button"
+                              onClick={() => replacementInputs.current[focusedReviewEntry.item.id]?.click()}
+                              type="button"
+                            >
+                              Replace file
+                            </button>
+                            <input
+                              accept="image/*,application/pdf"
+                              aria-label={`Replacement file for ${focusedReviewEntry.item.sourceFileName}`}
+                              className="visually-hidden"
+                              onChange={(event) => {
+                                const replacement = event.target.files?.[0]
+                                event.target.value = ''
+                                if (replacement) {
+                                  void replaceJobItemFile(focusedReviewEntry.item.id, replacement)
+                                }
+                              }}
+                              ref={(element) => {
+                                replacementInputs.current[focusedReviewEntry.item.id] = element
+                              }}
+                              type="file"
+                            />
+                          </div>
+                        </div>
+                      )}
+                      {focusedReviewEntry.item.status === 'skipped' && (
+                        <div className="empty-state">
+                          <strong>Skipped</strong>
+                          <span>This item will not be included when pages are saved.</span>
+                        </div>
+                      )}
+                      {(focusedReviewEntry.item.status === 'queued' || focusedReviewEntry.item.status === 'running') && (
+                        <div className="empty-state">
+                          <strong>{formatItemStatus(focusedReviewEntry.item.status)}</strong>
+                          <span>This item is still waiting for OCR output.</span>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <OcrFocusedPageEditor
+                      entry={focusedReviewEntry}
+                      onUpdatePage={updatePageDraft}
+                      preservePageBreaks={preservePageBreaks}
+                    />
+                  )}
+                </article>
+              )}
             </div>
           )}
           <div className="ocr-save-actions">
             <span>
               {totalWords.toLocaleString()} total words across {pagesForSave.length} page(s)
               {hasBlockingItems ? ' - finish or resolve all items before saving' : ''}
+              {!hasBlockingItems && hasUnapprovedPages ? ' - approve or skip every included page before saving' : ''}
             </span>
             <div className="button-row">
               {!appendTargetDocumentId && (
                 <button
                   className="primary-button"
-                  disabled={totalWords === 0 || hasBlockingItems}
+                  disabled={!canSavePages}
                   onClick={handleCreateDocument}
                   type="button"
                 >
@@ -829,7 +859,7 @@ export function OcrReview({
               )}
               <button
                 className={appendTargetDocumentId ? 'primary-button' : 'secondary-button'}
-                disabled={totalWords === 0 || hasBlockingItems || !(appendTargetDocumentId ?? appendDocumentId)}
+                disabled={!canSavePages || !(appendTargetDocumentId ?? appendDocumentId)}
                 onClick={handleAppendPages}
                 type="button"
               >
@@ -853,6 +883,91 @@ export function OcrReview({
         </button>
       )}
     </section>
+  )
+}
+
+function OcrFocusedPageEditor({
+  entry,
+  onUpdatePage,
+  preservePageBreaks,
+}: {
+  entry: OcrReviewPageEntry
+  onUpdatePage: (pageId: string, updates: Partial<OcrJobItemPage>) => void
+  preservePageBreaks: boolean
+}) {
+  const cleanedText = cleanReadingText(entry.page.text, { preservePageBreaks })
+  const wordCount = countWords(cleanedText)
+  const pageId = pageKey(entry.item, entry.page)
+
+  return (
+    <article className="ocr-page-card">
+      <div className="ocr-page-header">
+        <div>
+          <span className="eyebrow">Page {entry.page.pageNumber}</span>
+          <h3>{entry.page.sourceFileName ?? `Source page ${entry.page.sourcePageNumber ?? entry.pageIndex + 1}`}</h3>
+        </div>
+        <span className="status-pill">{wordCount.toLocaleString()} words</span>
+      </div>
+      <div className="ocr-page-meta">
+        <span>Item {entry.item.orderIndex + 1}</span>
+        <span>Source page {entry.page.sourcePageNumber ?? entry.pageIndex + 1}</span>
+        {entry.page.sourceFileName && <span>{entry.page.sourceFileName}</span>}
+        {entry.page.ocrConfidence !== null && <span>{Math.round(entry.page.ocrConfidence * 100)}% confidence</span>}
+        {entry.page.uncertainSpans.length > 0 && <span>{entry.page.uncertainSpans.length} uncertain span(s)</span>}
+      </div>
+      {entry.page.reviewStatus === 'skipped' && (
+        <div className="empty-state compact">
+          <strong>Skipped page</strong>
+          <span>This page is preserved in the OCR job but excluded from save.</span>
+        </div>
+      )}
+      <label className="field">
+        Review status
+        <select
+          onChange={(event) => onUpdatePage(pageId, { reviewStatus: event.target.value as OcrJobPageReviewStatus })}
+          value={entry.page.reviewStatus}
+        >
+          <option value="reviewed">Approved</option>
+          <option value="needs_attention">Needs attention</option>
+          <option value="unreviewed">Unreviewed</option>
+          <option value="skipped">Skipped</option>
+        </select>
+      </label>
+      <label className="field">
+        Page title (optional)
+        <input
+          onChange={(event) => onUpdatePage(pageId, { title: event.target.value })}
+          placeholder="Shown in organizer"
+          value={entry.page.title ?? ''}
+        />
+      </label>
+      <label className="field">
+        Notes
+        <input
+          onChange={(event) => onUpdatePage(pageId, { ocrNotes: event.target.value })}
+          placeholder="OCR notes or review notes"
+          value={entry.page.ocrNotes ?? ''}
+        />
+      </label>
+      <label className="field">
+        Source page number
+        <input
+          inputMode="numeric"
+          onChange={(event) => onUpdatePage(pageId, { sourcePageNumber: normalizeSourcePageNumber(event.target.value) })}
+          placeholder="Optional"
+          type="text"
+          value={entry.page.sourcePageNumber ?? ''}
+        />
+      </label>
+      <label className="field">
+        Page text
+        <textarea
+          className="ocr-page-textarea"
+          onChange={(event) => onUpdatePage(pageId, { text: event.target.value })}
+          value={entry.page.text}
+        />
+      </label>
+    </article>
   )
 }
 
@@ -944,18 +1059,61 @@ function buildJobItemPage(
   }
 }
 
+function buildReviewEntries(items: OcrJobItemDraft[]): OcrReviewEntry[] {
+  return [...items]
+    .sort((left, right) => left.orderIndex - right.orderIndex)
+    .flatMap((item): OcrReviewEntry[] => {
+      if (item.status === 'queued' || item.status === 'running') {
+        return [{ id: item.id, type: 'item', item, status: 'pending' as const }]
+      }
+
+      if (item.status === 'failed') {
+        return [{ id: item.id, type: 'item', item, status: 'failed' as const }]
+      }
+
+      if (item.status === 'skipped') {
+        return [{ id: item.id, type: 'item', item, status: 'skipped' as const }]
+      }
+
+      return item.pages.map((page, pageIndex) => ({
+        id: pageKey(item, page),
+        type: 'page' as const,
+        item,
+        page,
+        pageIndex,
+        status: formatPageReviewEntryStatus(page.reviewStatus),
+      }))
+    })
+}
+
+function summarizeReviewEntries(entries: OcrReviewEntry[]): OcrReviewSummary {
+  return entries.reduce<OcrReviewSummary>(
+    (summary, entry) => ({
+      ...summary,
+      [entry.status]: summary[entry.status] + 1,
+    }),
+    {
+      pending: 0,
+      approved: 0,
+      needs_attention: 0,
+      skipped: 0,
+      failed: 0,
+    },
+  )
+}
+
 function buildReviewedPages(items: OcrJobItemDraft[], preservePageBreaks: boolean): OcrPageInput[] {
   let nextPageNumber = 1
   return items
     .filter((item) => item.status === 'review')
     .sort((left, right) => left.orderIndex - right.orderIndex)
     .flatMap((item) =>
-      item.pages.map((page) => {
+      item.pages.filter((page) => page.reviewStatus === 'reviewed').map((page) => {
         const reviewedPage: OcrPageInput = {
           pageNumber: nextPageNumber,
           title: page.title,
           text: preservePageBreaks ? page.text : page.text.replace(/\f/g, '\n'),
-          reviewStatus: page.reviewStatus,
+          reviewStatus: 'reviewed',
           sourcePageNumber: page.sourcePageNumber,
           ocrConfidence: page.ocrConfidence,
           ocrNotes: page.ocrNotes?.trim() || null,
@@ -1038,6 +1196,40 @@ function formatItemStatus(status: OcrJobItemStatus): string {
     case 'skipped':
       return 'Skipped'
   }
+}
+
+function formatPageReviewEntryStatus(status: OcrJobPageReviewStatus): OcrReviewEntryStatus {
+  if (status === 'reviewed') {
+    return 'approved'
+  }
+  if (status === 'skipped') {
+    return 'skipped'
+  }
+
+  return 'needs_attention'
+}
+
+function formatReviewEntryStatus(status: OcrReviewEntryStatus): string {
+  switch (status) {
+    case 'pending':
+      return 'Pending'
+    case 'approved':
+      return 'Approved'
+    case 'needs_attention':
+      return 'Needs attention'
+    case 'skipped':
+      return 'Skipped'
+    case 'failed':
+      return 'Failed'
+  }
+}
+
+function formatReviewEntryTitle(entry: OcrReviewEntry): string {
+  if (entry.type === 'item') {
+    return entry.item.sourceFileName
+  }
+
+  return entry.page.title?.trim() || entry.page.sourceFileName || `Source page ${entry.page.sourcePageNumber ?? entry.pageIndex + 1}`
 }
 
 function normalizeSourcePageNumber(value: string): number | null {

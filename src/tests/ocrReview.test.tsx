@@ -137,29 +137,40 @@ describe('OcrReview', () => {
     await waitFor(() => expect(screen.getByDisplayValue('OCR Title')).toBeTruthy())
     expect(loadApiKey).toHaveBeenCalledTimes(1)
     expect(promptSpy).not.toHaveBeenCalled()
+    expect(screen.getByText('Review 1 of 2')).toBeTruthy()
     expect(screen.getByText('Page 1')).toBeTruthy()
+    expect(screen.getByText('Approved 1')).toBeTruthy()
+    expect(screen.getByText('Needs attention 1')).toBeTruthy()
+    expect(screen.getAllByText('Cleaner pass removed a repeated header.').length).toBeGreaterThan(0)
+
+    const pageTextarea = screen.getByLabelText('Page text')
+    expect(pageTextarea).toHaveProperty('className', expect.stringContaining('ocr-page-textarea'))
+    await user.clear(pageTextarea)
+    await user.type(pageTextarea, 'Edited first OCR page')
+    await user.type(screen.getByLabelText('Page title (optional)'), 'Chapter opener')
+    await user.type(screen.getByLabelText('Notes'), 'Reviewed cleanly')
+    const sourcePageInput = screen.getByLabelText('Source page number')
+    await user.clear(sourcePageInput)
+    await user.type(sourcePageInput, '156')
+    expect(screen.getByRole('button', { name: 'Create document from pages' })).toHaveProperty('disabled', true)
+
+    await user.click(screen.getByRole('button', { name: 'Next' }))
+    expect(screen.getByText('Review 2 of 2')).toBeTruthy()
     expect(screen.getByText('Page 2')).toBeTruthy()
     expect(screen.getByText('62% confidence')).toBeTruthy()
     expect(screen.getByText('1 uncertain span(s)')).toBeTruthy()
-    expect(screen.getAllByText('Cleaner pass removed a repeated header.').length).toBeGreaterThan(0)
     expect(screen.getByDisplayValue('Low light')).toBeTruthy()
-
-    const pageTextareas = screen.getAllByLabelText('Page text')
-    expect(pageTextareas[0]).toHaveProperty('className', expect.stringContaining('ocr-page-textarea'))
-    await user.clear(pageTextareas[0])
-    await user.type(pageTextareas[0], 'Edited first OCR page')
-    const sourcePageInputs = screen.getAllByLabelText('Source page number')
-    await user.clear(sourcePageInputs[0])
-    await user.type(sourcePageInputs[0], '156')
-    await user.selectOptions(screen.getAllByLabelText('Review status')[1], 'reviewed')
+    await user.selectOptions(screen.getByLabelText('Review status'), 'reviewed')
     await user.click(screen.getByRole('button', { name: 'Create document from pages' }))
 
     expect(onCreateDocument).toHaveBeenCalledWith('OCR Title', [
       expect.objectContaining({
         pageNumber: 1,
         sourcePageNumber: 156,
+        title: 'Chapter opener',
         text: 'Edited first OCR page',
         reviewStatus: 'reviewed',
+        ocrNotes: 'Reviewed cleanly',
         sourceFileName: 'scan-4.png',
         sourceKind: 'image',
       }),
@@ -171,6 +182,71 @@ describe('OcrReview', () => {
         ocrNotes: 'Low light',
         sourceFileName: 'scan-5.png',
       }),
+    ])
+  })
+
+  it('skips focused OCR pages and renumbers the final save payload in review order', async () => {
+    const user = userEvent.setup()
+    const onCreateDocument = vi.fn()
+    runGeminiOcrFromFilesMock.mockResolvedValue({
+      titleGuess: 'Skip middle page',
+      pages: [
+        {
+          pageNumber: 1,
+          sourcePageNumber: 11,
+          text: 'First kept page.',
+          confidence: null,
+          notes: null,
+          sourceFileName: null,
+          uncertainSpans: [],
+        },
+        {
+          pageNumber: 2,
+          sourcePageNumber: 12,
+          text: 'Skipped ad page.',
+          confidence: null,
+          notes: null,
+          sourceFileName: null,
+          uncertainSpans: [],
+        },
+        {
+          pageNumber: 3,
+          sourcePageNumber: 13,
+          text: 'Final kept page.',
+          confidence: null,
+          notes: null,
+          sourceFileName: null,
+          uncertainSpans: [],
+        },
+      ],
+      warnings: [],
+    })
+    const { container } = render(
+      <OcrReview
+        documents={[]}
+        hasKey
+        loadApiKey={vi.fn().mockResolvedValue('browser-key')}
+        onAppendPages={vi.fn()}
+        onCreateDocument={onCreateDocument}
+        preservePageBreaks
+        stripImageMetadataBeforeOcr={false}
+      />,
+    )
+
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]')
+    await user.upload(input!, new File(['image'], 'three-pages.png', { type: 'image/png' }))
+    await user.click(screen.getByRole('button', { name: 'Process 1 page(s)' }))
+
+    await waitFor(() => expect(screen.getByDisplayValue('First kept page.')).toBeTruthy())
+    await user.click(screen.getByRole('button', { name: 'Next' }))
+    expect(screen.getByDisplayValue('Skipped ad page.')).toBeTruthy()
+    await user.selectOptions(screen.getByLabelText('Review status'), 'skipped')
+    expect(screen.getByText('Skipped 1')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Create document from pages' }))
+
+    expect(onCreateDocument).toHaveBeenCalledWith('Skip middle page', [
+      expect.objectContaining({ pageNumber: 1, sourcePageNumber: 11, text: 'First kept page.' }),
+      expect.objectContaining({ pageNumber: 2, sourcePageNumber: 13, text: 'Final kept page.' }),
     ])
   })
 
@@ -383,7 +459,7 @@ describe('OcrReview', () => {
 
     await waitFor(() => expect(screen.getByDisplayValue('First item ready.')).toBeTruthy())
     expect(screen.getByText('Processing item 2 of 2: Reading scans with Gemini OCR.')).toBeTruthy()
-    expect(screen.getByText('Running')).toBeTruthy()
+    expect(screen.getByText('Pending 1')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Create document from pages' })).toHaveProperty('disabled', true)
 
     await user.clear(screen.getByDisplayValue('First item ready.'))
@@ -405,8 +481,10 @@ describe('OcrReview', () => {
       warnings: [],
     })
 
-    await waitFor(() => expect(screen.getByDisplayValue('Second item finished.')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('Approved 2')).toBeTruthy())
     expect(screen.getByDisplayValue('Edited while second runs.')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Next' }))
+    expect(screen.getByDisplayValue('Second item finished.')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Create document from pages' })).toHaveProperty('disabled', false)
 
     await user.click(screen.getByRole('button', { name: 'Create document from pages' }))
@@ -502,6 +580,8 @@ describe('OcrReview', () => {
     await user.click(screen.getByRole('button', { name: 'Process 2 page(s)' }))
 
     await waitFor(() => expect(screen.getByText('Successful page text.')).toBeTruthy())
+    expect(screen.getByText('Failed 1')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Next' }))
     expect(screen.getByText('Gemini could not read the scan.')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Skip' })).toBeTruthy()
@@ -577,11 +657,15 @@ describe('OcrReview', () => {
     ])
     await user.click(screen.getByRole('button', { name: 'Process 2 page(s)' }))
 
-    await waitFor(() => expect(screen.getByText('Temporary OCR failure.')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('Failed 1')).toBeTruthy())
+    await user.click(screen.getByRole('button', { name: 'Next' }))
+    expect(screen.getByText('Temporary OCR failure.')).toBeTruthy()
     await user.click(screen.getByRole('button', { name: 'Retry' }))
 
-    await waitFor(() => expect(screen.getByText('Recovered page.')).toBeTruthy())
-    expect(screen.getByText('Already successful.')).toBeTruthy()
+    await waitFor(() => expect(screen.getByText('Approved 2')).toBeTruthy())
+    expect(screen.getByDisplayValue('Recovered page.')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Previous' }))
+    expect(screen.getByDisplayValue('Already successful.')).toBeTruthy()
     expect(runGeminiOcrFromFilesMock.mock.calls.map((call) => call[1][0]?.name)).toEqual([
       'good-page.png',
       'bad-page.png',
@@ -649,14 +733,17 @@ describe('OcrReview', () => {
     ])
     await user.click(screen.getByRole('button', { name: 'Process 2 page(s)' }))
 
-    await waitFor(() => expect(screen.getByText('Unreadable original.')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('Failed 1')).toBeTruthy())
+    await user.click(screen.getByRole('button', { name: 'Next' }))
+    expect(screen.getByText('Unreadable original.')).toBeTruthy()
     await user.upload(
       screen.getByLabelText('Replacement file for bad-page.png'),
       new File(['replacement'], 'replacement-page.png', { type: 'image/png' }),
     )
 
-    await waitFor(() => expect(screen.getByText('Replacement page text.')).toBeTruthy())
-    expect(screen.getByText('Kept page text.')).toBeTruthy()
+    await waitFor(() => expect(screen.getByDisplayValue('Replacement page text.')).toBeTruthy())
+    await user.click(screen.getByRole('button', { name: 'Previous' }))
+    expect(screen.getByDisplayValue('Kept page text.')).toBeTruthy()
     expect(runGeminiOcrFromFilesMock.mock.calls.map((call) => call[1][0]?.name)).toEqual([
       'good-page.png',
       'bad-page.png',

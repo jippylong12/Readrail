@@ -11,10 +11,15 @@ type DocumentOrganizerProps = {
   onMoveChapter: (documentId: string, chapterId: string, direction: -1 | 1) => void
   onDeleteChapter: (chapterId: string) => void
   onMovePage: (pageId: string, targetChapterId: string, targetIndex: number) => void
+  onSelectChapter: (chapterId: string) => void
+  onSelectPage: (pageNumber: number) => void
   onUpdatePageMetadata: (
     pageId: string,
     updates: Partial<Pick<DocumentPageRecord, 'sourcePageNumber' | 'title'>>,
   ) => void
+  pageNumber: number
+  pagesPerPage: number
+  selectedChapterId: string | null
 }
 
 export function DocumentOrganizer({
@@ -26,7 +31,12 @@ export function DocumentOrganizer({
   onMoveChapter,
   onDeleteChapter,
   onMovePage,
+  onSelectChapter,
+  onSelectPage,
   onUpdatePageMetadata,
+  pageNumber,
+  pagesPerPage,
+  selectedChapterId,
 }: DocumentOrganizerProps) {
   const [newChapterTitle, setNewChapterTitle] = useState('')
   const [editingChapterId, setEditingChapterId] = useState<string | null>(null)
@@ -34,6 +44,16 @@ export function DocumentOrganizer({
   const [pageLabelDrafts, setPageLabelDrafts] = useState<Record<string, string>>({})
   const [sourcePageDrafts, setSourcePageDrafts] = useState<Record<string, string>>({})
   const orderedChapters = getOrderedDocumentChapters(document.id, chapters)
+  const selectedChapter = orderedChapters.find((chapter) => chapter.id === selectedChapterId) ?? orderedChapters[0] ?? null
+  const selectedChapterIndex = selectedChapter
+    ? orderedChapters.findIndex((chapter) => chapter.id === selectedChapter.id)
+    : -1
+  const selectedChapterPages = selectedChapter ? getOrderedChapterPages(selectedChapter.id, pages) : []
+  const paginationPageCount = Math.max(1, Math.ceil(selectedChapterPages.length / pagesPerPage))
+  const currentPageNumber = Math.min(Math.max(1, pageNumber), paginationPageCount)
+  const visibleStartIndex = (currentPageNumber - 1) * pagesPerPage
+  const visiblePages = selectedChapterPages.slice(visibleStartIndex, visibleStartIndex + pagesPerPage)
+  const selectedChapterWords = selectedChapterPages.reduce((total, page) => total + page.wordCount, 0)
 
   function submitChapter(): void {
     onCreateChapter(document.id, newChapterTitle)
@@ -76,98 +96,144 @@ export function DocumentOrganizer({
         </button>
       </form>
 
-      <div className="organizer-chapter-list">
-        {orderedChapters.map((chapter, chapterIndex) => {
-          const chapterPages = getOrderedChapterPages(chapter.id, pages)
-          const isEditingChapter = editingChapterId === chapter.id
-          return (
-            <article className="organizer-chapter" key={chapter.id}>
-              <div className="organizer-chapter-header">
-                {isEditingChapter ? (
-                  <form
-                    className="organizer-title-edit"
-                    onSubmit={(event) => {
-                      event.preventDefault()
-                      saveChapterTitle(chapter.id)
-                    }}
-                  >
-                    <label className="field">
-                      Chapter title
-                      <input
-                        autoFocus
-                        onChange={(event) => setChapterTitleDraft(event.target.value)}
-                        value={chapterTitleDraft}
-                      />
-                    </label>
-                    <div className="button-row compact">
-                      <button className="primary-button" type="submit">
-                        Save
-                      </button>
-                      <button
-                        className="secondary-button"
-                        onClick={() => setEditingChapterId(null)}
-                        type="button"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </form>
-                ) : (
-                  <>
-                    <div>
-                      <span className="eyebrow">Chapter {chapterIndex + 1}</span>
-                      <h3>{chapter.title}</h3>
-                      <span>{chapterPages.length} page(s)</span>
-                    </div>
-                    <div className="organizer-actions">
-                      <button
-                        className="ghost-button"
-                        disabled={chapterIndex === 0}
-                        onClick={() => onMoveChapter(document.id, chapter.id, -1)}
-                        type="button"
-                      >
-                        Up
-                      </button>
-                      <button
-                        className="ghost-button"
-                        disabled={chapterIndex === orderedChapters.length - 1}
-                        onClick={() => onMoveChapter(document.id, chapter.id, 1)}
-                        type="button"
-                      >
-                        Down
-                      </button>
-                      <button
-                        className="ghost-button"
-                        onClick={() => {
-                          setEditingChapterId(chapter.id)
-                          setChapterTitleDraft(chapter.title)
-                        }}
-                        type="button"
-                      >
-                        Rename
-                      </button>
-                      <button
-                        className="danger-button"
-                        disabled={orderedChapters.length <= 1}
-                        onClick={() => onDeleteChapter(chapter.id)}
-                        title="Pages move to the nearest chapter."
-                        type="button"
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
+      <div className="organizer-browser">
+        <nav className="organizer-chapter-nav" aria-label="Document chapters">
+          {orderedChapters.map((chapter, chapterIndex) => {
+            const chapterPages = getOrderedChapterPages(chapter.id, pages)
+            const isSelected = chapter.id === selectedChapter?.id
+            return (
+              <button
+                aria-current={isSelected ? 'page' : undefined}
+                className={isSelected ? 'organizer-chapter-tab active' : 'organizer-chapter-tab'}
+                key={chapter.id}
+                onClick={() => onSelectChapter(chapter.id)}
+                type="button"
+              >
+                <span className="eyebrow">Chapter {chapterIndex + 1}</span>
+                <strong>{chapter.title}</strong>
+                <span>{chapterPages.length} page(s)</span>
+              </button>
+            )
+          })}
+        </nav>
 
-              <div className="organizer-page-list">
-                {chapterPages.length === 0 ? (
-                  <div className="empty-state compact">
-                    <strong>Empty chapter</strong>
-                    <span>Move pages here or delete it.</span>
+        {selectedChapter ? (
+          <article className="organizer-chapter">
+            <div className="organizer-chapter-header">
+              {editingChapterId === selectedChapter.id ? (
+                <form
+                  className="organizer-title-edit"
+                  onSubmit={(event) => {
+                    event.preventDefault()
+                    saveChapterTitle(selectedChapter.id)
+                  }}
+                >
+                  <label className="field">
+                    Chapter title
+                    <input
+                      autoFocus
+                      onChange={(event) => setChapterTitleDraft(event.target.value)}
+                      value={chapterTitleDraft}
+                    />
+                  </label>
+                  <div className="button-row compact">
+                    <button className="primary-button" type="submit">
+                      Save
+                    </button>
+                    <button
+                      className="secondary-button"
+                      onClick={() => setEditingChapterId(null)}
+                      type="button"
+                    >
+                      Cancel
+                    </button>
                   </div>
-                ) : (
-                  chapterPages.map((page, pageIndex) => (
+                </form>
+              ) : (
+                <>
+                  <div>
+                    <span className="eyebrow">Chapter {selectedChapterIndex + 1}</span>
+                    <h3>{selectedChapter.title}</h3>
+                    <span>
+                      {selectedChapterPages.length} page(s) - {selectedChapterWords.toLocaleString()} words
+                    </span>
+                  </div>
+                  <div className="organizer-actions">
+                    <button
+                      className="ghost-button"
+                      disabled={selectedChapterIndex <= 0}
+                      onClick={() => onMoveChapter(document.id, selectedChapter.id, -1)}
+                      type="button"
+                    >
+                      Up
+                    </button>
+                    <button
+                      className="ghost-button"
+                      disabled={selectedChapterIndex === orderedChapters.length - 1}
+                      onClick={() => onMoveChapter(document.id, selectedChapter.id, 1)}
+                      type="button"
+                    >
+                      Down
+                    </button>
+                    <button
+                      className="ghost-button"
+                      onClick={() => {
+                        setEditingChapterId(selectedChapter.id)
+                        setChapterTitleDraft(selectedChapter.title)
+                      }}
+                      type="button"
+                    >
+                      Rename
+                    </button>
+                    <button
+                      className="danger-button"
+                      disabled={orderedChapters.length <= 1}
+                      onClick={() => onDeleteChapter(selectedChapter.id)}
+                      title="Pages move to the nearest chapter."
+                      type="button"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="organizer-pagination" aria-label="Chapter page navigation">
+              <button
+                className="ghost-button"
+                disabled={currentPageNumber <= 1}
+                onClick={() => onSelectPage(currentPageNumber - 1)}
+                type="button"
+              >
+                Previous page
+              </button>
+              <span>
+                Page {currentPageNumber} of {paginationPageCount}
+                {selectedChapterPages.length > 0
+                  ? ` - showing ${visibleStartIndex + 1}-${visibleStartIndex + visiblePages.length} of ${selectedChapterPages.length}`
+                  : ' - no pages'}
+              </span>
+              <button
+                className="ghost-button"
+                disabled={currentPageNumber >= paginationPageCount}
+                onClick={() => onSelectPage(currentPageNumber + 1)}
+                type="button"
+              >
+                Next page
+              </button>
+            </div>
+
+            <div className="organizer-page-list">
+              {visiblePages.length === 0 ? (
+                <div className="empty-state compact">
+                  <strong>Empty chapter</strong>
+                  <span>Move pages here or delete it.</span>
+                </div>
+              ) : (
+                visiblePages.map((page, visiblePageIndex) => {
+                  const pageIndex = visibleStartIndex + visiblePageIndex
+                  return (
                     <article className="organizer-page" key={page.id}>
                       <div className="organizer-page-summary">
                         <strong>{page.title || `Page ${page.pageNumber}`}</strong>
@@ -179,15 +245,15 @@ export function DocumentOrganizer({
                         <button
                           className="ghost-button"
                           disabled={pageIndex === 0}
-                          onClick={() => onMovePage(page.id, chapter.id, pageIndex - 1)}
+                          onClick={() => onMovePage(page.id, selectedChapter.id, pageIndex - 1)}
                           type="button"
                         >
                           Up
                         </button>
                         <button
                           className="ghost-button"
-                          disabled={pageIndex === chapterPages.length - 1}
-                          onClick={() => onMovePage(page.id, chapter.id, pageIndex + 1)}
+                          disabled={pageIndex === selectedChapterPages.length - 1}
+                          onClick={() => onMovePage(page.id, selectedChapter.id, pageIndex + 1)}
                           type="button"
                         >
                           Down
@@ -198,12 +264,12 @@ export function DocumentOrganizer({
                             aria-label={`Move page ${page.pageNumber} to chapter`}
                             onChange={(event) => {
                               const nextChapterId = event.target.value
-                              if (nextChapterId !== chapter.id) {
+                              if (nextChapterId !== selectedChapter.id) {
                                 const nextChapterPageCount = getOrderedChapterPages(nextChapterId, pages).length
                                 onMovePage(page.id, nextChapterId, nextChapterPageCount)
                               }
                             }}
-                            value={chapter.id}
+                            value={selectedChapter.id}
                           >
                             {orderedChapters.map((candidate) => (
                               <option key={candidate.id} value={candidate.id}>
@@ -239,12 +305,17 @@ export function DocumentOrganizer({
                         </label>
                       </div>
                     </article>
-                  ))
-                )}
-              </div>
-            </article>
-          )
-        })}
+                  )
+                })
+              )}
+            </div>
+          </article>
+        ) : (
+          <div className="empty-state compact">
+            <strong>No chapters yet</strong>
+            <span>Add a chapter to start organizing this document.</span>
+          </div>
+        )}
       </div>
     </section>
   )

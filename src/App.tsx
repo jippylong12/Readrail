@@ -450,6 +450,9 @@ function App() {
           loadApiKey={() => loadGeminiApiKey('ocr')}
           onAppendPages={appendAndOpenOcrPages}
           onBack={() => navigate({ route: 'library-saved', documentId: null })}
+          onDocumentViewChange={(documentId, chapterId, pageNumber, options) => {
+            navigate({ route: 'library-document', documentId, chapterId, pageNumber }, options)
+          }}
           onCreateChapter={(documentId, title) => {
             createChapter(documentId, title)
           }}
@@ -468,6 +471,8 @@ function App() {
           onUpdatePageMetadata={updatePageMetadata}
           pages={documentPages}
           preservePageBreaks={settings.ocr.preservePageBreaks}
+          routeChapterId={navigation.chapterId ?? null}
+          routePageNumber={navigation.pageNumber ?? null}
           stripImageMetadataBeforeOcr={settings.privacy.stripImageMetadataBeforeOcr}
         />
       )}
