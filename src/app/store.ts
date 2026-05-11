@@ -268,7 +268,19 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: 'readrail-local-state',
-      version: 1,
+      version: 2,
+      migrate: (persistedState: unknown, fromVersion: number) => {
+        const state = persistedState as Record<string, unknown>
+        // v1 → v2: seed defaultPageLayout for existing users
+        if (fromVersion < 2) {
+          const settings = state.settings as Record<string, unknown> | undefined
+          const reader = settings?.reader as Record<string, unknown> | undefined
+          if (reader && reader.defaultPageLayout === undefined) {
+            reader.defaultPageLayout = 1
+          }
+        }
+        return state
+      },
       partialize: (state) => ({
         documents: state.documents,
         sessions: state.sessions,

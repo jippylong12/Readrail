@@ -7,7 +7,7 @@
  * @returns An array of `pageCount` arrays, each containing a slice of items.
  */
 export function splitIntoPages<T>(items: T[], pageCount: number): T[][] {
-  if (pageCount <= 1 || items.length === 0) {
+  if (!pageCount || pageCount <= 1 || items.length === 0) {
     return [items]
   }
 

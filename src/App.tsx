@@ -172,7 +172,7 @@ function App() {
             baselineResult={baselineResult}
             defaultChunkSize={settings.reader.chunkSize}
             defaultMode={settings.reader.defaultMode}
-            defaultPageLayout={settings.reader.defaultPageLayout}
+            defaultPageLayout={settings.reader.defaultPageLayout ?? 1}
             defaultWpm={settings.reader.defaultWpm}
             document={activeDocument}
             fontSize={settings.reader.fontSize}
