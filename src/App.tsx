@@ -37,6 +37,7 @@ function App() {
   const onboarding = useAppStore((state) => state.onboarding)
   const completedTourIds = useAppStore((state) => state.tourProgress.completedTourIds)
   const baselineResult = useAppStore((state) => state.baselineResult)
+  const quizAttempts = useAppStore((state) => state.quizAttempts)
   const activeDocument = useAppStore(selectActiveDocument)
   const createDocument = useAppStore((state) => state.createDocument)
   const archiveDocument = useAppStore((state) => state.archiveDocument)
@@ -198,7 +199,7 @@ function App() {
 
       {route === 'stats' && (
         <div className="content-stack">
-          <StatsChart baselineResult={baselineResult} documents={documents} sessions={sessions} />
+          <StatsChart baselineResult={baselineResult} documents={documents} sessions={sessions} quizAttempts={quizAttempts} />
           <section className="panel export-panel" data-tour="export">
             <span className="eyebrow">Export</span>
             <h2>Progress backup</h2>
