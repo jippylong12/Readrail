@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
+import { invoke } from '@tauri-apps/api/core'
 import { AppShell } from './components/AppShell'
 import { ImportPanel } from './components/ImportPanel'
 import { LibraryList } from './components/LibraryList'
 import { OnboardingJourney } from './components/OnboardingJourney'
 import { OcrReview } from './components/OcrReview'
 import { ReaderRail } from './components/ReaderRail'
-import { SessionSummary } from './components/SessionSummary'
+import { ReadingQuizPanel } from './components/ReadingQuizPanel'
+import { ProgressPanel } from './components/ProgressPanel'
 import { SettingsPanel } from './components/SettingsPanel'
 import { StatsChart } from './components/StatsChart'
 import { GuidedTour } from './components/GuidedTour'
@@ -14,22 +16,35 @@ import { getRouteForShortcutEvent } from './app/shortcuts'
 import { selectActiveDocument, useAppStore } from './app/store'
 import { TOUR_DEFINITIONS, type TourId } from './app/tours'
 import { exportProgressCsv, exportProgressJson } from './lib/db/export'
-import { getDatabase } from './lib/db/migrations'
-import type { ReaderMode } from './types/domain'
+import { getDatabase, isTauriRuntime } from './lib/db/migrations'
+import { generateQuizFromReading, type GeminiQuiz } from './lib/ai/geminiQuiz'
+import { buildGeneratedQuizAttempt, scoreGeneratedQuizQuestions } from './lib/reading/coaching'
+import type { DocumentRecord, ReaderMode } from './types/domain'
 
 type PendingSession = {
   mode: ReaderMode
   targetWpm: number
+  startWordIndex: number
+  endWordIndex: number
   wordsRead: number
   durationSeconds: number
   pauseCount: number
   regressionCount: number
 }
 
+type PendingQuiz = {
+  document: DocumentRecord
+  error: string | null
+  isLoading: boolean
+  quiz: GeminiQuiz | null
+  session: PendingSession
+}
+
 function App() {
   const [route, setRoute] = useState<AppRoute>('library')
-  const [pendingSession, setPendingSession] = useState<PendingSession | null>(null)
+  const [pendingQuiz, setPendingQuiz] = useState<PendingQuiz | null>(null)
   const [hasGeminiKey, setHasGeminiKey] = useState(false)
+  const [browserGeminiKey, setBrowserGeminiKey] = useState('')
   const [replayTourId, setReplayTourId] = useState<TourId | null>(null)
   const documents = useAppStore((state) => state.documents)
   const sessions = useAppStore((state) => state.sessions)
@@ -38,6 +53,7 @@ function App() {
   const completedTourIds = useAppStore((state) => state.tourProgress.completedTourIds)
   const baselineResult = useAppStore((state) => state.baselineResult)
   const quizAttempts = useAppStore((state) => state.quizAttempts)
+  const coaching = useAppStore((state) => state.coaching)
   const activeDocument = useAppStore(selectActiveDocument)
   const createDocument = useAppStore((state) => state.createDocument)
   const archiveDocument = useAppStore((state) => state.archiveDocument)
@@ -45,6 +61,9 @@ function App() {
   const completeSession = useAppStore((state) => state.completeSession)
   const updateSettings = useAppStore((state) => state.updateSettings)
   const saveBaselineResult = useAppStore((state) => state.saveBaselineResult)
+  const addQuizAttempt = useAppStore((state) => state.addQuizAttempt)
+  const resetCoachingSegment = useAppStore((state) => state.resetCoachingSegment)
+  const startCoachingSegment = useAppStore((state) => state.startCoachingSegment)
   const skipOnboarding = useAppStore((state) => state.skipOnboarding)
   const completeOnboardingIntro = useAppStore((state) => state.completeOnboardingIntro)
   const reopenOnboarding = useAppStore((state) => state.reopenOnboarding)
@@ -61,7 +80,18 @@ function App() {
     void getDatabase()
   }, [])
 
-  const activeTourId = replayTourId ?? (completedTourIds.includes(route) ? null : route)
+  useEffect(() => {
+    if (!isTauriRuntime()) {
+      return
+    }
+
+    void invoke<{ hasKey: boolean }>('keychain_has_gemini_key').then((result) => {
+      setHasGeminiKey(result.hasKey)
+    })
+  }, [])
+
+  const routeTourId = route in TOUR_DEFINITIONS ? (route as TourId) : null
+  const activeTourId = replayTourId ?? (routeTourId && !completedTourIds.includes(routeTourId) ? routeTourId : null)
 
   const createAndOpenDocument = useCallback(
     (title: string, content: string, sourceType: 'paste' | 'text_file' | 'photo_ocr' = 'paste') => {
@@ -94,7 +124,7 @@ function App() {
     setRoute('library')
   }
 
-  function replayTour(tourId: TourId = route): void {
+  function replayTour(tourId: TourId = routeTourId ?? 'reader'): void {
     setRoute(tourId)
     resetTour(tourId)
     setReplayTourId(tourId)
@@ -109,6 +139,117 @@ function App() {
     setReplayTourId(null)
     setRoute(nextRoute)
   }, [])
+
+  const handleGeminiKeyStateChange = useCallback((hasKey: boolean, apiKey?: string): void => {
+    setHasGeminiKey(hasKey)
+    if (apiKey !== undefined) {
+      setBrowserGeminiKey(apiKey.trim())
+    }
+  }, [])
+
+  const loadGeminiApiKey = useCallback(async (): Promise<string | null> => {
+    if (!hasGeminiKey) {
+      return null
+    }
+
+    if (isTauriRuntime()) {
+      const key = await invoke<string>('keychain_get_gemini_key_for_ocr', { reason: 'quiz' })
+      return key.trim() || null
+    }
+
+    const sessionKey = browserGeminiKey.trim()
+    if (sessionKey) {
+      return sessionKey
+    }
+
+    return window.prompt('Gemini API key for this quiz run')?.trim() || null
+  }, [browserGeminiKey, hasGeminiKey])
+
+  const startQuizForSession = useCallback(
+    async (session: PendingSession): Promise<void> => {
+      if (!activeDocument) {
+        return
+      }
+
+      const endWordIndex = Math.max(0, Math.min(session.endWordIndex || activeDocument.wordCount, activeDocument.wordCount))
+      const startWordIndex = Math.max(0, Math.min(session.startWordIndex, endWordIndex))
+      const wordsRead = Math.max(1, endWordIndex - startWordIndex)
+      const normalizedSession = { ...session, startWordIndex, endWordIndex, wordsRead }
+      const quizDocument = activeDocument
+      setRoute('test')
+      setPendingQuiz({
+        document: quizDocument,
+        error: null,
+        isLoading: true,
+        quiz: null,
+        session: normalizedSession,
+      })
+
+      try {
+        const apiKey = await loadGeminiApiKey()
+        if (!apiKey) {
+          throw new Error('Add a Gemini API key in Settings before testing comprehension.')
+        }
+
+        const quizText = excerptWords(quizDocument.content, startWordIndex, endWordIndex)
+        const quiz = await generateQuizFromReading(apiKey, quizDocument.title, quizText, wordsRead)
+        setPendingQuiz({
+          document: quizDocument,
+          error: null,
+          isLoading: false,
+          quiz,
+          session: normalizedSession,
+        })
+      } catch (error) {
+        setPendingQuiz({
+          document: quizDocument,
+          error: error instanceof Error ? error.message : 'Quiz generation failed.',
+          isLoading: false,
+          quiz: null,
+          session: normalizedSession,
+        })
+      }
+    },
+    [activeDocument, loadGeminiApiKey],
+  )
+
+  function cancelPendingQuiz(): void {
+    setPendingQuiz(null)
+    setRoute('reader')
+  }
+
+  function saveQuizResult(answers: Record<string, string>): void {
+    if (!pendingQuiz?.quiz) {
+      return
+    }
+
+    const scoring = scoreGeneratedQuizQuestions(pendingQuiz.quiz.questions, answers)
+    const session = completeSession({
+      ...pendingQuiz.session,
+      documentId: pendingQuiz.document.id,
+      startPosition: pendingQuiz.session.startWordIndex,
+      endPosition: pendingQuiz.session.endWordIndex,
+      comprehensionScore: scoring.comprehensionPercent,
+      selfRating: null,
+      notes: '',
+    })
+    addQuizAttempt(
+      buildGeneratedQuizAttempt({
+        documentId: pendingQuiz.document.id,
+        readingSessionId: session.id,
+        startWordIndex: pendingQuiz.session.startWordIndex,
+        endWordIndex: pendingQuiz.session.endWordIndex,
+        wordCount: pendingQuiz.session.wordsRead,
+        durationSeconds: pendingQuiz.session.durationSeconds,
+        comprehensionPercent: scoring.comprehensionPercent,
+        currentTargetWpm: pendingQuiz.session.targetWpm,
+        questionResults: scoring.questionResults,
+        questions: scoring.questions,
+      }),
+    )
+    setPendingQuiz(null)
+    setRoute('progress')
+  }
 
   useEffect(() => {
     if (onboarding.status === 'not_started') {
@@ -174,27 +315,64 @@ function App() {
             defaultChunkSize={settings.reader.chunkSize}
             defaultMode={settings.reader.defaultMode}
             defaultPageLayout={settings.reader.defaultPageLayout ?? 1}
-            defaultWpm={settings.reader.defaultWpm}
+            defaultWpm={coaching.recommendedWpm || settings.reader.defaultWpm}
             document={activeDocument}
             fontSize={settings.reader.fontSize}
             key={activeDocument?.id ?? 'empty-reader'}
             lineHeight={settings.reader.lineHeight}
-            onComplete={setPendingSession}
-          />
-          <SessionSummary
-            onDiscard={() => setPendingSession(null)}
-            onSave={(input) => {
-              if (!activeDocument) {
-                return
-              }
-
-              completeSession({ ...input, documentId: activeDocument.id })
-              setPendingSession(null)
-              setRoute('stats')
+            segmentStartWordIndex={
+              activeDocument ? coaching.lastResetWordIndexByDocument[activeDocument.id] ?? 0 : 0
+            }
+            onSegmentReset={resetCoachingSegment}
+            onSegmentStart={(documentId, segment) => startCoachingSegment(documentId, segment)}
+            onStartTest={(input) => {
+              void startQuizForSession(input)
             }}
-            pendingSession={pendingSession}
           />
         </div>
+      )}
+
+      {route === 'test' && (
+        <div className="content-stack">
+          {pendingQuiz ? (
+            <ReadingQuizPanel
+              durationSeconds={pendingQuiz.session.durationSeconds}
+              error={pendingQuiz.error}
+              isLoading={pendingQuiz.isLoading}
+              onCancel={cancelPendingQuiz}
+              onRetry={() => {
+                void startQuizForSession(pendingQuiz.session)
+              }}
+              onSubmit={saveQuizResult}
+              quiz={pendingQuiz.quiz}
+              wordsRead={pendingQuiz.session.wordsRead}
+            />
+          ) : (
+            <section className="panel quiz-panel">
+              <span className="eyebrow">Test</span>
+              <h1>No test in progress</h1>
+              <div className="empty-state">
+                <strong>Return to the reader</strong>
+                <span>Open a reading and use Test to generate a comprehension quiz.</span>
+              </div>
+              <button className="primary-button" onClick={() => setRoute('reader')} type="button">
+                Back to reader
+              </button>
+            </section>
+          )}
+        </div>
+      )}
+
+      {route === 'progress' && (
+        <ProgressPanel
+          coaching={coaching}
+          documents={documents}
+          onOpenReader={(documentId) => {
+            setActiveDocument(documentId)
+            setRoute('reader')
+          }}
+          quizAttempts={quizAttempts}
+        />
       )}
 
       {route === 'stats' && (
@@ -203,8 +381,6 @@ function App() {
             baselineResult={baselineResult}
             documents={documents}
             sessions={sessions}
-            quizAttempts={quizAttempts}
-            hasGeminiKey={hasGeminiKey}
           />
           <section className="panel export-panel" data-tour="export">
             <span className="eyebrow">Export</span>
@@ -223,7 +399,7 @@ function App() {
 
       {route === 'settings' && (
         <SettingsPanel
-          onKeyStateChange={setHasGeminiKey}
+          onKeyStateChange={handleGeminiKeyStateChange}
           onOpenJourney={reopenOnboarding}
           onReplayTour={replayTour}
           onResetData={resetAllData}
@@ -238,6 +414,10 @@ function App() {
       )}
     </AppShell>
   )
+}
+
+function excerptWords(content: string, startWordIndex: number, endWordIndex: number): string {
+  return content.split(/\s+/).filter(Boolean).slice(startWordIndex, endWordIndex).join(' ')
 }
 
 export default App

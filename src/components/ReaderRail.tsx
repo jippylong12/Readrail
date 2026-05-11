@@ -5,6 +5,19 @@ import { clampWpm, formatDuration } from '../lib/reading/pacing'
 import { splitIntoPages, getActivePage } from '../lib/text/pages'
 import { ReaderControls } from './ReaderControls'
 
+export const COMPREHENSION_TEST_THRESHOLD_WORDS = 1000
+
+export type ReaderSegmentInput = {
+  mode: ReaderMode
+  targetWpm: number
+  startWordIndex: number
+  endWordIndex: number
+  wordsRead: number
+  durationSeconds: number
+  pauseCount: number
+  regressionCount: number
+}
+
 type ReaderRailProps = {
   baselineResult: BaselineAssessmentResult | null
   document: DocumentRecord | null
@@ -14,14 +27,10 @@ type ReaderRailProps = {
   defaultPageLayout: PageLayout
   fontSize: number
   lineHeight: number
-  onComplete: (input: {
-    mode: ReaderMode
-    targetWpm: number
-    wordsRead: number
-    durationSeconds: number
-    pauseCount: number
-    regressionCount: number
-  }) => void
+  segmentStartWordIndex: number
+  onSegmentReset: (documentId: string, wordIndex: number) => void
+  onSegmentStart: (documentId: string, segment: { startWordIndex: number; startedAt: string; targetWpm: number }) => void
+  onStartTest: (input: ReaderSegmentInput) => void
 }
 
 export function ReaderRail({
@@ -33,7 +42,10 @@ export function ReaderRail({
   defaultPageLayout,
   fontSize,
   lineHeight,
-  onComplete,
+  segmentStartWordIndex: initialSegmentStartWordIndex,
+  onSegmentReset,
+  onSegmentStart,
+  onStartTest,
 }: ReaderRailProps) {
   const [mode, setMode] = useState<ReaderMode>(defaultMode)
   const [targetWpm, setTargetWpm] = useState(defaultWpm)
@@ -45,10 +57,16 @@ export function ReaderRail({
   const [pauseCount, setPauseCount] = useState(0)
   const [regressionCount, setRegressionCount] = useState(0)
   const [isFocusMode, setIsFocusMode] = useState(false)
+  const [hasStartedReading, setHasStartedReading] = useState(false)
+  const [segmentStartWordIndex, setSegmentStartWordIndex] = useState(initialSegmentStartWordIndex)
+  const [segmentStartElapsedSeconds, setSegmentStartElapsedSeconds] = useState(0)
+  const [suggestion, setSuggestion] = useState<'threshold' | null>(null)
   const startedRef = useRef<number | null>(null)
 
   const chunks = useMemo(() => chunkText(document?.content ?? '', chunkSize), [chunkSize, document?.content])
   const activeChunk = chunks[activeIndex]
+  const currentWordIndex = activeChunk?.endWord ?? 0
+  const untestedWordCount = Math.max(0, currentWordIndex - segmentStartWordIndex)
   const progress = chunks.length ? Math.round(((activeIndex + 1) / chunks.length) * 100) : 0
 
   useEffect(() => {
@@ -61,7 +79,11 @@ export function ReaderRail({
     const timer = window.setTimeout(() => {
       setActiveIndex((index) => {
         if (index >= chunks.length - 1) {
+          const finalWordIndex = chunks[index]?.endWord ?? document?.wordCount ?? currentWordIndex
           setIsRunning(false)
+          if (finalWordIndex - segmentStartWordIndex >= COMPREHENSION_TEST_THRESHOLD_WORDS) {
+            setSuggestion('threshold')
+          }
           return index
         }
 
@@ -70,7 +92,7 @@ export function ReaderRail({
     }, duration)
 
     return () => window.clearTimeout(timer)
-  }, [activeChunk, activeIndex, chunks.length, isRunning, targetWpm])
+  }, [activeChunk, activeIndex, chunks, currentWordIndex, document?.wordCount, isRunning, segmentStartWordIndex, targetWpm])
 
   useEffect(() => {
     if (!isRunning) {
@@ -109,17 +131,73 @@ export function ReaderRail({
     )
   }
 
-  function finishSession(): void {
-    setIsRunning(false)
-    setIsFocusMode(false)
-    onComplete({
+  function buildSegment(endWordIndex = currentWordIndex): ReaderSegmentInput {
+    const normalizedEndWordIndex = Math.max(0, Math.min(endWordIndex, document?.wordCount ?? endWordIndex))
+    const normalizedStartWordIndex = Math.max(0, Math.min(segmentStartWordIndex, normalizedEndWordIndex))
+    return {
       mode,
       targetWpm,
-      wordsRead: activeChunk?.endWord ?? 0,
-      durationSeconds: Math.max(1, elapsedSeconds),
+      startWordIndex: normalizedStartWordIndex,
+      endWordIndex: normalizedEndWordIndex,
+      wordsRead: Math.max(0, normalizedEndWordIndex - normalizedStartWordIndex),
+      durationSeconds: Math.max(1, elapsedSeconds - segmentStartElapsedSeconds),
       pauseCount,
       regressionCount,
-    })
+    }
+  }
+
+  function beginSegmentIfNeeded(): void {
+    if (hasStartedReading) {
+      return
+    }
+
+    const startWordIndex = Math.max(0, activeChunk?.startWord ?? segmentStartWordIndex)
+    setHasStartedReading(true)
+    setSegmentStartWordIndex(startWordIndex)
+    setSegmentStartElapsedSeconds(elapsedSeconds)
+    if (document) {
+      onSegmentStart(document.id, {
+        startWordIndex,
+        startedAt: new Date().toISOString(),
+        targetWpm,
+      })
+    }
+  }
+
+  function resetSegment(wordIndex: number): void {
+    const normalizedWordIndex = Math.max(0, Math.round(wordIndex))
+    setSegmentStartWordIndex(normalizedWordIndex)
+    setSegmentStartElapsedSeconds(elapsedSeconds)
+    setSuggestion(null)
+    if (document) {
+      onSegmentReset(document.id, normalizedWordIndex)
+    }
+  }
+
+  function startTest(): void {
+    setIsRunning(false)
+    setIsFocusMode(false)
+    setSuggestion(null)
+    onStartTest(buildSegment())
+  }
+
+  function pauseReading(): void {
+    setIsRunning(false)
+    setPauseCount((count) => count + 1)
+    if (untestedWordCount >= COMPREHENSION_TEST_THRESHOLD_WORDS) {
+      setSuggestion('threshold')
+    }
+  }
+
+  function toggleRunning(): void {
+    if (isRunning) {
+      pauseReading()
+      return
+    }
+
+    beginSegmentIfNeeded()
+    setSuggestion(null)
+    setIsRunning(true)
   }
 
   return (
@@ -140,26 +218,41 @@ export function ReaderRail({
         chunkSize={chunkSize}
         isFocusMode={isFocusMode}
         isRunning={isRunning}
+        isTestAvailable={hasStartedReading && untestedWordCount > 0}
         mode={mode}
         pageLayout={pageLayout}
         onChunkSizeChange={setChunkSize}
         onFocusModeToggle={() => setIsFocusMode((focused) => !focused)}
-        onFinish={finishSession}
+        onTest={startTest}
         onModeChange={setMode}
         onPageLayoutChange={setPageLayout}
         onRegression={() => setRegressionCount((count) => count + 1)}
         onRewind={() => setActiveIndex((index) => Math.max(0, index - 6))}
-        onToggleRunning={() => {
-          setIsRunning((running) => {
-            if (running) {
-              setPauseCount((count) => count + 1)
-            }
-            return !running
-          })
-        }}
+        onToggleRunning={toggleRunning}
         onWpmChange={(value) => setTargetWpm(clampWpm(value))}
         targetWpm={targetWpm}
       />
+
+      {suggestion && (
+        <section className="reader-test-suggestion" aria-live="polite">
+          <div>
+            <strong>
+              You've read a while. Test comprehension?
+            </strong>
+            <span>
+              {`${untestedWordCount.toLocaleString()} words are ready for a meaning-based check.`}
+            </span>
+          </div>
+          <div className="button-row">
+            <button className="secondary-button" onClick={() => resetSegment(currentWordIndex)} type="button">
+              Not now
+            </button>
+            <button className="primary-button" onClick={startTest} type="button">
+              Test now
+            </button>
+          </div>
+        </section>
+      )}
 
       <div className="progress-track" aria-label="Reading progress">
         <span style={{ width: `${progress}%` }} />

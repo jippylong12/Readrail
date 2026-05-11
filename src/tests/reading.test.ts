@@ -6,6 +6,7 @@ import {
   scoreBaselineAnswers,
 } from '../lib/reading/baseline'
 import { comprehensionBand, recommendedNextWpm } from '../lib/reading/comprehension'
+import { buildGeneratedQuizAttempt, recommendCoachingWpm, scoreGeneratedQuizQuestions } from '../lib/reading/coaching'
 import {
   calculateActualWpm,
   calculateAdjustedWpm,
@@ -101,5 +102,69 @@ describe('reading math', () => {
       averageWpm: 240,
       averageComprehension: 85,
     })
+  })
+
+  it('builds coaching attempts from generated quiz results', () => {
+    const attempt = buildGeneratedQuizAttempt({
+      documentId: 'doc-1',
+      readingSessionId: null,
+      startWordIndex: 100,
+      endWordIndex: 400,
+      wordCount: 300,
+      durationSeconds: 90,
+      comprehensionPercent: 82,
+      currentTargetWpm: 240,
+      questionResults: [],
+      questions: [],
+    })
+
+    expect(attempt.kind).toBe('generated')
+    expect(attempt.startWordIndex).toBe(100)
+    expect(attempt.endWordIndex).toBe(400)
+    expect(attempt.targetWpm).toBe(240)
+    expect(attempt.rawWpm).toBe(200)
+    expect(attempt.adjustedWpm).toBe(164)
+    expect(attempt.recommendedWpm).toBe(255)
+  })
+
+  it('scores generated quizzes and recommends conservative targets', () => {
+    const scored = scoreGeneratedQuizQuestions(
+      [
+        {
+          id: 'q1',
+          kind: 'main_idea',
+          prompt: 'What is the central point?',
+          options: [
+            { id: 'a', label: 'Central point' },
+            { id: 'b', label: 'Distractor' },
+            { id: 'c', label: 'Another distractor' },
+            { id: 'd', label: 'Final distractor' },
+          ],
+          correctOptionId: 'a',
+        },
+        {
+          id: 'q2',
+          kind: 'inference',
+          prompt: 'What can the reader infer?',
+          options: [
+            { id: 'a', label: 'Wrong inference' },
+            { id: 'b', label: 'Right inference' },
+            { id: 'c', label: 'Weak inference' },
+            { id: 'd', label: 'Unsupported inference' },
+          ],
+          correctOptionId: 'b',
+        },
+      ],
+      { q1: 'a', q2: 'c' },
+    )
+
+    expect(scored.comprehensionPercent).toBe(50)
+    expect(scored.questionResults.map((result) => result.score)).toEqual([1, 0])
+    expect(scored.questions[0]).toMatchObject({
+      correctOptionId: 'a',
+      selectedOptionId: 'a',
+      score: 1,
+    })
+    expect(recommendCoachingWpm(240, 260, 50)).toBe(220)
   })
 })

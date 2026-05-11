@@ -1,25 +1,16 @@
 import { Area, AreaChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { buildTrendRows, summarizeSessions } from '../lib/reading/stats'
-import type { BaselineAssessmentResult, DocumentRecord, QuizAttempt, ReadingSession } from '../types/domain'
+import type { BaselineAssessmentResult, DocumentRecord, ReadingSession } from '../types/domain'
 
 type StatsChartProps = {
   baselineResult: BaselineAssessmentResult | null
   documents: DocumentRecord[]
   sessions: ReadingSession[]
-  quizAttempts: QuizAttempt[]
-  hasGeminiKey: boolean
 }
 
-export function StatsChart({ baselineResult, documents, sessions, quizAttempts, hasGeminiKey }: StatsChartProps) {
+export function StatsChart({ baselineResult, documents, sessions }: StatsChartProps) {
   const summary = summarizeSessions(sessions)
   const trends = buildTrendRows(sessions)
-  const latestQuiz = hasGeminiKey ? quizAttempts[0] : null
-  const previousQuiz = hasGeminiKey ? quizAttempts[1] : null
-  const coachingAttempts = hasGeminiKey ? quizAttempts : []
-  const latestSource = latestQuiz ? documents.find((document) => document.id === latestQuiz.documentId)?.title : null
-
-  const speedDelta = latestQuiz && previousQuiz ? latestQuiz.recommendedWpm - previousQuiz.recommendedWpm : null
-  const comprehensionDelta = latestQuiz && previousQuiz ? latestQuiz.comprehensionPercent - previousQuiz.comprehensionPercent : null
 
   return (
     <section className="panel stats-panel">
@@ -56,73 +47,10 @@ export function StatsChart({ baselineResult, documents, sessions, quizAttempts, 
         </section>
       )}
 
-      <section className="coaching-summary" data-tour="coaching-summary">
-        <div className="panel-header compact">
-          <div>
-            <span className="eyebrow">Active Coaching</span>
-            <h2>Latest Recommendation</h2>
-          </div>
-        </div>
-
-        {!hasGeminiKey ? (
-          <div className="empty-state">
-            <strong>Coaching is disabled</strong>
-            <span>
-              Add a Gemini API key in Settings to enable generated quiz attempts and AI-based coaching recommendations in this panel.
-            </span>
-          </div>
-        ) : latestQuiz ? (
-          <>
-            <p>{latestQuiz.explanation}</p>
-            <div className="summary-grid">
-              <Metric label="Recommended WPM" value={`${latestQuiz.recommendedWpm} WPM`} />
-              <Metric label="Speed trend" value={formatDelta(speedDelta, 'WPM')} />
-              <Metric label="Comprehension trend" value={formatDelta(comprehensionDelta, '%')} />
-              <Metric label="Latest source" value={latestSource ?? 'Unknown reading'} />
-              <Metric label="Assessment type" value={latestQuiz.kind === 'manual' ? 'Manual check' : 'Generated quiz'} />
-              <Metric label="Latest raw pace" value={`${latestQuiz.rawWpm} WPM`} />
-            </div>
-
-            <section className="coaching-history" data-tour="coaching-history">
-              <div className="panel-header compact">
-                <div>
-                  <span className="eyebrow">Coaching history</span>
-                  <h2>Recent attempts</h2>
-                </div>
-              </div>
-
-              {quizAttempts.length === 1 ? (
-                <div className="empty-state">
-                  <strong>One assessment recorded</strong>
-                  <span>Complete one more check after a reading session to track pace and comprehension movement.</span>
-                </div>
-              ) : (
-                <div className="summary-grid">
-                  {coachingAttempts.slice(0, 5).map((attempt) => (
-                    <div className="metric" key={attempt.id}>
-                      <span>{coachingAttemptDate(attempt.createdAt)}</span>
-                      <strong>{attempt.kind === 'manual' ? 'Manual' : 'Generated'} </strong>
-                      <span>{`${attempt.recommendedWpm} WPM · ${attempt.comprehensionPercent}% comp.`}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </section>
-          </>
-        ) : (
-          <div className="empty-state">
-            <strong>No recent assessments</strong>
-            <span>
-              Complete a manual or generated comprehension check after a reading session to update your coaching recommendation.
-            </span>
-          </div>
-        )}
-      </section>
-
       {sessions.length === 0 ? (
         <div className="empty-state" data-tour="stats-charts">
           <strong>No sessions yet</strong>
-          <span>Finish a reader session and save the comprehension check to populate trends.</span>
+          <span>Use Test after a reader session to populate comprehension-adjusted trends.</span>
         </div>
       ) : (
         <div className="chart-grid" data-tour="stats-charts">
@@ -164,24 +92,4 @@ function Metric({ label, value }: { label: string; value: number | string }) {
       <strong>{value}</strong>
     </div>
   )
-}
-
-function formatDelta(delta: number | null, unit: string): string {
-  if (delta === null) {
-    return 'First data point'
-  }
-
-  if (delta > 0) {
-    return `+${delta} ${unit}`
-  }
-
-  if (delta < 0) {
-    return `${delta} ${unit}`
-  }
-
-  return `0 ${unit}`
-}
-
-function coachingAttemptDate(createdAt: string): string {
-  return new Date(createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
 }

@@ -8,6 +8,7 @@ type ReaderControlsProps = {
   chunkSize: number
   isRunning: boolean
   isFocusMode: boolean
+  isTestAvailable: boolean
   pageLayout: PageLayout
   onModeChange: (mode: ReaderMode) => void
   onWpmChange: (wpm: number) => void
@@ -17,7 +18,7 @@ type ReaderControlsProps = {
   onFocusModeToggle: () => void
   onRewind: () => void
   onRegression: () => void
-  onFinish: () => void
+  onTest: () => void
 }
 
 const modeGuidance: Array<{
@@ -44,7 +45,7 @@ const modeGuidance: Array<{
 
 function baselineRecommendation(baselineResult: BaselineAssessmentResult | null): string {
   if (!baselineResult) {
-    return 'Start with Rail near a comfortable pace, then only raise WPM when recall and notes stay steady.'
+    return 'Start with Rail near a comfortable pace, then only raise WPM when quiz results stay steady.'
   }
 
   const { comprehensionPercent, rawWpm, recommendedWpm } = baselineResult
@@ -68,6 +69,7 @@ export function ReaderControls({
   chunkSize,
   isRunning,
   isFocusMode,
+  isTestAvailable,
   pageLayout,
   onModeChange,
   onWpmChange,
@@ -77,7 +79,7 @@ export function ReaderControls({
   onFocusModeToggle,
   onRewind,
   onRegression,
-  onFinish,
+  onTest,
 }: ReaderControlsProps) {
   const [isGuidanceOpen, setIsGuidanceOpen] = useState(false)
 
@@ -177,8 +179,8 @@ export function ReaderControls({
               </>
             )}
           </button>
-          <button className="finish-button" onClick={onFinish} type="button">
-            Finish
+          <button className="finish-button" disabled={!isTestAvailable} onClick={onTest} type="button">
+            Test
           </button>
         </div>
       </div>

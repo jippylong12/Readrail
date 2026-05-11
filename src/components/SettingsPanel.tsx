@@ -12,7 +12,7 @@ type SettingsPanelProps = {
   onOpenJourney: () => void
   onReplayTour: (tourId: TourId) => void
   onResetTours: () => void
-  onKeyStateChange: (hasKey: boolean) => void
+  onKeyStateChange: (hasKey: boolean, apiKey?: string) => void
 }
 
 export function SettingsPanel({
@@ -46,15 +46,15 @@ export function SettingsPanel({
     }
 
     if (isTauriRuntime()) {
-      await invoke('keychain_set_gemini_key', { apiKey })
+      await invoke('keychain_set_gemini_key', { apiKey: apiKey.trim() })
       setMessage('Gemini key saved to the OS keychain.')
     } else {
-      setMessage('Browser preview cannot write to the OS keychain.')
+      setMessage('Gemini key available for this browser session.')
     }
 
     setApiKey('')
     setHasKey(true)
-    onKeyStateChange(true)
+    onKeyStateChange(true, apiKey.trim())
   }
 
   async function deleteKey(): Promise<void> {
@@ -62,7 +62,7 @@ export function SettingsPanel({
       await invoke('keychain_delete_gemini_key')
     }
     setHasKey(false)
-    onKeyStateChange(false)
+    onKeyStateChange(false, '')
     setMessage('Gemini key deleted.')
   }
 
@@ -194,7 +194,7 @@ export function SettingsPanel({
             Open learner journey
           </button>
           <div className="tour-replay-grid" aria-label="Replay walkthroughs">
-            {(['library', 'reader', 'stats', 'settings'] as const).map((tourId) => (
+            {(['library', 'reader', 'progress', 'stats', 'settings'] as const).map((tourId) => (
               <button className="secondary-button" key={tourId} onClick={() => onReplayTour(tourId)} type="button">
                 {tourId[0].toUpperCase()}
                 {tourId.slice(1)}

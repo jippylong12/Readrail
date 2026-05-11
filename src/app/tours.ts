@@ -1,6 +1,6 @@
 import type { AppRoute } from './routes'
 
-export type TourId = AppRoute
+export type TourId = Exclude<AppRoute, 'test'>
 
 export type TourStep = {
   target: string
@@ -57,8 +57,29 @@ export const TOUR_DEFINITIONS: Record<TourId, TourDefinition> = {
       },
       {
         target: '[data-tour="reader-actions"]',
-        title: 'Finish and reflect',
-        body: 'Finish opens a short summary where comprehension, confidence, and notes turn raw pace into adjusted progress.',
+        title: 'Test comprehension',
+        body: 'Test creates an AI-generated quiz from the reading you just completed, then uses the result for comprehension-adjusted progress.',
+      },
+    ],
+  },
+  progress: {
+    id: 'progress',
+    title: 'Progress walkthrough',
+    steps: [
+      {
+        target: '[data-tour="progress-summary"]',
+        title: 'Current recommendation',
+        body: 'Progress shows the current recommended WPM, latest quiz score, and the adjustment context from comprehension checks.',
+      },
+      {
+        target: '[data-tour="progress-history"]',
+        title: 'Comprehension history',
+        body: 'Each completed test is saved with the reading, word range, score, raw WPM, adjusted WPM, and recommendation.',
+      },
+      {
+        target: '[data-tour="progress-review"]',
+        title: 'Answer review',
+        body: 'Review each quiz question with selected and correct answers so comprehension feedback is inspectable.',
       },
     ],
   },

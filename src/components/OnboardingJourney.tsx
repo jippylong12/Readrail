@@ -344,7 +344,7 @@ export function OnboardingJourney({
               <span className="eyebrow">Reader modes</span>
               <h1 id="onboarding-title">Pick the practice view that fits the session.</h1>
               <p>
-                Each mode is a pacing tool. Progress should be judged with comprehension, notes, and repeated sessions,
+                Each mode is a pacing tool. Progress should be judged with comprehension quizzes and repeated sessions,
                 not by raw WPM alone.
               </p>
             </div>

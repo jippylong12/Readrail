@@ -42,6 +42,20 @@ export type BaselineQuestionResult = {
   maxScore: number
 }
 
+export type QuizQuestionReview = {
+  questionId: string
+  kind: Exclude<BaselineQuestionKind, 'confidence'>
+  prompt: string
+  options: Array<{
+    id: string
+    label: string
+  }>
+  correctOptionId: string
+  selectedOptionId: string
+  score: number
+  maxScore: number
+}
+
 export type BaselineAssessmentResult = {
   id: string
   storyTitle: string
@@ -119,6 +133,18 @@ export type AppSettings = {
   ocr: OcrSettings
 }
 
+export type CoachingSegmentState = {
+  startWordIndex: number
+  startedAt: string | null
+  targetWpm: number | null
+}
+
+export type CoachingState = {
+  recommendedWpm: number
+  lastResetWordIndexByDocument: Record<string, number>
+  activeSegmentByDocument: Record<string, CoachingSegmentState>
+}
+
 export type SourceFileRecord = {
   id: string
   documentId: string | null
@@ -146,14 +172,17 @@ export type QuizAttempt = {
   documentId: string
   readingSessionId: string | null
   kind: 'generated' | 'manual'
+  startWordIndex: number
+  endWordIndex: number
   wordCount: number
   durationSeconds: number
+  targetWpm: number
   rawWpm: number
   comprehensionPercent: number
   adjustedWpm: number
   recommendedWpm: number
   explanation: string
   questionResults?: BaselineQuestionResult[]
+  questions?: QuizQuestionReview[]
   createdAt: string
 }
-

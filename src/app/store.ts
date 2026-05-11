@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware'
 import type {
   AppSettings,
   BaselineAssessmentResult,
+  CoachingState,
   DocumentRecord,
   OnboardingState,
   PageLayout,
@@ -29,6 +30,8 @@ type CompleteSessionInput = {
   targetWpm: number
   wordsRead: number
   durationSeconds: number
+  startPosition?: number
+  endPosition?: number
   pauseCount: number
   regressionCount: number
   comprehensionScore: number | null
@@ -45,6 +48,7 @@ type AppState = {
   tourProgress: TourProgressState
   baselineResult: BaselineAssessmentResult | null
   quizAttempts: QuizAttempt[]
+  coaching: CoachingState
   createDocument: (input: CreateDocumentInput) => DocumentRecord
   updateDocument: (id: string, updates: Partial<Pick<DocumentRecord, 'title' | 'content'>>) => void
   archiveDocument: (id: string) => void
@@ -59,6 +63,8 @@ type AppState = {
   resetTour: (tourId: string) => void
   resetAllTours: () => void
   addQuizAttempt: (attempt: QuizAttempt) => void
+  resetCoachingSegment: (documentId: string, wordIndex: number) => void
+  startCoachingSegment: (documentId: string, segment: CoachingState['activeSegmentByDocument'][string]) => void
   resetAllData: () => void
 }
 
@@ -94,6 +100,14 @@ export const defaultTourProgressState: TourProgressState = {
   completedTourIds: [],
 }
 
+function buildDefaultCoachingState(recommendedWpm = defaultSettings.reader.defaultWpm): CoachingState {
+  return {
+    recommendedWpm,
+    lastResetWordIndexByDocument: {},
+    activeSegmentByDocument: {},
+  }
+}
+
 export const useAppStore = create<AppState>()(
   persist(
     (set) => ({
@@ -105,6 +119,7 @@ export const useAppStore = create<AppState>()(
       tourProgress: defaultTourProgressState,
       baselineResult: null,
       quizAttempts: [],
+      coaching: buildDefaultCoachingState(),
       createDocument: (input) => {
         const now = new Date().toISOString()
         const content = cleanReadingText(input.content, { preservePageBreaks: true })
@@ -180,8 +195,8 @@ export const useAppStore = create<AppState>()(
           adjustedWpm: calculateAdjustedWpm(actualWpm, input.comprehensionScore),
           wordsRead: input.wordsRead,
           durationSeconds: input.durationSeconds,
-          startPosition: 0,
-          endPosition: input.wordsRead,
+          startPosition: input.startPosition ?? 0,
+          endPosition: input.endPosition ?? input.wordsRead,
           pauseCount: input.pauseCount,
           regressionCount: input.regressionCount,
           comprehensionScore: input.comprehensionScore,
@@ -217,6 +232,10 @@ export const useAppStore = create<AppState>()(
               ...state.settings.reader,
               defaultWpm: result.recommendedWpm,
             },
+          },
+          coaching: {
+            ...state.coaching,
+            recommendedWpm: result.recommendedWpm,
           },
         }))
       },
@@ -260,7 +279,54 @@ export const useAppStore = create<AppState>()(
         }))
       },
       resetAllTours: () => set({ tourProgress: defaultTourProgressState }),
-      addQuizAttempt: (attempt) => set((state) => ({ quizAttempts: [attempt, ...state.quizAttempts] })),
+      addQuizAttempt: (attempt) =>
+        set((state) => ({
+          quizAttempts: [attempt, ...state.quizAttempts],
+          coaching: {
+            ...state.coaching,
+            recommendedWpm: attempt.recommendedWpm,
+            lastResetWordIndexByDocument: {
+              ...state.coaching.lastResetWordIndexByDocument,
+              [attempt.documentId]: attempt.endWordIndex,
+            },
+            activeSegmentByDocument: {
+              ...state.coaching.activeSegmentByDocument,
+              [attempt.documentId]: {
+                startWordIndex: attempt.endWordIndex,
+                startedAt: null,
+                targetWpm: attempt.recommendedWpm,
+              },
+            },
+          },
+        })),
+      resetCoachingSegment: (documentId, wordIndex) =>
+        set((state) => ({
+          coaching: {
+            ...state.coaching,
+            lastResetWordIndexByDocument: {
+              ...state.coaching.lastResetWordIndexByDocument,
+              [documentId]: Math.max(0, Math.round(wordIndex)),
+            },
+            activeSegmentByDocument: {
+              ...state.coaching.activeSegmentByDocument,
+              [documentId]: {
+                startWordIndex: Math.max(0, Math.round(wordIndex)),
+                startedAt: null,
+                targetWpm: state.coaching.recommendedWpm,
+              },
+            },
+          },
+        })),
+      startCoachingSegment: (documentId, segment) =>
+        set((state) => ({
+          coaching: {
+            ...state.coaching,
+            activeSegmentByDocument: {
+              ...state.coaching.activeSegmentByDocument,
+              [documentId]: segment,
+            },
+          },
+        })),
       resetAllData: () =>
         set({
           documents: [],
@@ -270,11 +336,12 @@ export const useAppStore = create<AppState>()(
           tourProgress: defaultTourProgressState,
           baselineResult: null,
           quizAttempts: [],
+          coaching: buildDefaultCoachingState(),
         }),
     }),
     {
       name: 'readrail-local-state',
-      version: 3,
+      version: 4,
       migrate: (persistedState: unknown, fromVersion: number) => {
         const state = persistedState as Record<string, unknown>
         // v1 → v2: seed defaultPageLayout for existing users
@@ -289,6 +356,21 @@ export const useAppStore = create<AppState>()(
         if (fromVersion < 3) {
           state.quizAttempts = state.quizAttempts || []
         }
+        // v3 → v4: seed persistent coaching state and reviewable quiz metadata defaults.
+        if (fromVersion < 4) {
+          const settings = state.settings as AppSettings | undefined
+          const reader = settings?.reader
+          const fallbackWpm = reader?.defaultWpm ?? defaultSettings.reader.defaultWpm
+          state.coaching = state.coaching || buildDefaultCoachingState(fallbackWpm)
+
+          const quizAttempts = (state.quizAttempts as QuizAttempt[] | undefined) ?? []
+          state.quizAttempts = quizAttempts.map((attempt) => ({
+            ...attempt,
+            startWordIndex: attempt.startWordIndex ?? 0,
+            endWordIndex: attempt.endWordIndex ?? attempt.wordCount,
+            targetWpm: attempt.targetWpm ?? attempt.recommendedWpm ?? fallbackWpm,
+          }))
+        }
         return state
       },
       partialize: (state) => ({
@@ -300,6 +382,7 @@ export const useAppStore = create<AppState>()(
         tourProgress: state.tourProgress,
         baselineResult: state.baselineResult,
         quizAttempts: state.quizAttempts,
+        coaching: state.coaching,
       }),
     },
   ),

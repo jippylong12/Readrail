@@ -2,7 +2,7 @@
 import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 import { StatsChart } from '../components/StatsChart'
-import type { BaselineAssessmentResult, DocumentRecord, QuizAttempt, ReadingSession } from '../types/domain'
+import type { BaselineAssessmentResult, DocumentRecord, ReadingSession } from '../types/domain'
 
 const sampleDocument: DocumentRecord = {
   id: 'doc-1',
@@ -17,109 +17,61 @@ const sampleDocument: DocumentRecord = {
   archivedAt: null,
 }
 
-const readingSessions: ReadingSession[] = []
-
-const baseline: BaselineAssessmentResult | null = null
-
-const coachedAttempt: QuizAttempt = {
-  id: 'attempt-1',
-  documentId: 'doc-1',
-  readingSessionId: null,
-  kind: 'manual',
-  wordCount: 240,
-  durationSeconds: 72,
-  rawWpm: 200,
+const baseline: BaselineAssessmentResult | null = {
+  id: 'baseline-1',
+  storyTitle: 'Baseline story',
+  storySource: 'default',
+  wordCount: 250,
+  durationSeconds: 60,
+  rawWpm: 250,
   comprehensionPercent: 82,
-  adjustedWpm: 190,
-  recommendedWpm: 270,
-  explanation: 'Great comprehension. Try a slightly higher pace.',
-  createdAt: '2026-05-10T09:15:00.000Z',
+  adjustedWpm: 205,
+  recommendedWpm: 225,
+  explanation: 'Start conservatively.',
+  questionResults: [],
+  completedAt: '2026-05-01T00:00:00.000Z',
+  appliedWpmAt: '2026-05-01T00:00:00.000Z',
 }
 
-const priorAttempt: QuizAttempt = {
-  id: 'attempt-0',
+const readingSession: ReadingSession = {
+  id: 'session-1',
   documentId: 'doc-1',
-  readingSessionId: null,
-  kind: 'generated',
-  wordCount: 230,
-  durationSeconds: 74,
-  rawWpm: 190,
-  comprehensionPercent: 80,
-  adjustedWpm: 180,
-  recommendedWpm: 255,
-  explanation: 'Keep the same pace. Steady gains can come next round.',
-  createdAt: '2026-05-09T09:15:00.000Z',
+  mode: 'rail',
+  targetWpm: 240,
+  actualWpm: 200,
+  adjustedWpm: 170,
+  wordsRead: 300,
+  durationSeconds: 90,
+  startPosition: 0,
+  endPosition: 300,
+  pauseCount: 1,
+  regressionCount: 0,
+  comprehensionScore: 85,
+  selfRating: null,
+  notes: '',
+  startedAt: '2026-05-10T09:00:00.000Z',
+  endedAt: '2026-05-10T09:01:30.000Z',
 }
 
 afterEach(() => {
   cleanup()
 })
 
-describe('StatsChart coaching surface', () => {
-  it('shows latest recommendation and pace/comprehension deltas', () => {
-    render(
-      <StatsChart
-        baselineResult={baseline}
-        documents={[sampleDocument]}
-        sessions={readingSessions}
-        quizAttempts={[coachedAttempt, priorAttempt]}
-        hasGeminiKey
-      />,
-    )
+describe('StatsChart aggregate surface', () => {
+  it('shows aggregate stats and baseline context without coaching review UI', () => {
+    render(<StatsChart baselineResult={baseline} documents={[sampleDocument]} sessions={[readingSession]} />)
 
-    expect(screen.getByRole('heading', { name: 'Latest Recommendation' })).toBeTruthy()
-    expect(screen.getByText('Great comprehension. Try a slightly higher pace.')).toBeTruthy()
-    expect(screen.getByText('+15 WPM')).toBeTruthy()
-    expect(screen.getByText('+2 %')).toBeTruthy()
-    expect(screen.getByText('Recent attempts')).toBeTruthy()
-    expect(screen.getByText('Manual')).toBeTruthy()
-    expect(screen.getByText('Generated')).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Progress trends' })).toBeTruthy()
+    expect(screen.getByText('Baseline story')).toBeTruthy()
+    expect(screen.getByText('Words read')).toBeTruthy()
+    expect(screen.queryByText('Latest Recommendation')).toBeNull()
+    expect(screen.queryByText('Comprehension attempts')).toBeNull()
   })
 
-  it('shows no recent assessment guidance when history is absent', () => {
-    render(
-      <StatsChart
-        baselineResult={baseline}
-        documents={[sampleDocument]}
-        sessions={readingSessions}
-        quizAttempts={[]}
-        hasGeminiKey
-      />,
-    )
+  it('shows the empty chart state when there are no sessions', () => {
+    render(<StatsChart baselineResult={null} documents={[sampleDocument]} sessions={[]} />)
 
-    expect(screen.getByText('No recent assessments')).toBeTruthy()
-    expect(screen.getByText(/Complete a manual or generated comprehension check/)).toBeTruthy()
-  })
-
-  it('indicates the one-assessment state for coaching history', () => {
-    render(
-      <StatsChart
-        baselineResult={baseline}
-        documents={[sampleDocument]}
-        sessions={readingSessions}
-        quizAttempts={[coachedAttempt]}
-        hasGeminiKey
-      />,
-    )
-
-    expect(screen.getByText('One assessment recorded')).toBeTruthy()
-  })
-
-  it('shows coaching disabled state when the Gemini key is missing', () => {
-    render(
-      <StatsChart
-        baselineResult={baseline}
-        documents={[sampleDocument]}
-        sessions={readingSessions}
-        quizAttempts={[coachedAttempt, priorAttempt]}
-        hasGeminiKey={false}
-      />,
-    )
-
-    expect(screen.getByText('Coaching is disabled')).toBeTruthy()
-    expect(
-      screen.getByText(/Add a Gemini API key in Settings to enable generated quiz attempts and AI-based coaching recommendations/),
-    ).toBeTruthy()
-    expect(screen.queryByText('Great comprehension. Try a slightly higher pace.')).toBeNull()
+    expect(screen.getByText('No sessions yet')).toBeTruthy()
+    expect(screen.getByText(/populate comprehension-adjusted trends/)).toBeTruthy()
   })
 })

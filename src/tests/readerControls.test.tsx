@@ -29,15 +29,16 @@ function renderControls(pageLayout: PageLayout = 1) {
       chunkSize={4}
       isFocusMode={false}
       isRunning={false}
+      isTestAvailable
       mode="rail"
       pageLayout={pageLayout}
       onChunkSizeChange={vi.fn()}
       onFocusModeToggle={vi.fn()}
-      onFinish={vi.fn()}
       onModeChange={vi.fn()}
       onPageLayoutChange={onPageLayoutChange}
       onRegression={vi.fn()}
       onRewind={vi.fn()}
+      onTest={vi.fn()}
       onToggleRunning={vi.fn()}
       onWpmChange={vi.fn()}
       targetWpm={225}
