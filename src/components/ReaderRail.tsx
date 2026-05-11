@@ -170,8 +170,11 @@ export function ReaderRail({
           <div className="rsvp-frame">{activeChunk?.text ?? 'Done'}</div>
         ) : pageLayout === 1 ? (
           chunks.map((chunk, index) => (
-            <span className={index === activeIndex ? 'active-chunk' : ''} key={chunk.id}>
-              {chunk.text}{' '}
+            <span key={chunk.id}>
+              {chunk.startsNewParagraph && <span className="para-break" aria-hidden="true" />}
+              <span className={index === activeIndex ? 'active-chunk' : ''}>
+                {chunk.text}{' '}
+              </span>
             </span>
           ))
         ) : (
@@ -186,7 +189,7 @@ export function ReaderRail({
   )
 }
 
-type Chunk = { id: string; text: string; startWord: number; endWord: number }
+type Chunk = { id: string; text: string; startWord: number; endWord: number; startsNewParagraph?: boolean }
 
 type MultiPageLayoutProps = {
   chunks: Chunk[]
@@ -220,12 +223,14 @@ function MultiPageLayout({ chunks, activeIndex, pageLayout }: MultiPageLayoutPro
               const globalIndex = chunks.indexOf(chunk)
               const isActive = globalIndex === activeIndex
               return (
-                <span
-                  className={isActive ? 'active-chunk' : ''}
-                  key={chunk.id}
-                  ref={isActive ? activeChunkRef : null}
-                >
-                  {chunk.text}{' '}
+                <span key={chunk.id}>
+                  {chunk.startsNewParagraph && <span className="para-break" aria-hidden="true" />}
+                  <span
+                    className={isActive ? 'active-chunk' : ''}
+                    ref={isActive ? activeChunkRef : null}
+                  >
+                    {chunk.text}{' '}
+                  </span>
                 </span>
               )
             })}

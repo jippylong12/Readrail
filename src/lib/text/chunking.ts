@@ -3,23 +3,33 @@ export type TextChunk = {
   text: string
   startWord: number
   endWord: number
+  startsNewParagraph?: boolean
 }
 
 const WORD_TOKEN_PATTERN = /[\p{L}\p{N}]+(?:[-'\u2019][\p{L}\p{N}]+)*/gu
 
 export function chunkText(text: string, chunkSize: number): TextChunk[] {
-  const words = tokenizeReadableWords(text)
+  const paragraphs = text.split(/\n\n+/).filter((p) => p.trim().length > 0)
   const normalizedSize = Math.max(1, Math.floor(chunkSize))
   const chunks: TextChunk[] = []
+  let globalWordIndex = 0
 
-  for (let index = 0; index < words.length; index += normalizedSize) {
-    const slice = words.slice(index, index + normalizedSize)
-    chunks.push({
-      id: `chunk_${index}`,
-      text: normalizePunctuationSpacing(slice.join(' ')),
-      startWord: index,
-      endWord: Math.min(index + normalizedSize, words.length),
-    })
+  for (let paragraphIndex = 0; paragraphIndex < paragraphs.length; paragraphIndex++) {
+    const words = tokenizeReadableWords(paragraphs[paragraphIndex])
+    let isFirstChunkInParagraph = true
+
+    for (let index = 0; index < words.length; index += normalizedSize) {
+      const slice = words.slice(index, index + normalizedSize)
+      chunks.push({
+        id: `chunk_${globalWordIndex}`,
+        text: normalizePunctuationSpacing(slice.join(' ')),
+        startWord: globalWordIndex,
+        endWord: globalWordIndex + slice.length,
+        startsNewParagraph: isFirstChunkInParagraph && paragraphIndex > 0,
+      })
+      globalWordIndex += slice.length
+      isFirstChunkInParagraph = false
+    }
   }
 
   return chunks
