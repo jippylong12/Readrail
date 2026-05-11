@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import type { TourId } from '../app/tours'
-import type { AppSettings, BaselineAssessmentResult, ReaderMode, ThemeMode } from '../types/domain'
+import type { AppSettings, BaselineAssessmentResult, PageLayout, ReaderMode, ThemeMode } from '../types/domain'
 import { isTauriRuntime } from '../lib/db/migrations'
 
 type SettingsPanelProps = {
@@ -125,6 +125,20 @@ export function SettingsPanel({
               <option value="rail">Rail</option>
               <option value="chunk">Chunk</option>
               <option value="rsvp">RSVP drill</option>
+            </select>
+          </label>
+          <label className="field">
+            Default page layout
+            <select
+              onChange={(event) =>
+                onSettingsChange({ reader: { ...settings.reader, defaultPageLayout: Number(event.target.value) as PageLayout } })
+              }
+              value={settings.reader.defaultPageLayout}
+            >
+              <option value={1}>1 page</option>
+              <option value={2}>2 pages</option>
+              <option value={3}>3 pages</option>
+              <option value={4}>4 pages</option>
             </select>
           </label>
           <label className="field">

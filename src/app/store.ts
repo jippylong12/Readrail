@@ -5,6 +5,7 @@ import type {
   BaselineAssessmentResult,
   DocumentRecord,
   OnboardingState,
+  PageLayout,
   ReaderMode,
   ReadingSession,
   SourceType,
@@ -62,6 +63,7 @@ const defaultSettings: AppSettings = {
   reader: {
     defaultWpm: 250,
     defaultMode: 'rail',
+    defaultPageLayout: 1 as PageLayout,
     chunkSize: 4,
     fontFamily: 'system',
     fontSize: 20,

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { chunkText, getChunkDurationMs } from '../lib/text/chunking'
-import type { BaselineAssessmentResult, DocumentRecord, ReaderMode } from '../types/domain'
+import type { BaselineAssessmentResult, DocumentRecord, PageLayout, ReaderMode } from '../types/domain'
 import { clampWpm, formatDuration } from '../lib/reading/pacing'
+import { splitIntoPages, getActivePage } from '../lib/text/pages'
 import { ReaderControls } from './ReaderControls'
 
 type ReaderRailProps = {
@@ -10,6 +11,7 @@ type ReaderRailProps = {
   defaultMode: ReaderMode
   defaultWpm: number
   defaultChunkSize: number
+  defaultPageLayout: PageLayout
   fontSize: number
   lineHeight: number
   onComplete: (input: {
@@ -28,6 +30,7 @@ export function ReaderRail({
   defaultMode,
   defaultWpm,
   defaultChunkSize,
+  defaultPageLayout,
   fontSize,
   lineHeight,
   onComplete,
@@ -35,6 +38,7 @@ export function ReaderRail({
   const [mode, setMode] = useState<ReaderMode>(defaultMode)
   const [targetWpm, setTargetWpm] = useState(defaultWpm)
   const [chunkSize, setChunkSize] = useState(defaultChunkSize)
+  const [pageLayout, setPageLayout] = useState<PageLayout>(defaultPageLayout)
   const [activeIndex, setActiveIndex] = useState(0)
   const [isRunning, setIsRunning] = useState(false)
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
@@ -137,10 +141,12 @@ export function ReaderRail({
         isFocusMode={isFocusMode}
         isRunning={isRunning}
         mode={mode}
+        pageLayout={pageLayout}
         onChunkSizeChange={setChunkSize}
         onFocusModeToggle={() => setIsFocusMode((focused) => !focused)}
         onFinish={finishSession}
         onModeChange={setMode}
+        onPageLayoutChange={setPageLayout}
         onRegression={() => setRegressionCount((count) => count + 1)}
         onRewind={() => setActiveIndex((index) => Math.max(0, index - 6))}
         onToggleRunning={() => {
@@ -162,14 +168,70 @@ export function ReaderRail({
       <div className={`reading-surface ${mode}`} data-tour="reader-surface" style={{ fontSize, lineHeight }}>
         {mode === 'rsvp' ? (
           <div className="rsvp-frame">{activeChunk?.text ?? 'Done'}</div>
-        ) : (
+        ) : pageLayout === 1 ? (
           chunks.map((chunk, index) => (
             <span className={index === activeIndex ? 'active-chunk' : ''} key={chunk.id}>
               {chunk.text}{' '}
             </span>
           ))
+        ) : (
+          <MultiPageLayout
+            activeIndex={activeIndex}
+            chunks={chunks}
+            pageLayout={pageLayout}
+          />
         )}
       </div>
     </section>
+  )
+}
+
+type Chunk = { id: string; text: string; startWord: number; endWord: number }
+
+type MultiPageLayoutProps = {
+  chunks: Chunk[]
+  activeIndex: number
+  pageLayout: PageLayout
+}
+
+function MultiPageLayout({ chunks, activeIndex, pageLayout }: MultiPageLayoutProps) {
+  const activeChunkRef = useRef<HTMLSpanElement | null>(null)
+  const pages = useMemo(() => splitIntoPages(chunks, pageLayout), [chunks, pageLayout])
+  const activePage = getActivePage(activeIndex, chunks.length, pageLayout)
+
+  useEffect(() => {
+    activeChunkRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }, [activeIndex])
+
+  return (
+    <div
+      className="page-panes"
+      data-page-count={pages.length}
+      style={{ gridTemplateColumns: `repeat(${pages.length}, minmax(0, 1fr))` }}
+    >
+      {pages.map((pageChunks, pageIndex) => {
+        const isActivePage = pageIndex === activePage
+        return (
+          <div
+            className={`page-pane${isActivePage ? ' page-pane-active' : ''}`}
+            key={pageIndex}
+          >
+            {pageChunks.map((chunk) => {
+              const globalIndex = chunks.indexOf(chunk)
+              const isActive = globalIndex === activeIndex
+              return (
+                <span
+                  className={isActive ? 'active-chunk' : ''}
+                  key={chunk.id}
+                  ref={isActive ? activeChunkRef : null}
+                >
+                  {chunk.text}{' '}
+                </span>
+              )
+            })}
+          </div>
+        )
+      })}
+    </div>
   )
 }

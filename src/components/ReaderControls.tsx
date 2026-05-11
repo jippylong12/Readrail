@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { BaselineAssessmentResult, ReaderMode } from '../types/domain'
+import type { BaselineAssessmentResult, PageLayout, ReaderMode } from '../types/domain'
 
 type ReaderControlsProps = {
   baselineResult: BaselineAssessmentResult | null
@@ -8,9 +8,11 @@ type ReaderControlsProps = {
   chunkSize: number
   isRunning: boolean
   isFocusMode: boolean
+  pageLayout: PageLayout
   onModeChange: (mode: ReaderMode) => void
   onWpmChange: (wpm: number) => void
   onChunkSizeChange: (chunkSize: number) => void
+  onPageLayoutChange: (layout: PageLayout) => void
   onToggleRunning: () => void
   onFocusModeToggle: () => void
   onRewind: () => void
@@ -66,9 +68,11 @@ export function ReaderControls({
   chunkSize,
   isRunning,
   isFocusMode,
+  pageLayout,
   onModeChange,
   onWpmChange,
   onChunkSizeChange,
+  onPageLayoutChange,
   onToggleRunning,
   onFocusModeToggle,
   onRewind,
@@ -103,6 +107,24 @@ export function ReaderControls({
           >
             i
           </button>
+        </div>
+
+        <div className="layout-picker" aria-label="Page layout">
+          <span className="layout-picker-label">Pages</span>
+          <div className="segmented layout-segmented" role="group" aria-label="Page count">
+            {([1, 2, 3, 4] as PageLayout[]).map((count) => (
+              <button
+                className={count === pageLayout ? 'active' : ''}
+                key={count}
+                onClick={() => onPageLayoutChange(count)}
+                type="button"
+                aria-label={`${count} page${count > 1 ? 's' : ''}`}
+                aria-pressed={count === pageLayout}
+              >
+                {count}
+              </button>
+            ))}
+          </div>
         </div>
 
         <label className="wpm-control">

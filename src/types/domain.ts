@@ -2,6 +2,8 @@ export type SourceType = 'paste' | 'text_file' | 'pdf_text' | 'photo_ocr' | 'man
 
 export type ReaderMode = 'rail' | 'chunk' | 'rsvp'
 
+export type PageLayout = 1 | 2 | 3 | 4
+
 export type ThemeMode = 'system' | 'light' | 'dark'
 
 export type OnboardingStatus = 'not_started' | 'skipped' | 'intro_completed'
@@ -92,6 +94,7 @@ export type ReadingSession = {
 export type ReaderSettings = {
   defaultWpm: number
   defaultMode: ReaderMode
+  defaultPageLayout: PageLayout
   chunkSize: number
   fontFamily: 'system' | 'atkinson' | 'charter' | 'georgia'
   fontSize: number
