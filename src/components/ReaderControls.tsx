@@ -7,10 +7,12 @@ type ReaderControlsProps = {
   targetWpm: number
   chunkSize: number
   isRunning: boolean
+  isFocusMode: boolean
   onModeChange: (mode: ReaderMode) => void
   onWpmChange: (wpm: number) => void
   onChunkSizeChange: (chunkSize: number) => void
   onToggleRunning: () => void
+  onFocusModeToggle: () => void
   onRewind: () => void
   onRegression: () => void
   onFinish: () => void
@@ -63,10 +65,12 @@ export function ReaderControls({
   targetWpm,
   chunkSize,
   isRunning,
+  isFocusMode,
   onModeChange,
   onWpmChange,
   onChunkSizeChange,
   onToggleRunning,
+  onFocusModeToggle,
   onRewind,
   onRegression,
   onFinish,
@@ -127,6 +131,29 @@ export function ReaderControls({
           </button>
           <button className="secondary-button" onClick={onRegression} type="button">
             Reread
+          </button>
+          <button
+            aria-pressed={isFocusMode}
+            className="secondary-button focus-mode-toggle"
+            onClick={onFocusModeToggle}
+            type="button"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+          >
+            {isFocusMode ? (
+              <>
+                <svg fill="none" height="16" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" width="16">
+                  <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3" />
+                </svg>
+                Exit Focus
+              </>
+            ) : (
+              <>
+                <svg fill="none" height="16" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" width="16">
+                  <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
+                </svg>
+                Focus
+              </>
+            )}
           </button>
           <button className="finish-button" onClick={onFinish} type="button">
             Finish

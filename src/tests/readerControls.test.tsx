@@ -33,9 +33,11 @@ describe('ReaderControls', () => {
       <ReaderControls
         baselineResult={baselineResult}
         chunkSize={4}
+        isFocusMode={false}
         isRunning={false}
         mode="rail"
         onChunkSizeChange={vi.fn()}
+        onFocusModeToggle={vi.fn()}
         onFinish={vi.fn()}
         onModeChange={vi.fn()}
         onRegression={vi.fn()}

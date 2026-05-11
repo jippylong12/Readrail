@@ -40,6 +40,7 @@ export function ReaderRail({
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [pauseCount, setPauseCount] = useState(0)
   const [regressionCount, setRegressionCount] = useState(0)
+  const [isFocusMode, setIsFocusMode] = useState(false)
   const startedRef = useRef<number | null>(null)
 
   const chunks = useMemo(() => chunkText(document?.content ?? '', chunkSize), [chunkSize, document?.content])
@@ -76,6 +77,24 @@ export function ReaderRail({
     return () => window.clearInterval(timer)
   }, [isRunning])
 
+  useEffect(() => {
+    if (!isFocusMode) {
+      return undefined
+    }
+
+    function handleFocusExit(event: KeyboardEvent): void {
+      if (event.key !== 'Escape') {
+        return
+      }
+
+      event.preventDefault()
+      setIsFocusMode(false)
+    }
+
+    window.addEventListener('keydown', handleFocusExit)
+    return () => window.removeEventListener('keydown', handleFocusExit)
+  }, [isFocusMode])
+
   if (!document) {
     return (
       <section className="panel reader-empty" data-tour="reader-surface">
@@ -88,6 +107,7 @@ export function ReaderRail({
 
   function finishSession(): void {
     setIsRunning(false)
+    setIsFocusMode(false)
     onComplete({
       mode,
       targetWpm,
@@ -99,7 +119,7 @@ export function ReaderRail({
   }
 
   return (
-    <section className="panel reader-panel">
+    <section className={isFocusMode ? 'panel reader-panel reader-panel-focus' : 'panel reader-panel'} data-focus-mode={isFocusMode}>
       <div className="panel-header">
         <div>
           <span className="eyebrow">Reader</span>
@@ -114,9 +134,11 @@ export function ReaderRail({
       <ReaderControls
         baselineResult={baselineResult}
         chunkSize={chunkSize}
+        isFocusMode={isFocusMode}
         isRunning={isRunning}
         mode={mode}
         onChunkSizeChange={setChunkSize}
+        onFocusModeToggle={() => setIsFocusMode((focused) => !focused)}
         onFinish={finishSession}
         onModeChange={setMode}
         onRegression={() => setRegressionCount((count) => count + 1)}
