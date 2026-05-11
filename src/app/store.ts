@@ -10,6 +10,7 @@ import type {
   ReadingSession,
   SourceType,
   TourProgressState,
+  QuizAttempt,
 } from '../types/domain'
 import { calculateAdjustedWpm, calculateActualWpm } from '../lib/reading/pacing'
 import { cleanReadingText } from '../lib/text/cleanup'
@@ -43,6 +44,7 @@ type AppState = {
   onboarding: OnboardingState
   tourProgress: TourProgressState
   baselineResult: BaselineAssessmentResult | null
+  quizAttempts: QuizAttempt[]
   createDocument: (input: CreateDocumentInput) => DocumentRecord
   updateDocument: (id: string, updates: Partial<Pick<DocumentRecord, 'title' | 'content'>>) => void
   archiveDocument: (id: string) => void
@@ -56,6 +58,7 @@ type AppState = {
   completeTour: (tourId: string) => void
   resetTour: (tourId: string) => void
   resetAllTours: () => void
+  addQuizAttempt: (attempt: QuizAttempt) => void
   resetAllData: () => void
 }
 
@@ -101,6 +104,7 @@ export const useAppStore = create<AppState>()(
       onboarding: defaultOnboardingState,
       tourProgress: defaultTourProgressState,
       baselineResult: null,
+      quizAttempts: [],
       createDocument: (input) => {
         const now = new Date().toISOString()
         const content = cleanReadingText(input.content, { preservePageBreaks: true })
@@ -256,6 +260,7 @@ export const useAppStore = create<AppState>()(
         }))
       },
       resetAllTours: () => set({ tourProgress: defaultTourProgressState }),
+      addQuizAttempt: (attempt) => set((state) => ({ quizAttempts: [attempt, ...state.quizAttempts] })),
       resetAllData: () =>
         set({
           documents: [],
@@ -264,11 +269,12 @@ export const useAppStore = create<AppState>()(
           onboarding: defaultOnboardingState,
           tourProgress: defaultTourProgressState,
           baselineResult: null,
+          quizAttempts: [],
         }),
     }),
     {
       name: 'readrail-local-state',
-      version: 2,
+      version: 3,
       migrate: (persistedState: unknown, fromVersion: number) => {
         const state = persistedState as Record<string, unknown>
         // v1 → v2: seed defaultPageLayout for existing users
@@ -278,6 +284,10 @@ export const useAppStore = create<AppState>()(
           if (reader && reader.defaultPageLayout === undefined) {
             reader.defaultPageLayout = 1
           }
+        }
+        // v2 → v3: seed quizAttempts
+        if (fromVersion < 3) {
+          state.quizAttempts = state.quizAttempts || []
         }
         return state
       },
@@ -289,6 +299,7 @@ export const useAppStore = create<AppState>()(
         onboarding: state.onboarding,
         tourProgress: state.tourProgress,
         baselineResult: state.baselineResult,
+        quizAttempts: state.quizAttempts,
       }),
     },
   ),

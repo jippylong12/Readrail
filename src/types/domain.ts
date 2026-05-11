@@ -140,3 +140,20 @@ export type OcrJob = {
   createdAt: string
   completedAt: string | null
 }
+
+export type QuizAttempt = {
+  id: string
+  documentId: string
+  readingSessionId: string | null
+  kind: 'generated' | 'manual'
+  wordCount: number
+  durationSeconds: number
+  rawWpm: number
+  comprehensionPercent: number
+  adjustedWpm: number
+  recommendedWpm: number
+  explanation: string
+  questionResults?: BaselineQuestionResult[]
+  createdAt: string
+}
+
