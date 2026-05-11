@@ -15,9 +15,16 @@ type HighlightBox = {
 }
 
 function getViewportSize(): { width: number; height: number } {
+  const viewportWidths = [window.visualViewport?.width, window.innerWidth, document.documentElement.clientWidth].filter(
+    (value): value is number => typeof value === 'number' && value > 0,
+  )
+  const viewportHeights = [window.visualViewport?.height, window.innerHeight, document.documentElement.clientHeight].filter(
+    (value): value is number => typeof value === 'number' && value > 0,
+  )
+
   return {
-    width: window.visualViewport?.width ?? window.innerWidth,
-    height: window.visualViewport?.height ?? window.innerHeight,
+    width: Math.min(...viewportWidths),
+    height: Math.min(...viewportHeights),
   }
 }
 
@@ -84,7 +91,8 @@ export function GuidedTour({ tour, onComplete }: GuidedTourProps) {
         : aboveTop >= 16
           ? aboveTop
           : Math.max(16, Math.min(belowTop, viewport.height - estimatedHeight - 16))
-    const left = Math.min(Math.max(16, highlight.left), viewport.width - maxWidth - 16)
+    const rightLimit = Math.max(16, viewport.width - maxWidth - 16)
+    const left = Math.min(Math.max(16, highlight.left), rightLimit)
 
     return { left, maxWidth, top, width: maxWidth }
   }, [highlight])

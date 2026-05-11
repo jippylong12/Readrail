@@ -30,7 +30,7 @@ const journeySteps = [
   },
   {
     title: 'Answer five questions',
-    body: 'Comprehension stays part of the result instead of treating raw speed as the goal.',
+    body: 'Objective questions keep the baseline tied to meaning instead of treating raw speed as the goal.',
   },
   {
     title: 'Choose a starting pace',
@@ -49,7 +49,7 @@ const modeSummaries = [
   },
   {
     title: 'RSVP drill',
-    body: 'Shows focused word groups one at a time as an optional drill, not the default measure of progress.',
+    body: 'Shows focused word groups one at a time as an optional drill, with Progress still based on comprehension checks.',
   },
 ]
 
@@ -145,7 +145,8 @@ export function OnboardingJourney({
               <h1 id="onboarding-title">Start with a baseline before the full app.</h1>
               <p>
                 Readrail works best when pace and comprehension are measured together. This learner journey starts with a
-                story assessment, explains the reader modes, and then moves you into the local library.
+                story assessment, explains the reader modes, and then moves you into the local library for document-based
+                practice.
               </p>
             </div>
 
@@ -344,8 +345,8 @@ export function OnboardingJourney({
               <span className="eyebrow">Reader modes</span>
               <h1 id="onboarding-title">Pick the practice view that fits the session.</h1>
               <p>
-                Each mode is a pacing tool. Progress should be judged with comprehension quizzes and repeated sessions,
-                not by raw WPM alone.
+                Each mode is a pacing tool. After practice starts, use Test to generate comprehension checks from the
+                segment you just read; Progress uses those results instead of raw WPM alone.
               </p>
             </div>
 
