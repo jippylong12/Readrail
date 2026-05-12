@@ -55,7 +55,7 @@ type PendingQuiz = {
 }
 
 function App() {
-  const [navigation, setNavigation] = useState<RouteState>(() => routeFromPath(window.location.pathname))
+  const [navigation, setNavigation] = useState<RouteState>(() => routeFromPath(currentBrowserPath()))
   const [pendingQuiz, setPendingQuiz] = useState<PendingQuiz | null>(null)
   const [hasGeminiKey, setHasGeminiKey] = useState(false)
   const [browserGeminiKey, setBrowserGeminiKey] = useState('')
@@ -132,13 +132,13 @@ function App() {
   }, [])
 
   useEffect(() => {
-    const normalizedPath = pathForRoute(routeFromPath(window.location.pathname))
-    if (window.location.pathname !== normalizedPath) {
+    const normalizedPath = pathForRoute(routeFromPath(currentBrowserPath()))
+    if (currentBrowserPath() !== normalizedPath) {
       window.history.replaceState(null, '', normalizedPath)
     }
 
     function handlePopState(): void {
-      setNavigation(routeFromPath(window.location.pathname))
+      setNavigation(routeFromPath(currentBrowserPath()))
     }
 
     window.addEventListener('popstate', handlePopState)
@@ -149,7 +149,7 @@ function App() {
     setReplayTourId(null)
     setNavigation(nextRoute)
     const nextPath = pathForRoute(nextRoute)
-    if (window.location.pathname === nextPath) {
+    if (currentBrowserPath() === nextPath) {
       return
     }
 
@@ -456,6 +456,9 @@ function App() {
               loadApiKey={() => loadGeminiApiKey('ocr')}
               onAppendPages={appendAndOpenOcrPages}
               onCreateDocument={createAndOpenOcrDocument}
+              onOpenJobCosts={(ocrJobId) => {
+                navigate({ route: 'costs', documentId: null, ocrJobId })
+              }}
               preservePageBreaks={settings.ocr.preservePageBreaks}
               stripImageMetadataBeforeOcr={settings.privacy.stripImageMetadataBeforeOcr}
             />
@@ -492,6 +495,12 @@ function App() {
           loadApiKey={() => loadGeminiApiKey('ocr')}
           onAppendPages={appendAndOpenOcrPages}
           onBack={() => navigate({ route: 'library-saved', documentId: null })}
+          onOpenCosts={(documentId) => {
+            navigate({ route: 'costs', documentId })
+          }}
+          onOpenJobCosts={(ocrJobId) => {
+            navigate({ route: 'costs', documentId: null, ocrJobId })
+          }}
           onDocumentViewChange={(documentId, chapterId, pageNumber, options) => {
             navigate({ route: 'library-document', documentId, chapterId, pageNumber }, options)
           }}
@@ -607,6 +616,11 @@ function App() {
       {route === 'costs' && (
         <CostsReport
           documents={documents}
+          initialFilters={{
+            documentId: navigation.documentId ?? '',
+            ocrJobId: navigation.ocrJobId ?? '',
+          }}
+          key={`costs:${navigation.documentId ?? ''}:${navigation.ocrJobId ?? ''}`}
           lineItems={aiUsageLineItems}
           ocrJobs={ocrJobs}
         />
@@ -651,6 +665,10 @@ function App() {
       )}
     </AppShell>
   )
+}
+
+function currentBrowserPath(): string {
+  return `${window.location.pathname}${window.location.search}`
 }
 
 function readerScopeSelectionFromRoute(routeState: RouteState): ReaderScopeSelection {

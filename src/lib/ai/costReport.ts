@@ -34,6 +34,8 @@ export type CostReportLineItem = {
   documentTitle: string
   ocrJobId: string | null
   ocrJobLabel: string
+  ocrItemId: string | null
+  ocrItemLabel: string
   sourceFileName: string
   stage: AiUsageStage
   provider: string
@@ -165,6 +167,8 @@ export function exportCostReportCsv(report: CostReport): string {
     'document_title',
     'ocr_job_id',
     'ocr_job_label',
+    'ocr_item_id',
+    'ocr_item_label',
     'source_file_name',
     'stage',
     'provider',
@@ -188,6 +192,8 @@ export function exportCostReportCsv(report: CostReport): string {
       lineItem.documentTitle,
       lineItem.ocrJobId ?? '',
       lineItem.ocrJobLabel,
+      lineItem.ocrItemId ?? '',
+      lineItem.ocrItemLabel,
       lineItem.sourceFileName,
       lineItem.stage,
       lineItem.provider,
@@ -245,6 +251,8 @@ function enrichLineItem(
     documentTitle: getDocumentLabel(lineItem.documentId, documentById),
     ocrJobId: lineItem.ocrJobId,
     ocrJobLabel: getOcrJobLabel(lineItem.ocrJobId, ocrJobById),
+    ocrItemId: lineItem.ocrItemId,
+    ocrItemLabel: getOcrItemLabel(lineItem.ocrItemId),
     sourceFileName: lineItem.sourceFileName ?? 'No source file',
     stage: lineItem.stage,
     provider: lineItem.provider,
@@ -354,6 +362,10 @@ function getOcrJobLabel(ocrJobId: string | null, ocrJobById: Map<string, OcrJob>
   }
 
   return `OCR job ${formatDateTime(job.createdAt)}`
+}
+
+function getOcrItemLabel(ocrItemId: string | null): string {
+  return ocrItemId ?? 'No OCR item'
 }
 
 function getTimePeriodKey(isoDate: string, period: CostReportTimePeriod): string {

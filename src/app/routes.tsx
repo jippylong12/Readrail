@@ -17,6 +17,7 @@ export type PrimaryRoute = 'library-saved' | 'reader' | 'progress' | 'costs' | '
 export type RouteState = {
   route: AppRoute
   documentId: string | null
+  ocrJobId?: string | null
   chapterId?: string | null
   pageNumber?: number | null
   startPageNumber?: number | null
@@ -44,7 +45,9 @@ export const ROUTES: RouteDefinition[] = [
 ]
 
 export function routeFromPath(pathname: string): RouteState {
-  const segments = pathname.split('/').filter(Boolean).map(decodeURIComponent)
+  const [path, query = ''] = pathname.split('?')
+  const segments = path.split('/').filter(Boolean).map(decodeURIComponent)
+  const searchParams = new URLSearchParams(query)
 
   if (segments[0] === 'library') {
     if (segments[1] === 'import') {
@@ -88,7 +91,11 @@ export function routeFromPath(pathname: string): RouteState {
   }
 
   if (segments[0] === 'costs') {
-    return { route: 'costs', documentId: null }
+    return {
+      route: 'costs',
+      documentId: searchParams.get('documentId'),
+      ocrJobId: searchParams.get('ocrJobId'),
+    }
   }
 
   if (segments[0] === 'stats') {
@@ -137,7 +144,7 @@ export function pathForRoute(routeState: RouteState): string {
     case 'progress':
       return '/progress'
     case 'costs':
-      return '/costs'
+      return costPath(routeState)
     case 'stats':
       return '/stats'
     case 'settings':
@@ -146,6 +153,18 @@ export function pathForRoute(routeState: RouteState): string {
     default:
       return '/library/saved'
   }
+}
+
+function costPath(routeState: RouteState): string {
+  const searchParams = new URLSearchParams()
+  if (routeState.documentId) {
+    searchParams.set('documentId', routeState.documentId)
+  }
+  if (routeState.ocrJobId) {
+    searchParams.set('ocrJobId', routeState.ocrJobId)
+  }
+  const query = searchParams.toString()
+  return query ? `/costs?${query}` : '/costs'
 }
 
 export function primaryRouteFor(route: AppRoute): PrimaryRoute {

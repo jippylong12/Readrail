@@ -55,6 +55,7 @@ describe('cost report exports', () => {
     expect(parsed.rollups.byDocument).toHaveLength(1)
     expect(parsed.rollups.byStage).toHaveLength(1)
     expect(parsed.lineItems).toHaveLength(1)
+    expect(parsed.lineItems[0]).toMatchObject({ ocrItemId: 'item-1', ocrItemLabel: 'item-1' })
 
     vi.useRealTimers()
   })
@@ -68,8 +69,11 @@ describe('cost report exports', () => {
     const rows = exportCostReportCsv(report).split('\n')
 
     expect(rows[0]).toContain('usage_id,started_at,completed_at,document_id,document_title')
+    expect(rows[0]).toContain('ocr_job_id,ocr_job_label,ocr_item_id,ocr_item_label,source_file_name')
     expect(rows[1]).toContain('usage-1,2026-05-10T12:01:00.000Z')
     expect(rows[1]).toContain('"Structured, Book"')
+    expect(rows[1]).toContain('job-1,"OCR job')
+    expect(rows[1]).toContain('item-1,item-1,"scan,page.png"')
     expect(rows[1]).toContain('ocr_extraction,google,gemini-3.1-flash-lite,succeeded,estimated,USD')
     expect(rows[1]).toContain('"Needs ""review"", retry later"')
   })

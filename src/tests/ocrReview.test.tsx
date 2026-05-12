@@ -86,6 +86,75 @@ describe('OcrReview', () => {
     expect(screen.getByText('Key missing')).toBeTruthy()
   })
 
+  it('opens the active OCR job cost drilldown from review status', async () => {
+    const user = userEvent.setup()
+    const onOpenJobCosts = vi.fn()
+    const now = new Date().toISOString()
+    const job: OcrJob = {
+      id: 'job-costs',
+      documentId: null,
+      targetChapterId: null,
+      status: 'review',
+      modelId: 'gemini-3.1-flash-lite',
+      inputFileCount: 1,
+      promptVersion: 'v1',
+      warnings: [],
+      errorMessage: null,
+      createdAt: now,
+      updatedAt: now,
+      completedAt: now,
+    }
+    const item: OcrJobItem = {
+      id: 'item-costs',
+      jobId: job.id,
+      orderIndex: 0,
+      sourceFileName: 'scan.png',
+      sourceFileType: 'image/png',
+      sourceFileSize: 5,
+      sourceFileLastModified: 1,
+      sourcePageNumber: 1,
+      title: null,
+      status: 'review',
+      ocrText: 'Ready page.',
+      pages: [
+        {
+          pageNumber: 1,
+          sourcePageNumber: 1,
+          title: null,
+          text: 'Ready page.',
+          reviewStatus: 'reviewed',
+          ocrConfidence: null,
+          ocrNotes: null,
+          uncertainSpans: [],
+          sourceFileName: 'scan.png',
+          sourceKind: 'image',
+        },
+      ],
+      warnings: [],
+      failureReason: null,
+      createdAt: now,
+      updatedAt: now,
+    }
+    useAppStore.setState({ ocrJobs: [job], ocrJobItems: [item], ocrRuntimeJobs: {} })
+
+    render(
+      <OcrReview
+        documents={[]}
+        hasKey
+        loadApiKey={vi.fn().mockResolvedValue('browser-key')}
+        onAppendPages={vi.fn()}
+        onCreateDocument={vi.fn()}
+        onOpenJobCosts={onOpenJobCosts}
+        preservePageBreaks
+        stripImageMetadataBeforeOcr={false}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'View job costs' }))
+
+    expect(onOpenJobCosts).toHaveBeenCalledWith('job-costs')
+  })
+
   it('reviews OCR output as editable page items and saves a new structured document', async () => {
     const user = userEvent.setup()
     const onCreateDocument = vi.fn()

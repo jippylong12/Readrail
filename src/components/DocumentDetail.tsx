@@ -17,6 +17,8 @@ type DocumentDetailProps = {
   routeChapterId?: string | null
   routePageNumber?: number | null
   onBack: () => void
+  onOpenCosts: (documentId: string) => void
+  onOpenJobCosts: (ocrJobId: string) => void
   onDocumentViewChange: (
     documentId: string,
     chapterId: string | null,
@@ -51,6 +53,8 @@ export function DocumentDetail({
   routeChapterId,
   routePageNumber,
   onBack,
+  onOpenCosts,
+  onOpenJobCosts,
   onDocumentViewChange,
   onOpenReader,
   onCreateChapter,
@@ -116,6 +120,9 @@ export function DocumentDetail({
             <button className="secondary-button" onClick={onBack} type="button">
               Back to library
             </button>
+            <button className="secondary-button" onClick={() => onOpenCosts(document.id)} type="button">
+              View AI costs
+            </button>
             <button className="primary-button" onClick={() => onOpenReader(document.id, selectedChapter?.id ?? null)} type="button">
               Open reader
             </button>
@@ -165,6 +172,7 @@ export function DocumentDetail({
         loadApiKey={loadApiKey}
         onAppendPages={onAppendPages}
         onCreateDocument={onCreateDocument}
+        onOpenJobCosts={onOpenJobCosts}
         preservePageBreaks={preservePageBreaks}
         stripImageMetadataBeforeOcr={stripImageMetadataBeforeOcr}
       />

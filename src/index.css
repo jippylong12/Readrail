@@ -1513,7 +1513,13 @@ h3 {
 }
 
 .cost-detail-table {
-  min-width: 1120px;
+  min-width: 1200px;
+}
+
+.muted-text {
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 700;
 }
 
 .confidence-badge {

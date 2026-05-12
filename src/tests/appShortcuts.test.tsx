@@ -8,7 +8,7 @@ import { pathForRoute, routeFromPath } from '../app/routes'
 import { getRouteForShortcutEvent, isEditableShortcutTarget } from '../app/shortcuts'
 import { createDefaultDocumentStructure } from '../app/structuredDocuments'
 import { defaultOnboardingState, defaultTourProgressState, useAppStore } from '../app/store'
-import type { DocumentChapterRecord, DocumentPageRecord, DocumentRecord } from '../types/domain'
+import type { AiUsageLineItem, DocumentChapterRecord, DocumentPageRecord, DocumentRecord, OcrJob } from '../types/domain'
 
 const activeDocument: DocumentRecord = {
   id: 'document-1',
@@ -82,6 +82,77 @@ function buildPage(chapterId: string, pageNumber: number, sortOrder: number, tit
     sourceSha256: null,
     createdAt: activeDocument.createdAt,
     updatedAt: activeDocument.updatedAt,
+  }
+}
+
+function buildOcrJob(): OcrJob {
+  return {
+    id: 'job-1',
+    documentId: activeDocument.id,
+    targetChapterId: null,
+    status: 'review',
+    modelId: 'gemini-3.1-flash-lite',
+    inputFileCount: 1,
+    promptVersion: 'v1',
+    warnings: [],
+    errorMessage: null,
+    createdAt: activeDocument.createdAt,
+    updatedAt: activeDocument.updatedAt,
+    completedAt: activeDocument.updatedAt,
+  }
+}
+
+function buildAiUsageLineItem(overrides: Partial<AiUsageLineItem> = {}): AiUsageLineItem {
+  return {
+    id: 'usage-1',
+    documentId: activeDocument.id,
+    ocrJobId: 'job-1',
+    ocrItemId: 'item-1',
+    sourceFileName: 'scan.png',
+    stage: 'ocr_extraction',
+    provider: 'google',
+    model: 'gemini-3.1-flash-lite',
+    status: 'succeeded',
+    startedAt: activeDocument.createdAt,
+    completedAt: activeDocument.updatedAt,
+    failureMessage: null,
+    rawProviderMetadata: null,
+    pricingSnapshot: {
+      confidence: 'estimated',
+      currency: 'USD',
+      effectiveDate: '2026-05-12',
+      estimatedInputCost: 0.00025,
+      estimatedOutputCost: 0.00017,
+      estimatedThinkingCost: null,
+      estimatedTotalCost: 0.00042,
+      inputRatePerMillionTokens: 0.25,
+      modelId: 'gemini-3.1-flash-lite',
+      outputRatePerMillionTokens: 1.5,
+      thinkingRatePerMillionTokens: null,
+    },
+    tokenBreakdown: {
+      audioInputTokens: null,
+      audioOutputTokens: null,
+      cachedAudioInputTokens: null,
+      cachedDocumentInputTokens: null,
+      cachedImageInputTokens: null,
+      cachedInputTokens: null,
+      cachedTextInputTokens: null,
+      cachedVideoInputTokens: null,
+      documentInputTokens: null,
+      documentOutputTokens: null,
+      imageInputTokens: 200,
+      imageOutputTokens: null,
+      inputTokens: 1000,
+      outputTokens: 200,
+      textInputTokens: 800,
+      textOutputTokens: 200,
+      thinkingTokens: null,
+      totalTokens: 1200,
+      videoInputTokens: null,
+      videoOutputTokens: null,
+    },
+    ...overrides,
   }
 }
 
@@ -177,6 +248,24 @@ describe('app section shortcuts', () => {
     await user.click(screen.getByRole('button', { name: 'Back to library' }))
     expect(screen.getByRole('heading', { name: 'Reading documents' })).toBeTruthy()
     expect(window.location.pathname).toBe('/library/saved')
+  })
+
+  it('opens a document-specific Costs drilldown from document detail', async () => {
+    const user = userEvent.setup()
+    useAppStore.setState({
+      aiUsageLineItems: [buildAiUsageLineItem()],
+      ocrJobs: [buildOcrJob()],
+    })
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: /Shortcut test document/i }))
+    await user.click(screen.getByRole('button', { name: 'View AI costs' }))
+
+    expect(screen.getByRole('heading', { name: 'AI usage costs' })).toBeTruthy()
+    expect(window.location.pathname).toBe('/costs')
+    expect(window.location.search).toBe('?documentId=document-1')
+    expect((screen.getByLabelText('Document') as HTMLSelectElement).value).toBe('document-1')
+    expect(screen.getByText('scan.png')).toBeTruthy()
   })
 
   it('deep-links document detail to selected chapters and paginated pages', async () => {
@@ -397,11 +486,31 @@ describe('route helpers', () => {
     expect(routeFromPath('/costs')).toEqual({
       route: 'costs',
       documentId: null,
+      ocrJobId: null,
     })
     expect(pathForRoute({
       route: 'costs',
       documentId: null,
     })).toBe('/costs')
+    expect(routeFromPath('/costs?documentId=document-1')).toEqual({
+      route: 'costs',
+      documentId: 'document-1',
+      ocrJobId: null,
+    })
+    expect(pathForRoute({
+      route: 'costs',
+      documentId: 'document-1',
+    })).toBe('/costs?documentId=document-1')
+    expect(routeFromPath('/costs?ocrJobId=job-1')).toEqual({
+      route: 'costs',
+      documentId: null,
+      ocrJobId: 'job-1',
+    })
+    expect(pathForRoute({
+      route: 'costs',
+      documentId: null,
+      ocrJobId: 'job-1',
+    })).toBe('/costs?ocrJobId=job-1')
   })
 })
 

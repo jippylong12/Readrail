@@ -78,6 +78,37 @@ describe('CostsReport', () => {
     expect(screen.getAllByText('No OCR job').length).toBeGreaterThan(0)
   })
 
+  it('initializes document and OCR job drilldown filters from route state', () => {
+    render(
+      <CostsReport
+        documents={[documentRecord]}
+        initialFilters={{ documentId: 'doc-1', ocrJobId: 'job-1' }}
+        lineItems={[buildLineItem({ id: 'usage-ocr', ocrItemId: 'item-7', sourceFileName: 'scan.png' })]}
+        ocrJobs={[ocrJob]}
+      />,
+    )
+
+    expect((screen.getByLabelText('Document') as HTMLSelectElement).value).toBe('doc-1')
+    expect((screen.getByLabelText('OCR job') as HTMLSelectElement).value).toBe('job-1')
+    expect(screen.getByText('Filtered to one OCR job.')).toBeTruthy()
+    expect(screen.getByText('item-7')).toBeTruthy()
+    expect(screen.getByText('scan.png')).toBeTruthy()
+  })
+
+  it('keeps filtered drilldowns usable when no usage records match', () => {
+    render(
+      <CostsReport
+        documents={[documentRecord, { ...documentRecord, id: 'doc-missing', title: 'No usage book' }]}
+        initialFilters={{ documentId: 'doc-missing' }}
+        lineItems={[buildLineItem()]}
+        ocrJobs={[ocrJob]}
+      />,
+    )
+
+    expect(screen.getByText('No matching usage records')).toBeTruthy()
+    expect((screen.getByRole('button', { name: 'Export CSV' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
   it('renders rollups by document, OCR job, stage, model, and time period', async () => {
     const user = userEvent.setup()
     render(<CostsReport documents={[documentRecord]} lineItems={[buildLineItem()]} ocrJobs={[ocrJob]} />)

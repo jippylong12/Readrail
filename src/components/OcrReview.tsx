@@ -33,6 +33,7 @@ type OcrReviewProps = {
   loadApiKey: () => Promise<string | null>
   onCreateDocument: (title: string, pages: OcrPageInput[]) => void
   onAppendPages: (documentId: string, pages: OcrPageInput[], chapterId?: string | null) => void
+  onOpenJobCosts?: (ocrJobId: string) => void
 }
 
 type OcrFileDraft = OcrFileInput & {
@@ -75,6 +76,7 @@ export function OcrReview({
   loadApiKey,
   onCreateDocument,
   onAppendPages,
+  onOpenJobCosts,
 }: OcrReviewProps) {
   const [fileDrafts, setFileDrafts] = useState<OcrFileDraft[]>([])
   const [appendDocumentId, setAppendDocumentId] = useState('')
@@ -391,6 +393,11 @@ export function OcrReview({
         <div className="ocr-progress" aria-label="OCR progress">
           <div className="ocr-progress-header">
             <strong>{progressMessage || 'Preparing OCR.'}</strong>
+            {onOpenJobCosts && (
+              <button className="ghost-button" onClick={() => onOpenJobCosts(activeJob.id)} type="button">
+                View job costs
+              </button>
+            )}
             <span>{progressPercent}%</span>
           </div>
           <div

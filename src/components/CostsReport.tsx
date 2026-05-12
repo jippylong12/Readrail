@@ -14,6 +14,7 @@ import type { AiCostConfidence, AiUsageLineItem, AiUsageStage, AiUsageStatus, Do
 
 type CostsReportProps = {
   documents: DocumentRecord[]
+  initialFilters?: Pick<CostReportFilters, 'documentId' | 'ocrJobId'>
   lineItems: AiUsageLineItem[]
   ocrJobs: OcrJob[]
 }
@@ -22,8 +23,13 @@ const STAGE_OPTIONS: AiUsageStage[] = ['ocr_extraction', 'ocr_cleaner', 'ocr_for
 const STATUS_OPTIONS: AiUsageStatus[] = ['running', 'succeeded', 'failed']
 const CONFIDENCE_OPTIONS: AiCostConfidence[] = ['estimated', 'unknown', 'exact']
 
-export function CostsReport({ documents, lineItems, ocrJobs }: CostsReportProps) {
-  const [filters, setFilters] = useState<CostReportFilters>({})
+export function CostsReport({ documents, initialFilters, lineItems, ocrJobs }: CostsReportProps) {
+  const initialDocumentId = initialFilters?.documentId ?? ''
+  const initialOcrJobId = initialFilters?.ocrJobId ?? ''
+  const [filters, setFilters] = useState<CostReportFilters>(() => ({
+    documentId: initialDocumentId,
+    ocrJobId: initialOcrJobId,
+  }))
   const [timePeriod, setTimePeriod] = useState<CostReportTimePeriod>('day')
   const report = useMemo(
     () => buildCostReport({ documents, filters, lineItems, ocrJobs, timePeriod }),
@@ -59,6 +65,11 @@ export function CostsReport({ documents, lineItems, ocrJobs }: CostsReportProps)
         <div>
           <span className="eyebrow">Costs</span>
           <h1>AI usage costs</h1>
+          {(filters.documentId || filters.ocrJobId) && (
+            <span className="muted-text">
+              {filters.ocrJobId ? 'Filtered to one OCR job.' : 'Filtered to one document.'}
+            </span>
+          )}
         </div>
         <div className="button-row" data-tour="cost-exports">
           <button className="secondary-button" disabled={!report.lineItems.length} onClick={() => exportReport('csv')} type="button">
@@ -213,6 +224,7 @@ export function CostsReport({ documents, lineItems, ocrJobs }: CostsReportProps)
                     <th>Started</th>
                     <th>Document</th>
                     <th>OCR job</th>
+                    <th>OCR item</th>
                     <th>Stage</th>
                     <th>Model</th>
                     <th>Status</th>
@@ -228,6 +240,7 @@ export function CostsReport({ documents, lineItems, ocrJobs }: CostsReportProps)
                       <td>{formatShortDateTime(lineItem.startedAt)}</td>
                       <td>{lineItem.documentTitle}</td>
                       <td>{lineItem.ocrJobLabel}</td>
+                      <td>{lineItem.ocrItemLabel}</td>
                       <td>{AI_USAGE_STAGE_LABELS[lineItem.stage]}</td>
                       <td>{lineItem.model}</td>
                       <td>{AI_USAGE_STATUS_LABELS[lineItem.status]}</td>
