@@ -16,7 +16,7 @@ export function calculateAdjustedWpm(actualWpm: number, comprehensionScore: numb
 }
 
 export function clampWpm(wpm: number): number {
-  return Math.min(900, Math.max(80, Math.round(wpm)))
+  return Math.min(1000, Math.max(80, Math.round(wpm)))
 }
 
 export function roundWpmToNearestFive(wpm: number): number {

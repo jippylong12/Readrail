@@ -31,7 +31,7 @@ import { getDatabase, isTauriRuntime } from './lib/db/migrations'
 import { saveQuizAttemptToDatabase } from './lib/db/repository'
 import { generateQuizFromReading, type GeminiQuiz } from './lib/ai/geminiQuiz'
 import { buildGeneratedQuizAttempt, buildManualQuizAttempt, buildRetestQuizAttempt, scoreGeneratedQuizQuestions } from './lib/reading/coaching'
-import type { DocumentRecord, ReaderMode, ReaderResumeMemory, ReaderResumeSlot, ReadingScopeType } from './types/domain'
+import type { DocumentRecord, ReaderMode, ReaderResumeMemory, ReaderResumeSlot } from './types/domain'
 
 type PendingSession = {
   mode: ReaderMode
@@ -718,8 +718,18 @@ function App() {
             pages={documentPages}
             resumeMemory={displayedDocument ? coaching.readerResumeByDocument[displayedDocument.id] : undefined}
             scopeSelection={readerScopeSelection}
+            initialCursorWordIndex={
+              displayedDocument ? readerResume?.cursorWordIndex ?? coaching.lastResetWordIndexByDocument[displayedDocument.id] ?? 0 : 0
+            }
+            initialElapsedSeconds={readerResume?.elapsedSeconds ?? 0}
+            initialPauseCount={readerResume?.pauseCount ?? 0}
+            initialReadThroughWordIndex={
+              displayedDocument ? readerResume?.readThroughWordIndex ?? readerResume?.wordIndex ?? coaching.lastResetWordIndexByDocument[displayedDocument.id] ?? 0 : 0
+            }
+            initialRegressionCount={readerResume?.regressionCount ?? 0}
+            initialSegmentStartElapsedSeconds={readerResume?.segmentStartElapsedSeconds ?? 0}
             segmentStartWordIndex={
-              displayedDocument ? readerResume?.wordIndex ?? coaching.lastResetWordIndexByDocument[displayedDocument.id] ?? 0 : 0
+              displayedDocument ? readerResume?.segmentStartWordIndex ?? coaching.lastResetWordIndexByDocument[displayedDocument.id] ?? 0 : 0
             }
             onBackToLibrary={() => navigate({ route: 'library-saved', documentId: null })}
             onSegmentReset={resetCoachingSegment}
@@ -888,6 +898,13 @@ function routeForReaderScope(documentId: string, selection: ReaderScopeSelection
 type ResolvedReaderResume = {
   selection: ReaderScopeSelection
   wordIndex: number
+  cursorWordIndex: number
+  readThroughWordIndex: number
+  segmentStartWordIndex: number
+  elapsedSeconds: number
+  segmentStartElapsedSeconds: number
+  pauseCount: number
+  regressionCount: number
   chunkSize: number
   mode?: ReaderMode
   pageLayout?: ReaderResumeSlot['pageLayout']
@@ -918,14 +935,7 @@ function resolveReaderResume({
   if (isExplicitScopeRoute) {
     const matchingSlot = getReaderResumeSlotForSelection(memory, routeSelection)
     const scope = buildReaderScope(document, chapters, pages, routeSelection)
-    return {
-      selection: routeSelection,
-      wordIndex: matchingSlot ? clampResumeWordIndex(matchingSlot.wordIndex, scope) : scope.startWordOffset,
-      chunkSize: matchingSlot?.chunkSize ?? fallbackChunkSize,
-      mode: matchingSlot?.mode,
-      pageLayout: matchingSlot?.pageLayout,
-      targetWpm: matchingSlot?.targetWpm,
-    }
+    return buildResolvedReaderResume(routeSelection, scope, matchingSlot, fallbackChunkSize)
   }
 
   const slot = getLatestReaderResumeSlot(memory)
@@ -935,19 +945,39 @@ function resolveReaderResume({
 
   const selection = normalizeReaderScopeSelection(document, chapters, pages, readerResumeSlotToSelection(slot))
   const scope = buildReaderScope(document, chapters, pages, selection)
+  return buildResolvedReaderResume(selection, scope, slot, fallbackChunkSize)
+}
+
+function buildResolvedReaderResume(
+  selection: ReaderScopeSelection,
+  scope: ReturnType<typeof buildReaderScope>,
+  slot: ReaderResumeSlot | null,
+  fallbackChunkSize: number,
+): ResolvedReaderResume {
+  const fallbackWordIndex = scope.startWordOffset
   return {
     selection,
-    wordIndex: clampResumeWordIndex(slot.wordIndex, scope),
-    chunkSize: slot.chunkSize || fallbackChunkSize,
-    mode: slot.mode,
-    pageLayout: slot.pageLayout,
-    targetWpm: slot.targetWpm,
+    wordIndex: clampResumeWordIndex(slot?.wordIndex ?? slot?.readThroughWordIndex ?? fallbackWordIndex, scope),
+    cursorWordIndex: clampResumeWordIndex(slot?.cursorWordIndex ?? slot?.wordIndex ?? fallbackWordIndex, scope),
+    readThroughWordIndex: clampResumeWordIndex(slot?.readThroughWordIndex ?? slot?.wordIndex ?? fallbackWordIndex, scope),
+    segmentStartWordIndex: clampResumeWordIndex(slot?.segmentStartWordIndex ?? slot?.cursorWordIndex ?? fallbackWordIndex, scope),
+    elapsedSeconds: Math.max(0, Math.round(slot?.elapsedSeconds ?? 0)),
+    segmentStartElapsedSeconds: Math.max(0, Math.round(slot?.segmentStartElapsedSeconds ?? 0)),
+    pauseCount: Math.max(0, Math.round(slot?.pauseCount ?? 0)),
+    regressionCount: Math.max(0, Math.round(slot?.regressionCount ?? 0)),
+    chunkSize: slot?.chunkSize || fallbackChunkSize,
+    mode: slot?.mode,
+    pageLayout: slot?.pageLayout,
+    targetWpm: slot?.targetWpm,
   }
 }
 
 function getLatestReaderResumeSlot(memory: ReaderResumeMemory | undefined): ReaderResumeSlot | null {
-  const slots = (['document', 'chapter', 'pages'] as ReadingScopeType[])
-    .map((scopeType) => memory?.[scopeType] ?? null)
+  const slots = [
+    memory?.document ?? null,
+    ...Object.values(memory?.chapters ?? {}),
+    ...Object.values(memory?.pageRanges ?? {}),
+  ]
     .filter((slot): slot is ReaderResumeSlot => Boolean(slot))
   if (slots.length === 0) {
     return null
@@ -960,7 +990,12 @@ function getReaderResumeSlotForSelection(
   memory: ReaderResumeMemory | undefined,
   selection: ReaderScopeSelection,
 ): ReaderResumeSlot | null {
-  const slot = memory?.[selection.scopeType]
+  const slot =
+    selection.scopeType === 'document'
+      ? memory?.document
+      : selection.scopeType === 'chapter'
+        ? memory?.chapters?.[selection.chapterId ?? '']
+        : memory?.pageRanges?.[getReaderResumePageRangeKey(selection)]
   return slot && readerResumeSlotMatchesSelection(slot, selection) ? slot : null
 }
 
@@ -978,6 +1013,10 @@ function readerResumeSlotMatchesSelection(slot: ReaderResumeSlot, selection: Rea
     return true
   }
   return slot.startPageNumber === selection.startPageNumber && slot.endPageNumber === selection.endPageNumber
+}
+
+function getReaderResumePageRangeKey(selection: Pick<ReaderScopeSelection, 'chapterId' | 'endPageNumber' | 'startPageNumber'>): string {
+  return `${selection.chapterId ?? 'unknown'}:${selection.startPageNumber ?? 'start'}-${selection.endPageNumber ?? selection.startPageNumber ?? 'end'}`
 }
 
 function readerResumeSlotToSelection(slot: ReaderResumeSlot): ReaderScopeSelection {

@@ -20,7 +20,9 @@ import type {
   OnboardingState,
   PageLayout,
   ReaderMode,
+  ReaderResumeMemory,
   ReaderResumeSlot,
+  ReaderResumeSlotInput,
   ReadingSession,
   ReadingScopeType,
   SourceType,
@@ -218,7 +220,7 @@ type AppState = {
   addQuizAttempt: (attempt: QuizAttempt) => void
   resetCoachingSegment: (documentId: string, wordIndex: number) => void
   startCoachingSegment: (documentId: string, segment: CoachingState['activeSegmentByDocument'][string]) => void
-  updateReaderResume: (documentId: string, slot: Omit<ReaderResumeSlot, 'updatedAt'> & { updatedAt?: string }) => void
+  updateReaderResume: (documentId: string, slot: ReaderResumeSlotInput) => void
   resetAllData: () => void
   recoverDurableStateFromDatabase: () => Promise<boolean>
 }
@@ -373,15 +375,7 @@ function normalizeCoachingState(coaching: Partial<CoachingState> | undefined, fa
   const readerResumeByDocument = Object.fromEntries(
     Object.entries(coaching?.readerResumeByDocument ?? {}).map(([documentId, memory]) => [
       documentId,
-      Object.fromEntries(
-        (['document', 'chapter', 'pages'] as ReadingScopeType[])
-          .map((scopeType) => memory?.[scopeType])
-          .filter((slot): slot is ReaderResumeSlot => Boolean(slot))
-          .map((slot) => [
-            slot.scopeType,
-            normalizeReaderResumeSlot(slot, fallbackWpm),
-          ]),
-      ),
+      normalizeReaderResumeMemory(memory, fallbackWpm),
     ]),
   )
 
@@ -394,19 +388,94 @@ function normalizeCoachingState(coaching: Partial<CoachingState> | undefined, fa
   }
 }
 
-function normalizeReaderResumeSlot(slot: ReaderResumeSlot, fallbackWpm: number): ReaderResumeSlot {
+function normalizeReaderResumeMemory(memory: ReaderResumeMemory | Partial<Record<ReadingScopeType, ReaderResumeSlot>> | undefined, fallbackWpm: number): ReaderResumeMemory {
+  const normalizedMemory = memory as ReaderResumeMemory & Partial<Record<ReadingScopeType, ReaderResumeSlot>>
+  const documentSlot = normalizedMemory.document
+  const chapterSlots = normalizedMemory.chapters ?? {}
+  const pageRangeSlots = normalizedMemory.pageRanges ?? {}
+  const legacyChapterSlot = normalizedMemory.chapter
+  const legacyPagesSlot = normalizedMemory.pages
+
+  return {
+    document: documentSlot ? normalizeReaderResumeSlot(documentSlot, fallbackWpm) : undefined,
+    chapters: normalizeReaderResumeSlotMap({
+      ...chapterSlots,
+      ...(legacyChapterSlot?.chapterId ? { [legacyChapterSlot.chapterId]: legacyChapterSlot } : {}),
+    }, fallbackWpm),
+    pageRanges: normalizeReaderResumeSlotMap({
+      ...pageRangeSlots,
+      ...(legacyPagesSlot ? { [getReaderResumePageRangeKey(legacyPagesSlot)]: legacyPagesSlot } : {}),
+    }, fallbackWpm),
+  }
+}
+
+function normalizeReaderResumeSlotMap(slots: Record<string, ReaderResumeSlot>, fallbackWpm: number): Record<string, ReaderResumeSlot> | undefined {
+  const normalizedSlots = Object.fromEntries(
+    Object.entries(slots)
+      .filter((entry): entry is [string, ReaderResumeSlot] => Boolean(entry[1]))
+      .map(([key, slot]) => [key, normalizeReaderResumeSlot(slot, fallbackWpm)]),
+  )
+
+  return Object.keys(normalizedSlots).length > 0 ? normalizedSlots : undefined
+}
+
+function normalizeReaderResumeSlot(slot: ReaderResumeSlot | ReaderResumeSlotInput, fallbackWpm: number): ReaderResumeSlot {
+  const wordIndex = Math.max(0, Math.round(slot.wordIndex))
+  const cursorWordIndex = Math.max(0, Math.round(slot.cursorWordIndex ?? wordIndex))
+  const readThroughWordIndex = Math.max(cursorWordIndex, Math.round(slot.readThroughWordIndex ?? wordIndex))
+  const segmentStartWordIndex = Math.max(0, Math.round(slot.segmentStartWordIndex ?? cursorWordIndex))
+  const elapsedSeconds = Math.max(0, Math.round(slot.elapsedSeconds ?? 0))
   return {
     scopeType: slot.scopeType,
     chapterId: slot.chapterId ?? null,
     startPageNumber: slot.startPageNumber ?? null,
     endPageNumber: slot.endPageNumber ?? null,
-    wordIndex: Math.max(0, Math.round(slot.wordIndex)),
+    cursorWordIndex,
+    readThroughWordIndex,
+    segmentStartWordIndex,
+    elapsedSeconds,
+    segmentStartElapsedSeconds: Math.max(0, Math.min(elapsedSeconds, Math.round(slot.segmentStartElapsedSeconds ?? 0))),
+    pauseCount: Math.max(0, Math.round(slot.pauseCount ?? 0)),
+    regressionCount: Math.max(0, Math.round(slot.regressionCount ?? 0)),
+    wordIndex: readThroughWordIndex,
     chunkSize: Math.max(1, Math.round(slot.chunkSize)),
     mode: slot.mode ?? defaultSettings.reader.defaultMode,
     pageLayout: normalizePageLayout(slot.pageLayout ?? defaultSettings.reader.defaultPageLayout),
     targetWpm: Math.max(1, Math.round(slot.targetWpm ?? fallbackWpm)),
-    updatedAt: slot.updatedAt,
+    updatedAt: slot.updatedAt ?? new Date().toISOString(),
   }
+}
+
+function getReaderResumePageRangeKey(slot: Pick<ReaderResumeSlot, 'chapterId' | 'endPageNumber' | 'startPageNumber'>): string {
+  return `${slot.chapterId ?? 'unknown'}:${slot.startPageNumber ?? 'start'}-${slot.endPageNumber ?? slot.startPageNumber ?? 'end'}`
+}
+
+function saveReaderResumeSlot(memory: ReaderResumeMemory, slot: ReaderResumeSlot): ReaderResumeMemory {
+  if (slot.scopeType === 'document') {
+    return { ...memory, document: slot }
+  }
+
+  if (slot.scopeType === 'chapter' && slot.chapterId) {
+    return {
+      ...memory,
+      chapters: {
+        ...(memory.chapters ?? {}),
+        [slot.chapterId]: slot,
+      },
+    }
+  }
+
+  if (slot.scopeType === 'pages') {
+    return {
+      ...memory,
+      pageRanges: {
+        ...(memory.pageRanges ?? {}),
+        [getReaderResumePageRangeKey(slot)]: slot,
+      },
+    }
+  }
+
+  return memory
 }
 
 function normalizePageLayout(pageLayout: PageLayout | undefined): PageLayout {
@@ -2021,32 +2090,20 @@ export const useAppStore = create<AppState>()(
         })),
       updateReaderResume: (documentId, slot) =>
         set((state) => {
-          const normalizedSlot: ReaderResumeSlot = {
-            scopeType: slot.scopeType,
-            chapterId: slot.chapterId ?? null,
-            startPageNumber: slot.startPageNumber ?? null,
-            endPageNumber: slot.endPageNumber ?? null,
-            wordIndex: Math.max(0, Math.round(slot.wordIndex)),
-            chunkSize: Math.max(1, Math.round(slot.chunkSize)),
-            mode: slot.mode ?? defaultSettings.reader.defaultMode,
-            pageLayout: normalizePageLayout(slot.pageLayout ?? defaultSettings.reader.defaultPageLayout),
-            targetWpm: Math.max(1, Math.round(slot.targetWpm ?? state.coaching.recommendedWpm ?? defaultSettings.reader.defaultWpm)),
-            updatedAt: slot.updatedAt ?? new Date().toISOString(),
-          }
+          const normalizedSlot = normalizeReaderResumeSlot(slot, state.coaching.recommendedWpm ?? defaultSettings.reader.defaultWpm)
+          const currentMemory = state.coaching.readerResumeByDocument[documentId] ?? {}
+          const nextMemory = saveReaderResumeSlot(currentMemory, normalizedSlot)
 
           return {
             coaching: {
               ...state.coaching,
               lastResetWordIndexByDocument: {
                 ...state.coaching.lastResetWordIndexByDocument,
-                [documentId]: normalizedSlot.wordIndex,
+                [documentId]: normalizedSlot.segmentStartWordIndex,
               },
               readerResumeByDocument: {
                 ...state.coaching.readerResumeByDocument,
-                [documentId]: {
-                  ...(state.coaching.readerResumeByDocument[documentId] ?? {}),
-                  [normalizedSlot.scopeType]: normalizedSlot,
-                },
+                [documentId]: nextMemory,
               },
             },
           }

@@ -197,6 +197,13 @@ export type ReaderResumeSlot = {
   chapterId: string | null
   startPageNumber: number | null
   endPageNumber: number | null
+  cursorWordIndex: number
+  readThroughWordIndex: number
+  segmentStartWordIndex: number
+  elapsedSeconds: number
+  segmentStartElapsedSeconds: number
+  pauseCount: number
+  regressionCount: number
   wordIndex: number
   chunkSize: number
   mode?: ReaderMode
@@ -205,7 +212,16 @@ export type ReaderResumeSlot = {
   updatedAt: string
 }
 
-export type ReaderResumeMemory = Partial<Record<ReadingScopeType, ReaderResumeSlot>>
+export type ReaderResumeMemory = {
+  document?: ReaderResumeSlot
+  chapters?: Record<string, ReaderResumeSlot>
+  pageRanges?: Record<string, ReaderResumeSlot>
+}
+
+export type ReaderResumeSlotInput =
+  Pick<ReaderResumeSlot, 'chapterId' | 'chunkSize' | 'endPageNumber' | 'scopeType' | 'startPageNumber' | 'wordIndex'>
+  & Partial<Omit<ReaderResumeSlot, 'chapterId' | 'chunkSize' | 'endPageNumber' | 'scopeType' | 'startPageNumber' | 'updatedAt' | 'wordIndex'>>
+  & { updatedAt?: string }
 
 export type CoachingState = {
   recommendedWpm: number

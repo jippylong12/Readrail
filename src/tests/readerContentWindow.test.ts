@@ -104,11 +104,11 @@ describe('reader content windows', () => {
     expect(firstWindow.content).not.toContain('w1000')
     expect(firstWindow.isAtStart).toBe(true)
     expect(firstWindow.isAtEnd).toBe(false)
-    expect(model.shouldAdvanceWindow(499, firstWindow)).toBe(false)
-    expect(model.shouldAdvanceWindow(500, firstWindow)).toBe(true)
+    expect(model.shouldAdvanceWindow(999, firstWindow)).toBe(false)
+    expect(model.shouldAdvanceWindow(1000, firstWindow)).toBe(true)
 
     const nextWindow = model.getNextWindow(firstWindow)
-    expect(nextWindow.startWordIndex).toBe(500)
+    expect(nextWindow.startWordIndex).toBe(1000)
     expect(nextWindow.endWordIndex).toBe(1305)
     expect(nextWindow.isAtEnd).toBe(true)
 

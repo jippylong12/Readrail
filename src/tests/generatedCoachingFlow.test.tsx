@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../App'
 import { defaultOnboardingState, defaultTourProgressState, useAppStore } from '../app/store'
 import { generateQuizFromReading } from '../lib/ai/geminiQuiz'
-import type { DocumentChapterRecord, DocumentPageRecord, DocumentRecord } from '../types/domain'
+import type { DocumentChapterRecord, DocumentPageRecord, DocumentRecord, ReaderResumeSlot } from '../types/domain'
 
 vi.mock('../lib/ai/geminiQuiz', () => ({
   generateQuizFromReading: vi.fn(),
@@ -41,6 +41,30 @@ const pages: DocumentPageRecord[] = [
   buildPage('page-2', 2, 'Second page scoped words.', 42),
 ]
 
+function buildResumeSlot(overrides: Partial<ReaderResumeSlot> & Pick<ReaderResumeSlot, 'scopeType'>): ReaderResumeSlot {
+  const wordIndex = overrides.wordIndex ?? overrides.readThroughWordIndex ?? overrides.cursorWordIndex ?? 0
+  return {
+    chapterId: null,
+    chunkSize: 4,
+    cursorWordIndex: wordIndex,
+    elapsedSeconds: 0,
+    endPageNumber: null,
+    mode: 'rail',
+    pageLayout: 1,
+    pauseCount: 0,
+    readThroughWordIndex: wordIndex,
+    regressionCount: 0,
+    segmentStartElapsedSeconds: 0,
+    segmentStartWordIndex: wordIndex,
+    startPageNumber: null,
+    targetWpm: 250,
+    updatedAt: '2026-05-12T12:05:00.000Z',
+    wordIndex,
+    ...overrides,
+    scopeType: overrides.scopeType,
+  }
+}
+
 beforeEach(() => {
   window.localStorage.clear()
   window.history.replaceState(null, '', '/reader/document-1')
@@ -60,14 +84,15 @@ describe('generated coaching flow', () => {
         ...state.coaching,
         readerResumeByDocument: {
           [documentRecord.id]: {
-            pages: {
+            pageRanges: {
+              [`${chapter.id}:2-2`]: buildResumeSlot({
               scopeType: 'pages',
               chapterId: chapter.id,
               startPageNumber: 2,
               endPageNumber: 2,
               wordIndex: 4,
               chunkSize: 2,
-              updatedAt: '2026-05-12T12:05:00.000Z',
+              }),
             },
           },
         },
@@ -88,14 +113,15 @@ describe('generated coaching flow', () => {
         ...state.coaching,
         readerResumeByDocument: {
           [documentRecord.id]: {
-            pages: {
+            pageRanges: {
+              [`${chapter.id}:2-2`]: buildResumeSlot({
               scopeType: 'pages',
               chapterId: chapter.id,
               startPageNumber: 2,
               endPageNumber: 2,
               wordIndex: 4,
               chunkSize: 2,
-              updatedAt: '2026-05-12T12:05:00.000Z',
+              }),
             },
           },
         },
@@ -121,18 +147,18 @@ describe('generated coaching flow', () => {
     await waitFor(() => expect(screen.getByLabelText('Start page')).toHaveProperty('value', '2'))
     await user.click(screen.getByRole('button', { name: 'Chunk' }))
     await user.click(screen.getByRole('button', { name: '2 panes' }))
-    fireEvent.change(screen.getByRole('slider', { name: /WPM/ }), { target: { value: '300' } })
+    fireEvent.change(screen.getByLabelText('WPM'), { target: { value: '300' } })
     fireEvent.change(screen.getByLabelText('Chunk'), { target: { value: '2' } })
 
     await user.click(screen.getByRole('button', { name: 'Play' }))
 
     await waitFor(() => {
-      expect(useAppStore.getState().coaching.readerResumeByDocument[documentRecord.id]?.pages).toMatchObject({
+      expect(useAppStore.getState().coaching.readerResumeByDocument[documentRecord.id]?.pageRanges?.[`${chapter.id}:2-2`]).toMatchObject({
         scopeType: 'pages',
         chapterId: chapter.id,
         startPageNumber: 2,
         endPageNumber: 2,
-        wordIndex: 4,
+        wordIndex: 8,
         chunkSize: 2,
         mode: 'chunk',
         pageLayout: 2,
@@ -149,7 +175,7 @@ describe('generated coaching flow', () => {
     await waitFor(() => expect(screen.getByLabelText('Start page')).toHaveProperty('value', '2'))
     expect(screen.getByLabelText('End page')).toHaveProperty('value', '2')
     expect(screen.getByLabelText('Chunk')).toHaveProperty('value', '2')
-    expect(screen.getByRole('slider', { name: /WPM/ })).toHaveProperty('value', '300')
+    expect(screen.getByLabelText('WPM')).toHaveProperty('value', '300')
     expect(screen.getByRole('button', { name: 'Chunk' }).classList.contains('active')).toBe(true)
     expect(screen.getByRole('button', { name: '2 panes' }).classList.contains('active')).toBe(true)
 
@@ -159,7 +185,7 @@ describe('generated coaching flow', () => {
     await waitFor(() => expect(screen.getByLabelText('Start page')).toHaveProperty('value', '2'))
     expect(screen.getByLabelText('End page')).toHaveProperty('value', '2')
     expect(screen.getByLabelText('Chunk')).toHaveProperty('value', '2')
-    expect(screen.getByRole('slider', { name: /WPM/ })).toHaveProperty('value', '300')
+    expect(screen.getByLabelText('WPM')).toHaveProperty('value', '300')
     expect(screen.getByRole('button', { name: 'Chunk' }).classList.contains('active')).toBe(true)
     expect(screen.getByRole('button', { name: '2 panes' }).classList.contains('active')).toBe(true)
   })
@@ -171,14 +197,15 @@ describe('generated coaching flow', () => {
         ...state.coaching,
         readerResumeByDocument: {
           [documentRecord.id]: {
-            pages: {
+            pageRanges: {
+              [`${chapter.id}:2-2`]: buildResumeSlot({
               scopeType: 'pages',
               chapterId: chapter.id,
               startPageNumber: 2,
               endPageNumber: 2,
               wordIndex: 4,
               chunkSize: 2,
-              updatedAt: '2026-05-12T12:05:00.000Z',
+              }),
             },
           },
         },
@@ -208,7 +235,7 @@ describe('generated coaching flow', () => {
         chunkSize: 4,
       })
     })
-    expect(useAppStore.getState().coaching.readerResumeByDocument[documentRecord.id]?.pages).toBeUndefined()
+    expect(useAppStore.getState().coaching.readerResumeByDocument[documentRecord.id]?.pageRanges).toBeUndefined()
   })
 
   it('falls back gracefully when a saved chapter no longer exists', async () => {
@@ -217,14 +244,15 @@ describe('generated coaching flow', () => {
         ...state.coaching,
         readerResumeByDocument: {
           [documentRecord.id]: {
-            chapter: {
+            chapters: {
+              'missing-chapter': buildResumeSlot({
               scopeType: 'chapter',
               chapterId: 'missing-chapter',
               startPageNumber: null,
               endPageNumber: null,
               wordIndex: 999,
               chunkSize: 3,
-              updatedAt: '2026-05-12T12:05:00.000Z',
+              }),
             },
           },
         },

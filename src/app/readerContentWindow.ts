@@ -4,7 +4,7 @@ import { buildReaderScopeDescriptor, type ReaderScopeDescriptor, type ReaderScop
 import { getOrderedDocumentPages } from './structuredDocuments'
 
 export const DEFAULT_READER_WINDOW_WORD_COUNT = 1_000
-export const DEFAULT_READER_WINDOW_ADVANCE_THRESHOLD = 500
+export const DEFAULT_READER_WINDOW_ADVANCE_THRESHOLD = DEFAULT_READER_WINDOW_WORD_COUNT
 
 export type ReaderContentWindowOptions = {
   activeWindowWords?: number
@@ -70,7 +70,7 @@ export function buildReaderContentModel(
   )
   const advanceThresholdWords = normalizePositiveInteger(
     options.advanceThresholdWords,
-    DEFAULT_READER_WINDOW_ADVANCE_THRESHOLD,
+    activeWindowWords,
   )
   const sourcePages = buildSourcePages(document, chapters, pages, scope)
 

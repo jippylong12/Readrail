@@ -16,9 +16,13 @@ type ReaderControlsProps = {
   onPageLayoutChange: (layout: PageLayout) => void
   onToggleRunning: () => void
   onFocusModeToggle: () => void
+  onNextPane: () => void
+  onPreviousPane: () => void
   onRewind: () => void
   onRegression: () => void
   onTest: () => void
+  canGoNextPane: boolean
+  canGoPreviousPane: boolean
 }
 
 const modeGuidance: Array<{
@@ -77,9 +81,13 @@ export function ReaderControls({
   onPageLayoutChange,
   onToggleRunning,
   onFocusModeToggle,
+  onNextPane,
+  onPreviousPane,
   onRewind,
   onRegression,
   onTest,
+  canGoNextPane,
+  canGoPreviousPane,
 }: ReaderControlsProps) {
   const [isGuidanceOpen, setIsGuidanceOpen] = useState(false)
 
@@ -111,44 +119,49 @@ export function ReaderControls({
           </button>
         </div>
 
-        <div className="layout-picker" aria-label="Pane layout">
-          <span className="layout-picker-label">Panes</span>
-          <div className="segmented layout-segmented" role="group" aria-label="Pane count">
-            {([1, 2, 3, 4] as PageLayout[]).map((count) => (
-              <button
-                className={count === pageLayout ? 'active' : ''}
-                key={count}
-                onClick={() => onPageLayoutChange(count)}
-                type="button"
-                aria-label={`${count} pane${count > 1 ? 's' : ''}`}
-                aria-pressed={count === pageLayout}
-              >
-                {count}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <label className="wpm-control">
-          <span>WPM</span>
-          <input max={900} min={80} onChange={(event) => onWpmChange(Number(event.target.value))} type="range" value={targetWpm} />
-          <strong>{targetWpm}</strong>
-        </label>
-
-        <label className="chunk-control">
-          <span>Chunk</span>
-          <input
-            max={8}
+        <div className="reader-tuning-controls">
+          <MeterNumberInput
+            label="WPM"
+            max={1000}
+            min={80}
+            onChange={onWpmChange}
+            value={targetWpm}
+          />
+          <MeterNumberInput
+            label="Chunk"
+            max={6}
             min={1}
-            onChange={(event) => onChunkSizeChange(Number(event.target.value))}
-            type="number"
+            onChange={onChunkSizeChange}
             value={chunkSize}
           />
-        </label>
+          <div className="layout-picker" aria-label="Pane layout">
+            <span className="layout-picker-label">Panes</span>
+            <div className="segmented layout-segmented" role="group" aria-label="Pane count">
+              {([1, 2, 3, 4] as PageLayout[]).map((count) => (
+                <button
+                  className={count === pageLayout ? 'active' : ''}
+                  key={count}
+                  onClick={() => onPageLayoutChange(count)}
+                  type="button"
+                  aria-label={`${count} pane${count > 1 ? 's' : ''}`}
+                  aria-pressed={count === pageLayout}
+                >
+                  {count}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
 
         <div className="control-buttons" data-tour="reader-actions">
           <button className="primary-button" onClick={onToggleRunning} type="button">
             {isRunning ? 'Pause' : 'Play'}
+          </button>
+          <button className="secondary-button" disabled={!canGoPreviousPane} onClick={onPreviousPane} type="button">
+            Previous pane
+          </button>
+          <button className="secondary-button" disabled={!canGoNextPane} onClick={onNextPane} type="button">
+            Next pane
           </button>
           <button className="secondary-button" onClick={onRewind} type="button">
             Rewind
@@ -204,5 +217,43 @@ export function ReaderControls({
         </div>
       )}
     </div>
+  )
+}
+
+function MeterNumberInput({
+  label,
+  max,
+  min,
+  onChange,
+  value,
+}: {
+  label: string
+  max: number
+  min: number
+  onChange: (value: number) => void
+  value: number
+}) {
+  return (
+    <label className="meter-number-control">
+      <span>{label}</span>
+      <input
+        max={max}
+        min={min}
+        onBlur={(event) => onChange(Number(event.currentTarget.value))}
+        onChange={(event) => onChange(Number(event.target.value))}
+        type="number"
+        value={value}
+      />
+      <ValueMeter max={max} min={min} value={value} />
+    </label>
+  )
+}
+
+function ValueMeter({ max, min, value }: { max: number; min: number; value: number }) {
+  const percent = Math.max(0, Math.min(100, ((value - min) / (max - min)) * 100))
+  return (
+    <span className="value-meter" aria-hidden="true">
+      <span style={{ width: `${percent}%` }} />
+    </span>
   )
 }

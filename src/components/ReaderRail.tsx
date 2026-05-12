@@ -9,10 +9,16 @@ import type {
   ReaderMode,
   ReaderResumeMemory,
   ReaderResumeSlot,
+  ReaderResumeSlotInput,
 } from '../types/domain'
 import { clampWpm, formatDuration } from '../lib/reading/pacing'
 import { cleanReadingText } from '../lib/text/cleanup'
-import { buildVirtualReaderPaneLayout, type ReaderPaneMetrics, type VirtualReaderPane } from '../lib/text/pages'
+import {
+  buildVirtualReaderPaneLayout,
+  type ReaderPaneMetrics,
+  type VirtualReaderPane,
+  type VirtualReaderPaneLayout,
+} from '../lib/text/pages'
 import { countWords, estimatePages, estimateReadingMinutes } from '../lib/text/wordCount'
 import { ReaderControls } from './ReaderControls'
 import {
@@ -58,12 +64,18 @@ type ReaderRailProps = {
   defaultChunkSize: number
   defaultPageLayout: PageLayout
   fontSize: number
+  initialCursorWordIndex?: number
+  initialElapsedSeconds?: number
+  initialPauseCount?: number
+  initialReadThroughWordIndex?: number
+  initialRegressionCount?: number
+  initialSegmentStartElapsedSeconds?: number
   lineHeight: number
   segmentStartWordIndex: number
   onBackToLibrary: () => void
   onSegmentReset: (documentId: string, wordIndex: number) => void
   onSegmentStart: (documentId: string, segment: { startWordIndex: number; startedAt: string; targetWpm: number }) => void
-  onResumeUpdate: (documentId: string, slot: Omit<ReaderResumeSlot, 'updatedAt'> & { updatedAt?: string }) => void
+  onResumeUpdate: (documentId: string, slot: ReaderResumeSlotInput) => void
   onScopeChange: (selection: ReaderScopeSelection) => void
   onStartTest: (input: ReaderSegmentInput) => void
   onUpdateDocument?: (id: string, updates: Partial<Pick<DocumentRecord, 'title' | 'content'>>) => void
@@ -81,6 +93,12 @@ export function ReaderRail({
   defaultChunkSize,
   defaultPageLayout,
   fontSize,
+  initialCursorWordIndex,
+  initialElapsedSeconds = 0,
+  initialPauseCount = 0,
+  initialReadThroughWordIndex,
+  initialRegressionCount = 0,
+  initialSegmentStartElapsedSeconds = 0,
   lineHeight,
   segmentStartWordIndex: initialSegmentStartWordIndex,
   onBackToLibrary,
@@ -96,9 +114,9 @@ export function ReaderRail({
   const [chunkSize, setChunkSize] = useState(defaultChunkSize)
   const [pageLayout, setPageLayout] = useState<PageLayout>(defaultPageLayout)
   const [isRunning, setIsRunning] = useState(false)
-  const [elapsedSeconds, setElapsedSeconds] = useState(0)
-  const [pauseCount, setPauseCount] = useState(0)
-  const [regressionCount, setRegressionCount] = useState(0)
+  const [elapsedSeconds, setElapsedSeconds] = useState(() => Math.max(0, Math.round(initialElapsedSeconds)))
+  const [pauseCount, setPauseCount] = useState(() => Math.max(0, Math.round(initialPauseCount)))
+  const [regressionCount, setRegressionCount] = useState(() => Math.max(0, Math.round(initialRegressionCount)))
   const [isFocusMode, setIsFocusMode] = useState(false)
   const [hasStartedReading, setHasStartedReading] = useState(false)
   const [segmentStartElapsedSeconds, setSegmentStartElapsedSeconds] = useState(0)
@@ -110,19 +128,25 @@ export function ReaderRail({
   const startedRef = useRef<number | null>(null)
   const readingSurfaceRef = useRef<HTMLDivElement | null>(null)
   const [readerSurfaceSize, setReaderSurfaceSize] = useState(DEFAULT_READER_SURFACE_SIZE)
+  const [manualVisiblePaneStartIndex, setManualVisiblePaneStartIndex] = useState<number | null>(null)
 
   const activeScope = useMemo(
     () => (document ? buildReaderContentModel(document, chapters, pages, scopeSelection) : null),
     [chapters, document, pages, scopeSelection],
   )
+  const initialCursorDocumentWordIndex = initialCursorWordIndex ?? initialSegmentStartWordIndex
+  const initialReadThroughDocumentWordIndex = initialReadThroughWordIndex ?? initialCursorDocumentWordIndex
   const [segmentStartWordIndex, setSegmentStartWordIndex] = useState(() =>
     getLocalSegmentStart(initialSegmentStartWordIndex, activeScope),
   )
-  const [activeScopeWordIndex, setActiveScopeWordIndex] = useState(() =>
-    getLocalSegmentStart(initialSegmentStartWordIndex, activeScope),
+  const [cursorWordIndex, setCursorWordIndex] = useState(() =>
+    getLocalSegmentStart(initialCursorDocumentWordIndex, activeScope),
+  )
+  const [readThroughWordIndex, setReadThroughWordIndex] = useState(() =>
+    getLocalSegmentStart(initialReadThroughDocumentWordIndex, activeScope),
   )
   const [activeWindowStartWordIndex, setActiveWindowStartWordIndex] = useState(() =>
-    getWindowStartForWord(activeScope, getLocalSegmentStart(initialSegmentStartWordIndex, activeScope)),
+    getWindowStartForWord(activeScope, getLocalSegmentStart(initialCursorDocumentWordIndex, activeScope)),
   )
   const activeWindow = useMemo(
     () => activeScope?.getWindow(activeWindowStartWordIndex) ?? null,
@@ -132,9 +156,12 @@ export function ReaderRail({
     () => (activeWindow ? chunkWindowContent(activeWindow, chunkSize) : []),
     [activeWindow, chunkSize],
   )
-  const activeIndex = getChunkIndexForWord(chunks, activeScopeWordIndex)
+  const activeIndex = getChunkIndexForWord(chunks, cursorWordIndex)
   const activeChunk = chunks[activeIndex]
-  const currentWordIndex = activeChunk?.endWord ?? Math.min(activeScopeWordIndex, activeScope?.wordCount ?? 0)
+  const currentWordIndex = Math.max(
+    Math.min(readThroughWordIndex, activeScope?.wordCount ?? 0),
+    activeChunk?.endWord ?? Math.min(cursorWordIndex, activeScope?.wordCount ?? 0),
+  )
   const untestedWordCount = Math.max(0, currentWordIndex - segmentStartWordIndex)
   const comprehensionSuggestionThresholdWords = getComprehensionSuggestionThresholdWords(targetWpm)
   const progress = activeScope?.wordCount
@@ -155,12 +182,45 @@ export function ReaderRail({
     }),
     [fontSize, lineHeight, pageLayout, readerSurfaceSize.height, readerSurfaceSize.width],
   )
+  const paneLayout = useMemo(
+    () => buildVirtualReaderPaneLayout(chunks, activeIndex, paneMetrics),
+    [activeIndex, chunks, paneMetrics],
+  )
+  const visiblePaneStartIndex = Math.max(
+    0,
+    Math.min(manualVisiblePaneStartIndex ?? paneLayout.visibleStartPaneIndex, Math.max(0, paneLayout.panes.length - paneLayout.effectivePaneCount)),
+  )
+  const displayPaneLayout = useMemo<VirtualReaderPaneLayout<Chunk>>(
+    () => ({
+      ...paneLayout,
+      visiblePanes: paneLayout.panes.slice(visiblePaneStartIndex, visiblePaneStartIndex + paneLayout.effectivePaneCount),
+      visibleStartPaneIndex: visiblePaneStartIndex,
+    }),
+    [paneLayout, visiblePaneStartIndex],
+  )
+  const canGoPreviousPane = Boolean(
+    !isRunning && activeScope && activeWindow && visiblePaneStartIndex > 0,
+  )
+  const canGoNextPane = Boolean(
+    !isRunning
+      && activeScope
+      && activeWindow
+      && visiblePaneStartIndex + paneLayout.effectivePaneCount < paneLayout.panes.length,
+  )
 
   const scopeRuntimeStart = useMemo(() => {
     const localSegmentStart = getLocalSegmentStart(initialSegmentStartWordIndex, activeScope)
+    const localCursor = getLocalSegmentStart(initialCursorDocumentWordIndex, activeScope)
+    const localReadThrough = Math.max(localCursor, getLocalSegmentStart(initialReadThroughDocumentWordIndex, activeScope))
     return {
+      elapsedSeconds: Math.max(0, Math.round(initialElapsedSeconds)),
       localSegmentStart,
-      windowStartWordIndex: getWindowStartForWord(activeScope, localSegmentStart),
+      localCursor,
+      localReadThrough,
+      pauseCount: Math.max(0, Math.round(initialPauseCount)),
+      regressionCount: Math.max(0, Math.round(initialRegressionCount)),
+      segmentStartElapsedSeconds: Math.max(0, Math.round(initialSegmentStartElapsedSeconds)),
+      windowStartWordIndex: getWindowStartForWord(activeScope, localCursor),
     }
     // Reset only when the selected scope boundaries change; App-level derived arrays can rebuild the model object during reader events.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -174,42 +234,87 @@ export function ReaderRail({
     activeScope?.wordCount,
   ])
 
-  const rememberResume = useCallback((scopeWordIndex: number): void => {
+  const rememberResume = useCallback((updates: Partial<{
+    chunkSize: number
+    cursorWordIndex: number
+    elapsedSeconds: number
+    mode: ReaderMode
+    pageLayout: PageLayout
+    pauseCount: number
+    readThroughWordIndex: number
+    regressionCount: number
+    segmentStartElapsedSeconds: number
+    segmentStartWordIndex: number
+    targetWpm: number
+  }> = {}): void => {
     if (!document || !activeScope) {
       return
     }
+
+    const normalizedCursor = Math.max(0, Math.min(activeScope.wordCount, Math.round(updates.cursorWordIndex ?? cursorWordIndex)))
+    const normalizedReadThrough = Math.max(
+      normalizedCursor,
+      Math.min(activeScope.wordCount, Math.round(updates.readThroughWordIndex ?? currentWordIndex)),
+    )
+    const normalizedSegmentStart = Math.max(
+      0,
+      Math.min(activeScope.wordCount, Math.round(updates.segmentStartWordIndex ?? segmentStartWordIndex)),
+    )
+    const absoluteCursor = activeScope.startWordOffset + normalizedCursor
+    const absoluteReadThrough = activeScope.startWordOffset + normalizedReadThrough
+    const absoluteSegmentStart = activeScope.startWordOffset + normalizedSegmentStart
 
     onResumeUpdate(document.id, {
       scopeType: activeScope.scopeType,
       chapterId: activeScope.scopeType === 'document' ? null : activeScope.selectedChapterId,
       startPageNumber: activeScope.scopeType === 'pages' ? activeScope.selectedStartPageNumber : null,
       endPageNumber: activeScope.scopeType === 'pages' ? activeScope.selectedEndPageNumber : null,
-      wordIndex: activeScope.startWordOffset + Math.max(0, Math.min(activeScope.wordCount, Math.round(scopeWordIndex))),
-      chunkSize,
-      mode,
-      pageLayout,
-      targetWpm,
+      cursorWordIndex: absoluteCursor,
+      readThroughWordIndex: absoluteReadThrough,
+      segmentStartWordIndex: absoluteSegmentStart,
+      elapsedSeconds: Math.max(0, Math.round(updates.elapsedSeconds ?? elapsedSeconds)),
+      segmentStartElapsedSeconds: Math.max(0, Math.round(updates.segmentStartElapsedSeconds ?? segmentStartElapsedSeconds)),
+      pauseCount: Math.max(0, Math.round(updates.pauseCount ?? pauseCount)),
+      regressionCount: Math.max(0, Math.round(updates.regressionCount ?? regressionCount)),
+      wordIndex: absoluteReadThrough,
+      chunkSize: updates.chunkSize ?? chunkSize,
+      mode: updates.mode ?? mode,
+      pageLayout: updates.pageLayout ?? pageLayout,
+      targetWpm: updates.targetWpm ?? targetWpm,
     })
-  }, [activeScope, chunkSize, document, mode, onResumeUpdate, pageLayout, targetWpm])
+  }, [
+    activeScope,
+    chunkSize,
+    currentWordIndex,
+    cursorWordIndex,
+    document,
+    elapsedSeconds,
+    mode,
+    onResumeUpdate,
+    pageLayout,
+    pauseCount,
+    regressionCount,
+    segmentStartElapsedSeconds,
+    segmentStartWordIndex,
+    targetWpm,
+  ])
 
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    setActiveScopeWordIndex(scopeRuntimeStart.localSegmentStart)
+    setCursorWordIndex(scopeRuntimeStart.localCursor)
+    setReadThroughWordIndex(scopeRuntimeStart.localReadThrough)
     setActiveWindowStartWordIndex(scopeRuntimeStart.windowStartWordIndex)
     setIsRunning(false)
     setIsFocusMode(false)
     setHasStartedReading(false)
-    setElapsedSeconds(0)
-    setPauseCount(0)
-    setRegressionCount(0)
+    setElapsedSeconds(scopeRuntimeStart.elapsedSeconds)
+    setPauseCount(scopeRuntimeStart.pauseCount)
+    setRegressionCount(scopeRuntimeStart.regressionCount)
     setSegmentStartWordIndex(scopeRuntimeStart.localSegmentStart)
-    setSegmentStartElapsedSeconds(0)
+    setSegmentStartElapsedSeconds(scopeRuntimeStart.segmentStartElapsedSeconds)
+    setManualVisiblePaneStartIndex(null)
     setSuggestion(null)
-    setMode(defaultMode)
-    setTargetWpm(defaultWpm)
-    setChunkSize(defaultChunkSize)
-    setPageLayout(defaultPageLayout)
-  }, [defaultChunkSize, defaultMode, defaultPageLayout, defaultWpm, scopeRuntimeStart])
+  }, [scopeRuntimeStart])
   /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
@@ -258,11 +363,12 @@ export function ReaderRail({
     const duration = getChunkDurationMs(activeChunk.endWord - activeChunk.startWord, targetWpm)
     const timer = window.setTimeout(() => {
       const nextWordIndex = Math.min(activeChunk.endWord, activeScope.wordCount)
-      setActiveScopeWordIndex(nextWordIndex)
+      setCursorWordIndex(nextWordIndex)
+      setReadThroughWordIndex(nextWordIndex)
+      rememberResume({ cursorWordIndex: nextWordIndex, readThroughWordIndex: nextWordIndex })
       if (nextWordIndex >= activeScope.wordCount) {
         setIsRunning(false)
         setHasStartedReading(true)
-        rememberResume(nextWordIndex)
         if (nextWordIndex - segmentStartWordIndex >= comprehensionSuggestionThresholdWords) {
           setSuggestion('threshold')
         }
@@ -270,6 +376,7 @@ export function ReaderRail({
       }
 
       if (activeWindow && activeScope.shouldAdvanceWindow(nextWordIndex, activeWindow)) {
+        setManualVisiblePaneStartIndex(null)
         setActiveWindowStartWordIndex(activeScope.getNextWindow(activeWindow).startWordIndex)
       }
     }, duration)
@@ -355,14 +462,25 @@ export function ReaderRail({
   }
 
   function beginSegment(): void {
-    const startWordIndex = Math.max(0, hasStartedReading ? currentWordIndex : activeChunk?.startWord ?? segmentStartWordIndex)
+    const startWordIndex = Math.max(0, hasStartedReading ? cursorWordIndex : activeChunk?.startWord ?? segmentStartWordIndex)
     setHasStartedReading(false)
-    setActiveScopeWordIndex(startWordIndex)
+    setCursorWordIndex(startWordIndex)
+    setReadThroughWordIndex(Math.max(readThroughWordIndex, activeChunk?.endWord ?? startWordIndex))
     setActiveWindowStartWordIndex(getWindowStartForWord(activeScope, startWordIndex))
-    setSegmentStartWordIndex(startWordIndex)
-    setSegmentStartElapsedSeconds(elapsedSeconds)
-    rememberResume(startWordIndex)
-    if (document) {
+
+    if (!hasStartedReading) {
+      setSegmentStartWordIndex(startWordIndex)
+      setSegmentStartElapsedSeconds(elapsedSeconds)
+    }
+
+    rememberResume({
+      cursorWordIndex: startWordIndex,
+      readThroughWordIndex: Math.max(readThroughWordIndex, activeChunk?.endWord ?? startWordIndex),
+      segmentStartElapsedSeconds: hasStartedReading ? segmentStartElapsedSeconds : elapsedSeconds,
+      segmentStartWordIndex: hasStartedReading ? segmentStartWordIndex : startWordIndex,
+    })
+
+    if (document && !hasStartedReading) {
       onSegmentStart(document.id, {
         startWordIndex: (activeScope?.startWordOffset ?? 0) + startWordIndex,
         startedAt: new Date().toISOString(),
@@ -371,19 +489,57 @@ export function ReaderRail({
     }
   }
 
+  function moveReaderCursor(wordIndex: number): void {
+    const normalizedWordIndex = Math.max(0, Math.min(activeScope?.wordCount ?? 0, Math.round(wordIndex)))
+    setCursorWordIndex(normalizedWordIndex)
+    setReadThroughWordIndex(Math.max(readThroughWordIndex, normalizedWordIndex))
+    setActiveWindowStartWordIndex(getWindowStartForWord(activeScope, normalizedWordIndex))
+    setManualVisiblePaneStartIndex(null)
+    setIsRunning(false)
+    setSuggestion(null)
+    rememberResume({
+      cursorWordIndex: normalizedWordIndex,
+      readThroughWordIndex: Math.max(readThroughWordIndex, normalizedWordIndex),
+    })
+  }
+
+  function goToPreviousPane(): void {
+    if (!activeScope || !activeWindow || isRunning) {
+      return
+    }
+
+    setManualVisiblePaneStartIndex(Math.max(0, visiblePaneStartIndex - paneLayout.effectivePaneCount))
+  }
+
+  function goToNextPane(): void {
+    if (!activeScope || !activeWindow || isRunning) {
+      return
+    }
+
+    setManualVisiblePaneStartIndex(
+      Math.min(Math.max(0, paneLayout.panes.length - paneLayout.effectivePaneCount), visiblePaneStartIndex + paneLayout.effectivePaneCount),
+    )
+  }
+
   function resetSegment(wordIndex: number): void {
     const normalizedWordIndex = Math.max(0, Math.round(wordIndex))
     setSegmentStartWordIndex(normalizedWordIndex)
     setSegmentStartElapsedSeconds(elapsedSeconds)
     setSuggestion(null)
-    rememberResume(normalizedWordIndex)
+    rememberResume({
+      cursorWordIndex,
+      readThroughWordIndex: currentWordIndex,
+      segmentStartElapsedSeconds: elapsedSeconds,
+      segmentStartWordIndex: normalizedWordIndex,
+    })
     if (document) {
       onSegmentReset(document.id, (activeScope?.startWordOffset ?? 0) + normalizedWordIndex)
     }
   }
 
   function resetReaderRuntime(): void {
-    setActiveScopeWordIndex(0)
+    setCursorWordIndex(0)
+    setReadThroughWordIndex(0)
     setActiveWindowStartWordIndex(0)
     setIsRunning(false)
     setIsFocusMode(false)
@@ -400,7 +556,7 @@ export function ReaderRail({
     setIsRunning(false)
     setIsFocusMode(false)
     setSuggestion(null)
-    rememberResume(currentWordIndex)
+    rememberResume({ readThroughWordIndex: currentWordIndex })
     onStartTest(buildSegment())
   }
 
@@ -447,8 +603,13 @@ export function ReaderRail({
   function pauseReading(): void {
     setIsRunning(false)
     setHasStartedReading(true)
-    setPauseCount((count) => count + 1)
-    rememberResume(currentWordIndex)
+    const nextPauseCount = pauseCount + 1
+    setPauseCount(nextPauseCount)
+    rememberResume({
+      cursorWordIndex,
+      pauseCount: nextPauseCount,
+      readThroughWordIndex: currentWordIndex,
+    })
     if (untestedWordCount >= comprehensionSuggestionThresholdWords) {
       setSuggestion('threshold')
     }
@@ -465,20 +626,54 @@ export function ReaderRail({
     setIsRunning(false)
     setHasStartedReading(false)
     setSuggestion(null)
-    setActiveScopeWordIndex(rewindWordIndex)
+    setCursorWordIndex(rewindWordIndex)
+    setReadThroughWordIndex(Math.max(rewindWordIndex, chunks[getChunkIndexForWord(chunks, rewindWordIndex)]?.endWord ?? rewindWordIndex))
     setActiveWindowStartWordIndex(getWindowStartForWord(activeScope, rewindWordIndex))
-    rememberResume(rewindWordIndex)
+    setManualVisiblePaneStartIndex(null)
+    rememberResume({
+      cursorWordIndex: rewindWordIndex,
+      readThroughWordIndex: Math.max(rewindWordIndex, chunks[getChunkIndexForWord(chunks, rewindWordIndex)]?.endWord ?? rewindWordIndex),
+    })
   }
 
   function rereadSegment(): void {
     const rereadWordIndex = Math.max(0, segmentStartWordIndex)
-    setRegressionCount((count) => count + 1)
+    const nextRegressionCount = regressionCount + 1
+    setRegressionCount(nextRegressionCount)
     setIsRunning(false)
     setHasStartedReading(false)
     setSuggestion(null)
-    setActiveScopeWordIndex(rereadWordIndex)
+    setCursorWordIndex(rereadWordIndex)
+    setReadThroughWordIndex(Math.max(rereadWordIndex, chunks[getChunkIndexForWord(chunks, rereadWordIndex)]?.endWord ?? rereadWordIndex))
     setActiveWindowStartWordIndex(getWindowStartForWord(activeScope, rereadWordIndex))
-    rememberResume(rereadWordIndex)
+    setManualVisiblePaneStartIndex(null)
+    rememberResume({
+      cursorWordIndex: rereadWordIndex,
+      readThroughWordIndex: Math.max(rereadWordIndex, chunks[getChunkIndexForWord(chunks, rereadWordIndex)]?.endWord ?? rereadWordIndex),
+      regressionCount: nextRegressionCount,
+    })
+  }
+
+  function changeMode(nextMode: ReaderMode): void {
+    setMode(nextMode)
+    rememberResume({ mode: nextMode })
+  }
+
+  function changePageLayout(nextPageLayout: PageLayout): void {
+    setPageLayout(nextPageLayout)
+    rememberResume({ pageLayout: nextPageLayout })
+  }
+
+  function changeChunkSize(nextChunkSize: number): void {
+    const normalizedChunkSize = Math.max(1, Math.min(6, Math.round(nextChunkSize)))
+    setChunkSize(normalizedChunkSize)
+    rememberResume({ chunkSize: normalizedChunkSize })
+  }
+
+  function changeTargetWpm(nextTargetWpm: number): void {
+    const normalizedWpm = clampWpm(nextTargetWpm)
+    setTargetWpm(normalizedWpm)
+    rememberResume({ targetWpm: normalizedWpm })
   }
 
   function toggleRunning(): void {
@@ -569,15 +764,19 @@ export function ReaderRail({
         isTestAvailable={!isRunning && hasStartedReading && untestedWordCount > 0}
         mode={mode}
         pageLayout={pageLayout}
-        onChunkSizeChange={setChunkSize}
+        canGoNextPane={canGoNextPane}
+        canGoPreviousPane={canGoPreviousPane}
+        onChunkSizeChange={changeChunkSize}
         onFocusModeToggle={() => setIsFocusMode((focused) => !focused)}
+        onNextPane={goToNextPane}
         onTest={startTest}
-        onModeChange={setMode}
-        onPageLayoutChange={setPageLayout}
+        onModeChange={changeMode}
+        onPageLayoutChange={changePageLayout}
+        onPreviousPane={goToPreviousPane}
         onRegression={rereadSegment}
         onRewind={rewindPlayback}
         onToggleRunning={toggleRunning}
-        onWpmChange={(value) => setTargetWpm(clampWpm(value))}
+        onWpmChange={changeTargetWpm}
         targetWpm={targetWpm}
       />
 
@@ -617,7 +816,13 @@ export function ReaderRail({
         {mode === 'rsvp' ? (
           <div className="rsvp-frame">{activeChunk?.text ?? 'Done'}</div>
         ) : (
-          <ReaderPaneLayout activeIndex={activeIndex} chunks={chunks} metrics={paneMetrics} />
+          <ReaderPaneLayout
+            activeIndex={activeIndex}
+            chunks={chunks}
+            isCursorSelectionDisabled={isRunning}
+            onSelectChunk={(chunk) => moveReaderCursor(chunk.startWord)}
+            paneLayout={displayPaneLayout}
+          />
         )}
       </div>
     </section>
@@ -664,7 +869,7 @@ function ReaderScopeSetup({
       return
     }
 
-    const savedSelection = readerResumeSlotToScopeSelection(resumeMemory?.[scopeType])
+    const savedSelection = readerResumeSlotToScopeSelection(getResumeSlotForScopeType(resumeMemory, scopeType))
     if (savedSelection) {
       onScopeChange(savedSelection)
       return
@@ -833,6 +1038,18 @@ function readerResumeSlotToScopeSelection(slot: ReaderResumeSlot | undefined): R
   }
 }
 
+function getResumeSlotForScopeType(
+  memory: ReaderResumeMemory | undefined,
+  scopeType: ReaderScopeSelection['scopeType'],
+): ReaderResumeSlot | undefined {
+  if (scopeType === 'document') {
+    return memory?.document
+  }
+
+  const slots = scopeType === 'chapter' ? Object.values(memory?.chapters ?? {}) : Object.values(memory?.pageRanges ?? {})
+  return slots.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0]
+}
+
 function getLocalSegmentStart(documentWordIndex: number, scope: ReaderContentModel | null): number {
   if (!scope || documentWordIndex < scope.startWordOffset || documentWordIndex > scope.endWordOffset) {
     return 0
@@ -933,15 +1150,12 @@ function getChunkIndexForWord(chunks: Chunk[], wordIndex: number): number {
 type MultiPageLayoutProps = {
   chunks: Chunk[]
   activeIndex: number
-  metrics: ReaderPaneMetrics
+  isCursorSelectionDisabled: boolean
+  onSelectChunk: (chunk: Chunk) => void
+  paneLayout: VirtualReaderPaneLayout<Chunk>
 }
 
-function ReaderPaneLayout({ chunks, activeIndex, metrics }: MultiPageLayoutProps) {
-  const paneLayout = useMemo(
-    () => buildVirtualReaderPaneLayout(chunks, activeIndex, metrics),
-    [activeIndex, chunks, metrics],
-  )
-
+function ReaderPaneLayout({ chunks, activeIndex, isCursorSelectionDisabled, onSelectChunk, paneLayout }: MultiPageLayoutProps) {
   return (
     <div
       className="page-panes"
@@ -954,8 +1168,10 @@ function ReaderPaneLayout({ chunks, activeIndex, metrics }: MultiPageLayoutProps
         <ReaderPane
           activeIndex={activeIndex}
           chunks={chunks}
+          isCursorSelectionDisabled={isCursorSelectionDisabled}
           isActivePane={paneLayout.visibleStartPaneIndex + visibleIndex === paneLayout.activePaneIndex}
           key={pane.id}
+          onSelectChunk={onSelectChunk}
           pane={pane}
         />
       ))}
@@ -966,11 +1182,13 @@ function ReaderPaneLayout({ chunks, activeIndex, metrics }: MultiPageLayoutProps
 type ReaderPaneProps = {
   activeIndex: number
   chunks: Chunk[]
+  isCursorSelectionDisabled: boolean
   isActivePane: boolean
+  onSelectChunk: (chunk: Chunk) => void
   pane: VirtualReaderPane<Chunk>
 }
 
-function ReaderPane({ activeIndex, chunks, isActivePane, pane }: ReaderPaneProps) {
+function ReaderPane({ activeIndex, chunks, isCursorSelectionDisabled, isActivePane, onSelectChunk, pane }: ReaderPaneProps) {
   return (
     <div className={`page-pane${isActivePane ? ' page-pane-active' : ''}`}>
       {pane.chunks.map((chunk) => {
@@ -979,9 +1197,14 @@ function ReaderPane({ activeIndex, chunks, isActivePane, pane }: ReaderPaneProps
         return (
           <span key={chunk.id}>
             {chunk.startsNewParagraph && <span className="para-break" aria-hidden="true" />}
-            <span className={isActive ? 'active-chunk' : ''}>
+            <button
+              className={isActive ? 'reader-chunk active-chunk' : 'reader-chunk'}
+              disabled={isCursorSelectionDisabled}
+              onClick={() => onSelectChunk(chunk)}
+              type="button"
+            >
               {chunk.text}{' '}
-            </span>
+            </button>
           </span>
         )
       })}

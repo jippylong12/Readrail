@@ -41,7 +41,7 @@ export type VirtualReaderPaneLayout<TChunk extends ReaderPaneChunk = ReaderPaneC
 }
 
 const DEFAULT_GAP = 16
-const DEFAULT_MIN_PANE_WIDTH = 280
+const DEFAULT_MIN_PANE_WIDTH = 200
 const DEFAULT_MOBILE_BREAKPOINT = 720
 const DEFAULT_PANE_PADDING_BLOCK = 40
 const DEFAULT_PANE_PADDING_INLINE = 44

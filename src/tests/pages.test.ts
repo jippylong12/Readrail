@@ -48,6 +48,11 @@ describe('buildVirtualReaderPaneLayout', () => {
     expect(getEffectiveReaderPaneCount({ ...metrics, containerWidth: 520, requestedPaneCount: 4 })).toBe(1)
   })
 
+  it('keeps two- and three-pane layouts distinct at medium reader widths', () => {
+    expect(getEffectiveReaderPaneCount({ ...metrics, containerWidth: 760, requestedPaneCount: 2 })).toBe(2)
+    expect(getEffectiveReaderPaneCount({ ...metrics, containerWidth: 760, requestedPaneCount: 3 })).toBe(3)
+  })
+
   it('identifies the active pane and advances the visible pane window', () => {
     const layout = buildVirtualReaderPaneLayout(buildChunks(8), 5, metrics)
 

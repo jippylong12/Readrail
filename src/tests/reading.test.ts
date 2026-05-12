@@ -36,7 +36,7 @@ describe('reading math', () => {
 
   it('clamps WPM and formats elapsed time', () => {
     expect(clampWpm(40)).toBe(80)
-    expect(clampWpm(1200)).toBe(900)
+    expect(clampWpm(1200)).toBe(1000)
     expect(roundWpmToNearestFive(386.7)).toBe(385)
     expect(roundWpmToNearestFive(388)).toBe(390)
     expect(formatDuration(125)).toBe('2:05')
@@ -168,10 +168,10 @@ describe('reading math', () => {
     expect(retestAttempt).toMatchObject({
       kind: 'retest',
       readingSessionId: null,
-      targetWpm: 900,
+      targetWpm: 1000,
       rawWpm: 200,
       adjustedWpm: 182,
-      recommendedWpm: 900,
+      recommendedWpm: 1000,
       questionResults: [],
       questions: [],
     })

@@ -32,10 +32,14 @@ function renderControls(pageLayout: PageLayout = 1) {
       isTestAvailable
       mode="rail"
       pageLayout={pageLayout}
+      canGoNextPane
+      canGoPreviousPane={false}
       onChunkSizeChange={vi.fn()}
       onFocusModeToggle={vi.fn()}
       onModeChange={vi.fn()}
+      onNextPane={vi.fn()}
       onPageLayoutChange={onPageLayoutChange}
+      onPreviousPane={vi.fn()}
       onRegression={vi.fn()}
       onRewind={vi.fn()}
       onTest={vi.fn()}
