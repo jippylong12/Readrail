@@ -10,11 +10,16 @@ import type {
   DocumentRecord,
   OcrJob,
   OcrJobItem,
+  OcrJobItemPage,
+  OcrReviewStatus,
+  OcrUncertainSpan,
   QuizAttempt,
   QuizAttemptKind,
   QuizQuestionReview,
   ReadingScopeType,
   ReadingSession,
+  SourceFileRecord,
+  SourceType,
 } from '../../types/domain'
 import { getDatabase } from './migrations'
 
@@ -37,6 +42,17 @@ export type QuizAttemptQuery = {
   documentId?: string | null
   readingSessionId?: string | null
   kind?: QuizAttemptKind
+}
+
+export type DurableDatabaseState = {
+  documents: DocumentRecord[]
+  documentChapters: DocumentChapterRecord[]
+  documentPages: DocumentPageRecord[]
+  ocrJobs: OcrJob[]
+  ocrJobItems: OcrJobItem[]
+  sessions: ReadingSession[]
+  quizAttempts: QuizAttempt[]
+  aiUsageLineItems: AiUsageLineItem[]
 }
 
 export async function saveDocumentToDatabase(
@@ -149,6 +165,24 @@ export async function deleteDocumentPageFromDatabase(pageId: string): Promise<vo
   }
 
   await database.execute('DELETE FROM document_pages WHERE id = $1', [pageId])
+}
+
+export async function clearDurableStateFromDatabase(): Promise<void> {
+  const database = await getDatabase()
+  if (!database) {
+    return
+  }
+
+  await database.execute('DELETE FROM ai_usage_line_items')
+  await database.execute('DELETE FROM quiz_attempts')
+  await database.execute('DELETE FROM comprehension_checks')
+  await database.execute('DELETE FROM reading_sessions')
+  await database.execute('DELETE FROM ocr_job_items')
+  await database.execute('DELETE FROM ocr_jobs')
+  await database.execute('DELETE FROM source_files')
+  await database.execute('DELETE FROM document_pages')
+  await database.execute('DELETE FROM document_chapters')
+  await database.execute('DELETE FROM documents')
 }
 
 export async function saveSessionToDatabase(session: ReadingSession): Promise<void> {
@@ -439,6 +473,151 @@ export async function queryAiUsageLineItemsFromDatabase(
   return rows.map(aiUsageLineItemFromRow)
 }
 
+export async function loadDurableStateFromDatabase(): Promise<DurableDatabaseState | null> {
+  const database = await getDatabase()
+  if (!database) {
+    return null
+  }
+
+  const [
+    documentRows,
+    chapterRows,
+    pageRows,
+    ocrJobRows,
+    ocrJobItemRows,
+    sessionRows,
+    quizAttemptRows,
+    aiUsageLineItemRows,
+  ] = await Promise.all([
+    database.select<DocumentRow[]>('SELECT * FROM documents ORDER BY updated_at DESC'),
+    database.select<DocumentChapterRow[]>('SELECT * FROM document_chapters ORDER BY document_id ASC, sort_order ASC'),
+    database.select<DocumentPageRow[]>('SELECT * FROM document_pages ORDER BY document_id ASC, sort_order ASC'),
+    database.select<OcrJobRow[]>('SELECT * FROM ocr_jobs ORDER BY updated_at DESC, created_at DESC'),
+    database.select<OcrJobItemRow[]>('SELECT * FROM ocr_job_items ORDER BY job_id ASC, order_index ASC'),
+    database.select<ReadingSessionRow[]>('SELECT * FROM reading_sessions ORDER BY started_at DESC'),
+    database.select<QuizAttemptRow[]>('SELECT * FROM quiz_attempts ORDER BY created_at DESC'),
+    database.select<AiUsageLineItemRow[]>('SELECT * FROM ai_usage_line_items ORDER BY started_at DESC'),
+  ])
+
+  return {
+    documents: documentRows.map(documentFromRow),
+    documentChapters: chapterRows.map(documentChapterFromRow),
+    documentPages: pageRows.map(documentPageFromRow),
+    ocrJobs: ocrJobRows.map(ocrJobFromRow),
+    ocrJobItems: ocrJobItemRows.map(ocrJobItemFromRow),
+    sessions: sessionRows.map(readingSessionFromRow),
+    quizAttempts: quizAttemptRows.map(quizAttemptFromRow),
+    aiUsageLineItems: aiUsageLineItemRows.map(aiUsageLineItemFromRow),
+  }
+}
+
+type DocumentRow = {
+  id: string
+  title: string
+  source_type: SourceType
+  content: string
+  word_count: number
+  estimated_pages: number | null
+  language: string | null
+  structure_version: number | null
+  created_at: string
+  updated_at: string
+  archived_at: string | null
+}
+
+type DocumentChapterRow = {
+  id: string
+  document_id: string
+  title: string
+  sort_order: number
+  created_at: string
+  updated_at: string
+}
+
+type DocumentPageRow = {
+  id: string
+  document_id: string
+  chapter_id: string
+  sort_order: number
+  page_number: number
+  source_page_number: number | null
+  title: string | null
+  text: string
+  word_count: number
+  review_status: OcrReviewStatus
+  ocr_confidence: number | null
+  ocr_notes: string | null
+  uncertain_spans_json: string | null
+  source_file_id: string | null
+  source_file_name: string | null
+  source_kind: SourceFileRecord['kind'] | null
+  source_local_path: string | null
+  source_sha256: string | null
+  created_at: string
+  updated_at: string
+}
+
+type OcrJobRow = {
+  id: string
+  document_id: string | null
+  target_chapter_id: string | null
+  status: OcrJob['status']
+  model_id: string
+  input_file_count: number
+  prompt_version: string
+  warnings_json: string | null
+  error_message: string | null
+  created_at: string
+  updated_at: string
+  completed_at: string | null
+}
+
+type OcrJobItemRow = {
+  id: string
+  job_id: string
+  order_index: number
+  source_file_name: string
+  source_file_type: string
+  source_file_size: number
+  source_file_last_modified: number
+  source_page_number: number | null
+  title: string | null
+  status: OcrJobItem['status']
+  ocr_text: string | null
+  pages_json: string | null
+  warnings_json: string | null
+  failure_reason: string | null
+  created_at: string
+  updated_at: string
+}
+
+type ReadingSessionRow = {
+  id: string
+  document_id: string
+  scope_type: ReadingScopeType | null
+  scope_label: string | null
+  chapter_id: string | null
+  chapter_title: string | null
+  page_ids_json: string | null
+  page_numbers_json: string | null
+  source_page_numbers_json: string | null
+  mode: ReadingSession['mode']
+  target_wpm: number
+  actual_wpm: number
+  adjusted_wpm: number | null
+  words_read: number
+  duration_seconds: number
+  start_position: number
+  end_position: number
+  pause_count: number | null
+  regression_count: number | null
+  comprehension_score: number | null
+  self_rating: number | null
+  notes: string | null
+  started_at: string
+  ended_at: string
+}
+
 type AiUsageLineItemRow = {
   id: string
   document_id: string | null
@@ -482,6 +661,125 @@ type QuizAttemptRow = {
   question_results_json: string | null
   questions_json: string | null
   created_at: string
+}
+
+function documentFromRow(row: DocumentRow): DocumentRecord {
+  return {
+    id: row.id,
+    title: row.title,
+    sourceType: normalizeSourceType(row.source_type),
+    content: row.content,
+    wordCount: normalizeNumber(row.word_count, 0),
+    estimatedPages: normalizeNumber(row.estimated_pages, 0),
+    language: row.language || 'en',
+    structureVersion: normalizeNumber(row.structure_version, 1),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    archivedAt: row.archived_at,
+  }
+}
+
+function documentChapterFromRow(row: DocumentChapterRow): DocumentChapterRecord {
+  return {
+    id: row.id,
+    documentId: row.document_id,
+    title: row.title,
+    sortOrder: normalizeNumber(row.sort_order, 0),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+}
+
+function documentPageFromRow(row: DocumentPageRow): DocumentPageRecord {
+  return {
+    id: row.id,
+    documentId: row.document_id,
+    chapterId: row.chapter_id,
+    sortOrder: normalizeNumber(row.sort_order, 0),
+    pageNumber: normalizeNumber(row.page_number, 1),
+    sourcePageNumber: normalizeNullableNumber(row.source_page_number),
+    title: row.title,
+    text: row.text,
+    wordCount: normalizeNumber(row.word_count, 0),
+    reviewStatus: normalizeOcrReviewStatus(row.review_status),
+    ocrConfidence: normalizeNullableNumber(row.ocr_confidence),
+    ocrNotes: row.ocr_notes,
+    uncertainSpans: normalizeUncertainSpans(parseNullableJson<unknown>(row.uncertain_spans_json, [])),
+    sourceFileId: row.source_file_id,
+    sourceFileName: row.source_file_name,
+    sourceKind: normalizeSourceFileKind(row.source_kind),
+    sourceLocalPath: row.source_local_path,
+    sourceSha256: row.source_sha256,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+}
+
+function ocrJobFromRow(row: OcrJobRow): OcrJob {
+  return {
+    id: row.id,
+    documentId: row.document_id,
+    targetChapterId: row.target_chapter_id,
+    status: normalizeOcrJobStatus(row.status),
+    modelId: row.model_id,
+    inputFileCount: normalizeNumber(row.input_file_count, 0),
+    promptVersion: row.prompt_version,
+    warnings: normalizeStringArray(parseNullableJson<unknown>(row.warnings_json, [])),
+    errorMessage: row.error_message,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at || row.created_at,
+    completedAt: row.completed_at,
+  }
+}
+
+function ocrJobItemFromRow(row: OcrJobItemRow): OcrJobItem {
+  return {
+    id: row.id,
+    jobId: row.job_id,
+    orderIndex: normalizeNumber(row.order_index, 0),
+    sourceFileName: row.source_file_name,
+    sourceFileType: row.source_file_type,
+    sourceFileSize: normalizeNumber(row.source_file_size, 0),
+    sourceFileLastModified: normalizeNumber(row.source_file_last_modified, 0),
+    sourcePageNumber: normalizeNullableNumber(row.source_page_number),
+    title: row.title,
+    status: normalizeOcrJobItemStatus(row.status),
+    ocrText: row.ocr_text,
+    pages: normalizeOcrJobItemPages(parseNullableJson<unknown>(row.pages_json, [])),
+    warnings: normalizeStringArray(parseNullableJson<unknown>(row.warnings_json, [])),
+    failureReason: row.failure_reason,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+}
+
+function readingSessionFromRow(row: ReadingSessionRow): ReadingSession {
+  return {
+    id: row.id,
+    documentId: row.document_id,
+    scopeType: normalizeReadingScopeType(row.scope_type),
+    scopeLabel: row.scope_label,
+    chapterId: row.chapter_id,
+    chapterTitle: row.chapter_title,
+    pageIds: normalizeStringArray(parseNullableJson<unknown>(row.page_ids_json, [])),
+    pageNumbers: normalizeNumberArray(parseNullableJson<unknown>(row.page_numbers_json, [])),
+    sourcePageNumbers: normalizeNullableNumberArray(parseNullableJson<unknown>(row.source_page_numbers_json, [])),
+    mode: normalizeReaderMode(row.mode),
+    targetWpm: normalizeNumber(row.target_wpm, 0),
+    actualWpm: normalizeNumber(row.actual_wpm, 0),
+    adjustedWpm: normalizeNullableNumber(row.adjusted_wpm),
+    wordsRead: normalizeNumber(row.words_read, 0),
+    durationSeconds: normalizeNumber(row.duration_seconds, 0),
+    startPosition: normalizeNumber(row.start_position, 0),
+    endPosition: normalizeNumber(row.end_position, 0),
+    pauseCount: normalizeNumber(row.pause_count, 0),
+    regressionCount: normalizeNumber(row.regression_count, 0),
+    comprehensionScore: normalizeNullableNumber(row.comprehension_score),
+    selfRating: normalizeNullableNumber(row.self_rating),
+    notes: row.notes ?? '',
+    startedAt: row.started_at,
+    endedAt: row.ended_at,
+  }
 }
 
 function aiUsageLineItemFromRow(row: AiUsageLineItemRow): AiUsageLineItem {
@@ -535,6 +833,48 @@ function quizAttemptFromRow(row: QuizAttemptRow): QuizAttempt {
   }
 }
 
+function normalizeSourceType(sourceType: string): SourceType {
+  if (sourceType === 'text_file' || sourceType === 'pdf_text' || sourceType === 'photo_ocr' || sourceType === 'manual') {
+    return sourceType
+  }
+  return 'paste'
+}
+
+function normalizeReaderMode(mode: string): ReadingSession['mode'] {
+  if (mode === 'chunk' || mode === 'rsvp') {
+    return mode
+  }
+  return 'rail'
+}
+
+function normalizeOcrReviewStatus(status: string | null | undefined): OcrReviewStatus {
+  if (status === 'unreviewed' || status === 'needs_attention') {
+    return status
+  }
+  return 'reviewed'
+}
+
+function normalizeSourceFileKind(kind: string | null | undefined): SourceFileRecord['kind'] | null {
+  if (kind === 'image' || kind === 'pdf' || kind === 'text') {
+    return kind
+  }
+  return null
+}
+
+function normalizeOcrJobStatus(status: string): OcrJob['status'] {
+  if (status === 'queued' || status === 'running' || status === 'review' || status === 'saved' || status === 'failed') {
+    return status
+  }
+  return 'cancelled'
+}
+
+function normalizeOcrJobItemStatus(status: string): OcrJobItem['status'] {
+  if (status === 'queued' || status === 'running' || status === 'review' || status === 'failed') {
+    return status
+  }
+  return 'skipped'
+}
+
 function normalizeQuizAttemptKind(kind: string): QuizAttemptKind {
   if (kind === 'manual' || kind === 'retest') {
     return kind
@@ -551,6 +891,46 @@ function normalizeReadingScopeType(scopeType: string | null | undefined): Readin
 
 function normalizeStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+}
+
+function normalizeUncertainSpans(value: unknown): OcrUncertainSpan[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value.map((span) => {
+    const candidate = span as Partial<OcrUncertainSpan>
+    return {
+      text: typeof candidate.text === 'string' ? candidate.text : '',
+      startIndex: normalizeNullableNumber(candidate.startIndex),
+      endIndex: normalizeNullableNumber(candidate.endIndex),
+      confidence: normalizeNullableNumber(candidate.confidence),
+      note: typeof candidate.note === 'string' ? candidate.note : null,
+    }
+  })
+}
+
+function normalizeOcrJobItemPages(value: unknown): OcrJobItemPage[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value.map((page) => {
+    const candidate = page as Partial<OcrJobItemPage>
+    return {
+      pageNumber: normalizeNumber(candidate.pageNumber, 1),
+      sourcePageNumber: normalizeNullableNumber(candidate.sourcePageNumber),
+      title: typeof candidate.title === 'string' ? candidate.title : null,
+      text: typeof candidate.text === 'string' ? candidate.text : '',
+      reviewStatus:
+        candidate.reviewStatus === 'skipped' ? 'skipped' : normalizeOcrReviewStatus(candidate.reviewStatus),
+      ocrConfidence: normalizeNullableNumber(candidate.ocrConfidence),
+      ocrNotes: typeof candidate.ocrNotes === 'string' ? candidate.ocrNotes : null,
+      uncertainSpans: normalizeUncertainSpans(candidate.uncertainSpans),
+      sourceFileName: typeof candidate.sourceFileName === 'string' ? candidate.sourceFileName : null,
+      sourceKind: normalizeSourceFileKind(candidate.sourceKind),
+    }
+  })
 }
 
 function normalizeNumberArray(value: unknown): number[] {

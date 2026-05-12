@@ -38,8 +38,27 @@ pnpm build
 Build a local desktop artifact:
 
 ```bash
-pnpm tauri build
+pnpm build:desktop
 ```
+
+The macOS build output is written under `src-tauri/target/release/bundle/`. Install the generated `.dmg`/`.app` from there for local releases.
+
+## Local Releases and Updates
+
+Readrail is released locally. There is no GitHub CI/CD requirement for builds.
+
+1. Update the versions in `package.json`, `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml`.
+2. Run `pnpm install` if dependencies changed.
+3. Run `pnpm lint`, `pnpm test`, and `pnpm build:desktop`.
+4. Tag the release locally, for example `git tag v1.0.0`.
+
+User data is designed to survive app updates. Keep these values stable across releases:
+
+- Tauri identifier: `com.jippylong12.readrail`
+- SQLite database name: `readrail.db`
+- Zustand fallback storage key: `readrail-local-state`
+
+The desktop app writes durable records to SQLite using additive migrations, and on startup it can recover the UI state from SQLite if the WebView fallback storage is empty. Updating by installing a newer Readrail app over the old one should not delete the database. Uninstalling with an app cleaner, manually deleting app support data, or changing the identifier/database filename can still remove or orphan user data.
 
 ## Privacy Model
 

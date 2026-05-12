@@ -102,6 +102,7 @@ function App() {
   const resetTour = useAppStore((state) => state.resetTour)
   const resetAllTours = useAppStore((state) => state.resetAllTours)
   const resetAllData = useAppStore((state) => state.resetAllData)
+  const recoverDurableStateFromDatabase = useAppStore((state) => state.recoverDurableStateFromDatabase)
   const createAiUsageLineItem = useAppStore((state) => state.createAiUsageLineItem)
   const route = navigation.route
   const readerScopeSelection = useMemo(() => readerScopeSelectionFromRoute(navigation), [navigation])
@@ -119,11 +120,16 @@ function App() {
       if (!database) {
         return
       }
-      for (const attempt of useAppStore.getState().quizAttempts) {
-        void saveQuizAttemptToDatabase(attempt)
-      }
+      void recoverDurableStateFromDatabase().then((recovered) => {
+        if (recovered) {
+          return
+        }
+        for (const attempt of useAppStore.getState().quizAttempts) {
+          void saveQuizAttemptToDatabase(attempt)
+        }
+      })
     })
-  }, [])
+  }, [recoverDurableStateFromDatabase])
 
   useEffect(() => {
     recoverInterruptedOcrJobs()

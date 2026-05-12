@@ -34,7 +34,9 @@ import { calculateAdjustedWpm, calculateActualWpm } from '../lib/reading/pacing'
 import { cleanReadingText } from '../lib/text/cleanup'
 import { countWords, estimatePages } from '../lib/text/wordCount'
 import {
+  clearDurableStateFromDatabase,
   deleteDocumentPageFromDatabase,
+  loadDurableStateFromDatabase,
   saveAiUsageLineItemToDatabase,
   saveDocumentToDatabase,
   saveOcrJobToDatabase,
@@ -213,6 +215,7 @@ type AppState = {
   resetCoachingSegment: (documentId: string, wordIndex: number) => void
   startCoachingSegment: (documentId: string, segment: CoachingState['activeSegmentByDocument'][string]) => void
   resetAllData: () => void
+  recoverDurableStateFromDatabase: () => Promise<boolean>
 }
 
 const defaultSettings: AppSettings = {
@@ -1951,7 +1954,7 @@ export const useAppStore = create<AppState>()(
             },
           },
         })),
-      resetAllData: () =>
+      resetAllData: () => {
         set({
           documents: [],
           documentChapters: [],
@@ -1967,7 +1970,54 @@ export const useAppStore = create<AppState>()(
           quizAttempts: [],
           coaching: buildDefaultCoachingState(),
           aiUsageLineItems: [],
-        }),
+        })
+        void clearDurableStateFromDatabase()
+      },
+      recoverDurableStateFromDatabase: async () => {
+        const currentState = get()
+        const hasDurableState =
+          currentState.documents.length > 0 ||
+          currentState.sessions.length > 0 ||
+          currentState.quizAttempts.length > 0 ||
+          currentState.aiUsageLineItems.length > 0
+
+        if (hasDurableState) {
+          return false
+        }
+
+        const databaseState = await loadDurableStateFromDatabase()
+        if (!databaseState) {
+          return false
+        }
+
+        const hasRecoveredState =
+          databaseState.documents.length > 0 ||
+          databaseState.sessions.length > 0 ||
+          databaseState.quizAttempts.length > 0 ||
+          databaseState.aiUsageLineItems.length > 0
+
+        if (!hasRecoveredState) {
+          return false
+        }
+
+        set((state) => ({
+          documents: databaseState.documents,
+          documentChapters: databaseState.documentChapters,
+          documentPages: databaseState.documentPages,
+          ocrJobs: databaseState.ocrJobs,
+          ocrJobItems: databaseState.ocrJobItems,
+          sessions: databaseState.sessions,
+          activeDocumentId:
+            state.activeDocumentId ??
+            databaseState.documents.find((document) => document.archivedAt === null)?.id ??
+            databaseState.documents[0]?.id ??
+            null,
+          quizAttempts: databaseState.quizAttempts,
+          aiUsageLineItems: databaseState.aiUsageLineItems,
+        }))
+
+        return true
+      },
     }),
     {
       name: 'readrail-local-state',
