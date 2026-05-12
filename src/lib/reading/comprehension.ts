@@ -1,3 +1,7 @@
+import { clampWpm } from './pacing'
+
+export const COMPREHENSION_SUGGESTION_THRESHOLD_MINUTES = 60
+
 export function comprehensionBand(score: number | null): 'none' | 'review' | 'steady' | 'strong' {
   if (score === null) {
     return 'none'
@@ -28,4 +32,8 @@ export function recommendedNextWpm(currentWpm: number, comprehensionScore: numbe
   }
 
   return currentWpm
+}
+
+export function getComprehensionSuggestionThresholdWords(targetWpm: number): number {
+  return Math.round(clampWpm(targetWpm) * COMPREHENSION_SUGGESTION_THRESHOLD_MINUTES)
 }

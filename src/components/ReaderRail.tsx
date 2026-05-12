@@ -21,8 +21,8 @@ import {
   type ReaderSessionScopeMetadata,
 } from '../app/readerScopes'
 import { getOrderedChapterPages, getOrderedDocumentChapters } from '../app/structuredDocuments'
+import { getComprehensionSuggestionThresholdWords } from '../lib/reading/comprehension'
 
-export const COMPREHENSION_TEST_THRESHOLD_WORDS = 1000
 const DEFAULT_READER_SURFACE_SIZE = { width: 960, height: 420 }
 
 export type ReaderSegmentInput = {
@@ -113,6 +113,7 @@ export function ReaderRail({
   const activeChunk = chunks[activeIndex]
   const currentWordIndex = activeChunk?.endWord ?? 0
   const untestedWordCount = Math.max(0, currentWordIndex - segmentStartWordIndex)
+  const comprehensionSuggestionThresholdWords = getComprehensionSuggestionThresholdWords(targetWpm)
   const progress = chunks.length ? Math.round(((activeIndex + 1) / chunks.length) * 100) : 0
   const cleanedDraftText = useMemo(
     () => cleanReadingText(draftText, { preservePageBreaks: true }),
@@ -179,7 +180,7 @@ export function ReaderRail({
         if (index >= chunks.length - 1) {
           const finalWordIndex = chunks[index]?.endWord ?? document?.wordCount ?? currentWordIndex
           setIsRunning(false)
-          if (finalWordIndex - segmentStartWordIndex >= COMPREHENSION_TEST_THRESHOLD_WORDS) {
+          if (finalWordIndex - segmentStartWordIndex >= comprehensionSuggestionThresholdWords) {
             setSuggestion('threshold')
           }
           return index
@@ -190,7 +191,17 @@ export function ReaderRail({
     }, duration)
 
     return () => window.clearTimeout(timer)
-  }, [activeChunk, activeIndex, chunks, currentWordIndex, document?.wordCount, isRunning, segmentStartWordIndex, targetWpm])
+  }, [
+    activeChunk,
+    activeIndex,
+    chunks,
+    comprehensionSuggestionThresholdWords,
+    currentWordIndex,
+    document?.wordCount,
+    isRunning,
+    segmentStartWordIndex,
+    targetWpm,
+  ])
 
   useEffect(() => {
     if (!isRunning) {
@@ -348,7 +359,7 @@ export function ReaderRail({
   function pauseReading(): void {
     setIsRunning(false)
     setPauseCount((count) => count + 1)
-    if (untestedWordCount >= COMPREHENSION_TEST_THRESHOLD_WORDS) {
+    if (untestedWordCount >= comprehensionSuggestionThresholdWords) {
       setSuggestion('threshold')
     }
   }

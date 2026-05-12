@@ -4,6 +4,7 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ReaderRail } from '../components/ReaderRail'
+import { getComprehensionSuggestionThresholdWords } from '../lib/reading/comprehension'
 import type { DocumentChapterRecord, DocumentPageRecord, DocumentRecord, PageLayout, ReaderMode } from '../types/domain'
 import type { ReaderScopeSelection } from '../app/readerScopes'
 
@@ -374,6 +375,10 @@ describe('ReaderRail scope setup', () => {
 })
 
 describe('ReaderRail comprehension prompts', () => {
+  it('uses one hour of reading at the active target WPM as the suggestion threshold', () => {
+    expect(getComprehensionSuggestionThresholdWords(300)).toBe(18_000)
+  })
+
   it('pauses below the threshold without suggesting a test', async () => {
     const user = userEvent.setup()
     const onSegmentReset = vi.fn()
@@ -407,16 +412,15 @@ describe('ReaderRail comprehension prompts', () => {
     expect(onSegmentReset).not.toHaveBeenCalled()
   })
 
-  it('suggests a test at 1000 words on pause and decline resets the segment', async () => {
+  it('does not suggest a test at 1000 words when the one-hour threshold is higher', async () => {
     const user = userEvent.setup()
-    const onSegmentReset = vi.fn()
-    const longDocument: DocumentRecord = {
+    const documentUnderThreshold: DocumentRecord = {
       ...documentRecord,
-      id: 'long-document',
+      id: 'document-under-threshold',
       content: Array.from({ length: 1005 }, (_, index) => `word${index}`).join(' '),
       wordCount: 1005,
     }
-    const chapter = buildChapter(longDocument)
+    const chapter = buildChapter(documentUnderThreshold)
 
     render(
       <ReaderRail
@@ -425,7 +429,46 @@ describe('ReaderRail comprehension prompts', () => {
         defaultChunkSize={1000}
         defaultMode="rail"
         defaultPageLayout={1}
-        defaultWpm={900}
+        defaultWpm={300}
+        document={documentUnderThreshold}
+        fontSize={20}
+        lineHeight={1.65}
+        pages={[buildPage(documentUnderThreshold, chapter.id)]}
+        scopeSelection={{ scopeType: 'document' }}
+        segmentStartWordIndex={0}
+        onBackToLibrary={vi.fn()}
+        onSegmentReset={vi.fn()}
+        onSegmentStart={vi.fn()}
+        onScopeChange={vi.fn()}
+        onStartTest={vi.fn()}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Play' }))
+    await user.click(screen.getByRole('button', { name: 'Pause' }))
+
+    expect(screen.queryByText("You've read a while. Test comprehension?")).toBeNull()
+  })
+
+  it('suggests a test after one hour of target-WPM words on pause and decline resets the segment', async () => {
+    const user = userEvent.setup()
+    const onSegmentReset = vi.fn()
+    const longDocument: DocumentRecord = {
+      ...documentRecord,
+      id: 'long-document',
+      content: Array.from({ length: 4805 }, (_, index) => `word${index}`).join(' '),
+      wordCount: 4805,
+    }
+    const chapter = buildChapter(longDocument)
+
+    render(
+      <ReaderRail
+        baselineResult={null}
+        chapters={[chapter]}
+        defaultChunkSize={4800}
+        defaultMode="rail"
+        defaultPageLayout={1}
+        defaultWpm={80}
         document={longDocument}
         fontSize={20}
         lineHeight={1.65}
@@ -447,7 +490,7 @@ describe('ReaderRail comprehension prompts', () => {
 
     await user.click(screen.getByRole('button', { name: 'Not now' }))
 
-    expect(onSegmentReset).toHaveBeenCalledWith('long-document', 1000)
+    expect(onSegmentReset).toHaveBeenCalledWith('long-document', 4800)
   })
 
   it('finishes short documents without opening a suggested-test prompt', async () => {

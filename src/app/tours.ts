@@ -53,7 +53,7 @@ export const TOUR_DEFINITIONS: Record<TourId, TourDefinition> = {
       {
         target: '[data-tour="reader-actions"]',
         title: 'Test comprehension',
-        body: 'Test becomes available after reading starts. Readrail only suggests testing once an untested segment reaches 1000 words, but you can trigger it earlier.',
+        body: 'Test becomes available after reading starts. Readrail suggests testing after about one hour of reading at your active WPM, but you can trigger it earlier.',
       },
     ],
   },
