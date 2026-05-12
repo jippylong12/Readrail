@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { AppShell } from './components/AppShell'
 import { DocumentDetail } from './components/DocumentDetail'
@@ -20,6 +20,7 @@ import {
   type PrimaryRoute,
   type RouteState,
 } from './app/routes'
+import type { ReaderScopeSelection, ReaderSessionScopeMetadata } from './app/readerScopes'
 import { getRouteForShortcutEvent } from './app/shortcuts'
 import { selectActiveDocument, useAppStore, type OcrPageInput } from './app/store'
 import { TOUR_DEFINITIONS, type TourId } from './app/tours'
@@ -34,10 +35,14 @@ type PendingSession = {
   targetWpm: number
   startWordIndex: number
   endWordIndex: number
+  scopeStartWordIndex: number
+  scopeEndWordIndex: number
   wordsRead: number
   durationSeconds: number
   pauseCount: number
   regressionCount: number
+  scope: ReaderSessionScopeMetadata
+  scopeContent: string
 }
 
 type PendingQuiz = {
@@ -94,6 +99,7 @@ function App() {
   const resetAllTours = useAppStore((state) => state.resetAllTours)
   const resetAllData = useAppStore((state) => state.resetAllData)
   const route = navigation.route
+  const readerScopeSelection = useMemo(() => readerScopeSelectionFromRoute(navigation), [navigation])
   const routedDocument = navigation.documentId
     ? documents.find((document) => document.id === navigation.documentId) ?? null
     : null
@@ -268,8 +274,11 @@ function App() {
 
       const endWordIndex = Math.max(0, Math.min(session.endWordIndex || currentDocument.wordCount, currentDocument.wordCount))
       const startWordIndex = Math.max(0, Math.min(session.startWordIndex, endWordIndex))
-      const wordsRead = Math.max(1, endWordIndex - startWordIndex)
-      const normalizedSession = { ...session, startWordIndex, endWordIndex, wordsRead }
+      const scopeWordCount = session.scopeContent.split(/\s+/).filter(Boolean).length
+      const scopeEndWordIndex = Math.max(0, Math.min(session.scopeEndWordIndex || scopeWordCount, scopeWordCount))
+      const scopeStartWordIndex = Math.max(0, Math.min(session.scopeStartWordIndex, scopeEndWordIndex))
+      const wordsRead = Math.max(1, scopeEndWordIndex - scopeStartWordIndex)
+      const normalizedSession = { ...session, startWordIndex, endWordIndex, scopeStartWordIndex, scopeEndWordIndex, wordsRead }
       const quizDocument = currentDocument
       navigate({ route: 'test', documentId: null })
       setPendingQuiz({
@@ -286,8 +295,12 @@ function App() {
           throw new Error('Add a Gemini API key in Settings before testing comprehension.')
         }
 
-        const quizText = excerptWords(quizDocument.content, startWordIndex, endWordIndex)
-        const quiz = await generateQuizFromReading(apiKey, quizDocument.title, quizText, wordsRead)
+        const quizText = excerptWords(normalizedSession.scopeContent, scopeStartWordIndex, scopeEndWordIndex)
+        const quizTitle =
+          normalizedSession.scope.scopeType === 'document'
+            ? quizDocument.title
+            : `${quizDocument.title} - ${normalizedSession.scope.scopeLabel}`
+        const quiz = await generateQuizFromReading(apiKey, quizTitle, quizText, wordsRead)
         setPendingQuiz({
           document: quizDocument,
           error: null,
@@ -310,7 +323,16 @@ function App() {
 
   function cancelPendingQuiz(): void {
     setPendingQuiz(null)
-    navigate({ route: 'reader', documentId: pendingQuiz?.document.id ?? displayedDocument?.id ?? null })
+    if (pendingQuiz) {
+      navigate(routeForReaderScope(pendingQuiz.document.id, {
+        scopeType: pendingQuiz.session.scope.scopeType,
+        chapterId: pendingQuiz.session.scope.chapterId,
+        startPageNumber: pendingQuiz.session.scope.pageNumbers[0] ?? null,
+        endPageNumber: pendingQuiz.session.scope.pageNumbers[pendingQuiz.session.scope.pageNumbers.length - 1] ?? null,
+      }))
+      return
+    }
+    navigate({ route: 'reader', documentId: displayedDocument?.id ?? null })
   }
 
   function saveQuizResult(answers: Record<string, string>): void {
@@ -322,6 +344,7 @@ function App() {
     const session = completeSession({
       ...pendingQuiz.session,
       documentId: pendingQuiz.document.id,
+      scope: pendingQuiz.session.scope,
       startPosition: pendingQuiz.session.startWordIndex,
       endPosition: pendingQuiz.session.endWordIndex,
       comprehensionScore: scoring.comprehensionPercent,
@@ -474,9 +497,9 @@ function App() {
           onDeletePages={deletePages}
           onMoveChapter={moveChapter}
           onMovePage={movePage}
-          onOpenReader={(documentId) => {
+          onOpenReader={(documentId, chapterId) => {
             setActiveDocument(documentId)
-            navigate({ route: 'reader', documentId })
+            navigate(chapterId ? { route: 'reader', documentId, chapterId } : { route: 'reader', documentId })
           }}
           onRenameChapter={renameChapter}
           onUpdatePageMetadata={updatePageMetadata}
@@ -492,20 +515,28 @@ function App() {
         <div className="content-stack">
           <ReaderRail
             baselineResult={baselineResult}
+            chapters={documentChapters}
             defaultChunkSize={settings.reader.chunkSize}
             defaultMode={settings.reader.defaultMode}
             defaultPageLayout={settings.reader.defaultPageLayout ?? 1}
             defaultWpm={coaching.recommendedWpm || settings.reader.defaultWpm}
             document={displayedDocument}
             fontSize={settings.reader.fontSize}
-            key={displayedDocument?.id ?? 'empty-reader'}
+            key={displayedDocument ? pathForRoute(navigation) : 'empty-reader'}
             lineHeight={settings.reader.lineHeight}
+            pages={documentPages}
+            scopeSelection={readerScopeSelection}
             segmentStartWordIndex={
               displayedDocument ? coaching.lastResetWordIndexByDocument[displayedDocument.id] ?? 0 : 0
             }
             onBackToLibrary={() => navigate({ route: 'library-saved', documentId: null })}
             onSegmentReset={resetCoachingSegment}
             onSegmentStart={(documentId, segment) => startCoachingSegment(documentId, segment)}
+            onScopeChange={(selection) => {
+              if (displayedDocument) {
+                navigate(routeForReaderScope(displayedDocument.id, selection))
+              }
+            }}
             onStartTest={(input) => {
               void startQuizForSession(input)
             }}
@@ -558,6 +589,7 @@ function App() {
             navigate({ route: 'reader', documentId })
           }}
           quizAttempts={quizAttempts}
+          sessions={sessions}
         />
       )}
 
@@ -600,6 +632,44 @@ function App() {
       )}
     </AppShell>
   )
+}
+
+function readerScopeSelectionFromRoute(routeState: RouteState): ReaderScopeSelection {
+  if (routeState.route !== 'reader' || !routeState.chapterId) {
+    return { scopeType: 'document' }
+  }
+
+  if (routeState.startPageNumber) {
+    return {
+      scopeType: 'pages',
+      chapterId: routeState.chapterId,
+      startPageNumber: routeState.startPageNumber,
+      endPageNumber: routeState.endPageNumber ?? routeState.startPageNumber,
+    }
+  }
+
+  return {
+    scopeType: 'chapter',
+    chapterId: routeState.chapterId,
+  }
+}
+
+function routeForReaderScope(documentId: string, selection: ReaderScopeSelection): RouteState {
+  if (selection.scopeType === 'document' || !selection.chapterId) {
+    return { route: 'reader', documentId }
+  }
+
+  if (selection.scopeType === 'chapter') {
+    return { route: 'reader', documentId, chapterId: selection.chapterId }
+  }
+
+  return {
+    route: 'reader',
+    documentId,
+    chapterId: selection.chapterId,
+    startPageNumber: selection.startPageNumber ?? null,
+    endPageNumber: selection.endPageNumber ?? selection.startPageNumber ?? null,
+  }
 }
 
 function excerptWords(content: string, startWordIndex: number, endWordIndex: number): string {

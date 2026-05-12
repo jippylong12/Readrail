@@ -96,6 +96,13 @@ export const SCHEMA_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS reading_sessions (
     id TEXT PRIMARY KEY,
     document_id TEXT NOT NULL REFERENCES documents(id),
+    scope_type TEXT DEFAULT 'document',
+    scope_label TEXT,
+    chapter_id TEXT,
+    chapter_title TEXT,
+    page_ids_json TEXT NOT NULL DEFAULT '[]',
+    page_numbers_json TEXT NOT NULL DEFAULT '[]',
+    source_page_numbers_json TEXT NOT NULL DEFAULT '[]',
     mode TEXT NOT NULL,
     target_wpm INTEGER NOT NULL,
     actual_wpm REAL NOT NULL,

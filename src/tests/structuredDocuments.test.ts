@@ -650,6 +650,48 @@ describe('structured document store behavior', () => {
     expect(state.quizAttempts).toEqual([quizAttempt])
   })
 
+  it('persists scoped Reader session metadata', () => {
+    const document = buildStructuredDocumentFixture()
+
+    const session = useAppStore.getState().completeSession({
+      documentId: document.id,
+      scope: {
+        scopeType: 'pages',
+        scopeLabel: 'Introduction, pages 1-2',
+        chapterId: 'chapter-intro',
+        chapterTitle: 'Introduction',
+        pageIds: ['page-intro-1', 'page-intro-2'],
+        pageNumbers: [1, 2],
+        sourcePageNumbers: [1, 2],
+      },
+      mode: 'rail',
+      targetWpm: 240,
+      wordsRead: 6,
+      durationSeconds: 2,
+      startPosition: 0,
+      endPosition: 6,
+      pauseCount: 0,
+      regressionCount: 0,
+      comprehensionScore: 90,
+      selfRating: null,
+      notes: '',
+    })
+
+    expect(session).toMatchObject({
+      documentId: document.id,
+      scopeType: 'pages',
+      scopeLabel: 'Introduction, pages 1-2',
+      chapterId: 'chapter-intro',
+      chapterTitle: 'Introduction',
+      pageIds: ['page-intro-1', 'page-intro-2'],
+      pageNumbers: [1, 2],
+      sourcePageNumbers: [1, 2],
+      startPosition: 0,
+      endPosition: 6,
+    })
+    expect(useAppStore.getState().sessions[0]).toEqual(session)
+  })
+
   it('updates page labels and source page numbers without replacing the page', () => {
     const document = buildStructuredDocumentFixture()
 

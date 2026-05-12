@@ -42,6 +42,7 @@ import {
   normalizeDocumentStructureOrder,
   renderStructuredContent,
 } from './structuredDocuments'
+import type { ReaderSessionScopeMetadata } from './readerScopes'
 
 type CreateDocumentInput = {
   title: string
@@ -100,6 +101,7 @@ type RetryOcrJobItemInput = {
 
 type CompleteSessionInput = {
   documentId: string
+  scope?: ReaderSessionScopeMetadata
   mode: ReaderMode
   targetWpm: number
   wordsRead: number
@@ -228,6 +230,19 @@ function buildDefaultCoachingState(recommendedWpm = defaultSettings.reader.defau
     lastResetWordIndexByDocument: {},
     activeSegmentByDocument: {},
   }
+}
+
+function seedSessionScopeMetadata(sessions: ReadingSession[] | undefined): ReadingSession[] {
+  return (sessions ?? []).map((session) => ({
+    ...session,
+    scopeType: session.scopeType ?? 'document',
+    scopeLabel: session.scopeLabel ?? null,
+    chapterId: session.chapterId ?? null,
+    chapterTitle: session.chapterTitle ?? null,
+    pageIds: session.pageIds ?? [],
+    pageNumbers: session.pageNumbers ?? [],
+    sourcePageNumbers: session.sourcePageNumbers ?? [],
+  }))
 }
 
 function buildOcrPages(
@@ -1548,6 +1563,13 @@ export const useAppStore = create<AppState>()(
         const session: ReadingSession = {
           id: crypto.randomUUID(),
           documentId: input.documentId,
+          scopeType: input.scope?.scopeType ?? 'document',
+          scopeLabel: input.scope?.scopeLabel ?? null,
+          chapterId: input.scope?.chapterId ?? null,
+          chapterTitle: input.scope?.chapterTitle ?? null,
+          pageIds: input.scope?.pageIds ?? [],
+          pageNumbers: input.scope?.pageNumbers ?? [],
+          sourcePageNumbers: input.scope?.sourcePageNumbers ?? [],
           mode: input.mode,
           targetWpm: input.targetWpm,
           actualWpm,
@@ -1705,7 +1727,7 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: 'readrail-local-state',
-      version: 6,
+      version: 7,
       migrate: (persistedState: unknown, fromVersion: number) => {
         const state = persistedState as Record<string, unknown>
         const settings = state.settings as AppSettings | undefined
@@ -1753,6 +1775,10 @@ export const useAppStore = create<AppState>()(
         if (fromVersion < 6) {
           state.ocrJobs = state.ocrJobs || []
           state.ocrJobItems = state.ocrJobItems || []
+        }
+        // v6 -> v7: seed Reader scope metadata for legacy sessions.
+        if (fromVersion < 7) {
+          state.sessions = seedSessionScopeMetadata(state.sessions as ReadingSession[] | undefined)
         }
         return state
       },

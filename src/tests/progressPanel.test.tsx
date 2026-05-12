@@ -3,7 +3,7 @@ import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ProgressPanel } from '../components/ProgressPanel'
-import type { CoachingState, DocumentRecord, QuizAttempt } from '../types/domain'
+import type { CoachingState, DocumentRecord, QuizAttempt, ReadingSession } from '../types/domain'
 
 const documentRecord: DocumentRecord = {
   id: 'doc-1',
@@ -61,13 +61,40 @@ const attempt: QuizAttempt = {
   createdAt: '2026-05-10T09:15:00.000Z',
 }
 
+const session: ReadingSession = {
+  id: 'session-1',
+  documentId: 'doc-1',
+  scopeType: 'document',
+  scopeLabel: 'Full document',
+  chapterId: null,
+  chapterTitle: null,
+  pageIds: [],
+  pageNumbers: [],
+  sourcePageNumbers: [],
+  mode: 'rail',
+  targetWpm: 240,
+  actualWpm: 200,
+  adjustedWpm: 100,
+  wordsRead: 200,
+  durationSeconds: 60,
+  startPosition: 100,
+  endPosition: 300,
+  pauseCount: 0,
+  regressionCount: 0,
+  comprehensionScore: 50,
+  selfRating: null,
+  notes: '',
+  startedAt: '2026-05-10T09:14:00.000Z',
+  endedAt: '2026-05-10T09:15:00.000Z',
+}
+
 afterEach(() => {
   cleanup()
 })
 
 describe('ProgressPanel', () => {
   it('shows coaching summary, attempt table, and reviewable selected/correct answers', () => {
-    render(<ProgressPanel coaching={coaching} documents={[documentRecord]} onOpenReader={vi.fn()} quizAttempts={[attempt]} />)
+    render(<ProgressPanel coaching={coaching} documents={[documentRecord]} onOpenReader={vi.fn()} quizAttempts={[attempt]} sessions={[session]} />)
 
     expect(screen.getByRole('heading', { name: 'Coaching progress' })).toBeTruthy()
     expect(screen.getByText('255 WPM')).toBeTruthy()
@@ -83,7 +110,7 @@ describe('ProgressPanel', () => {
   it('opens the reviewed document from the review panel', async () => {
     const user = userEvent.setup()
     const onOpenReader = vi.fn()
-    render(<ProgressPanel coaching={coaching} documents={[documentRecord]} onOpenReader={onOpenReader} quizAttempts={[attempt]} />)
+    render(<ProgressPanel coaching={coaching} documents={[documentRecord]} onOpenReader={onOpenReader} quizAttempts={[attempt]} sessions={[session]} />)
 
     await user.click(screen.getByRole('button', { name: 'Open reader' }))
 
@@ -98,9 +125,26 @@ describe('ProgressPanel', () => {
       content: 'First page.\n\n\f\n\nSecond page.',
     }
 
-    render(<ProgressPanel coaching={coaching} documents={[structuredDocument]} onOpenReader={vi.fn()} quizAttempts={[attempt]} />)
+    render(<ProgressPanel coaching={coaching} documents={[structuredDocument]} onOpenReader={vi.fn()} quizAttempts={[attempt]} sessions={[session]} />)
 
     expect(screen.getAllByText('Structured OCR guide')).toHaveLength(2)
     expect(screen.getAllByText('100-300')).toHaveLength(2)
+  })
+
+  it('shows scoped session labels when available', () => {
+    const scopedSession: ReadingSession = {
+      ...session,
+      scopeType: 'pages',
+      scopeLabel: 'Chapter 2, pages 5-6',
+      chapterId: 'chapter-2',
+      chapterTitle: 'Chapter 2',
+      pageIds: ['page-5', 'page-6'],
+      pageNumbers: [5, 6],
+      sourcePageNumbers: [12, 13],
+    }
+
+    render(<ProgressPanel coaching={coaching} documents={[documentRecord]} onOpenReader={vi.fn()} quizAttempts={[attempt]} sessions={[scopedSession]} />)
+
+    expect(screen.getAllByText('Meaningful reading - Chapter 2, pages 5-6')).toHaveLength(2)
   })
 })

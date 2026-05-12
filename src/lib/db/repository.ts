@@ -133,17 +133,32 @@ export async function saveSessionToDatabase(session: ReadingSession): Promise<vo
 
   await database.execute(
     `INSERT INTO reading_sessions (
-      id, document_id, mode, target_wpm, actual_wpm, adjusted_wpm, words_read, duration_seconds,
+      id, document_id, scope_type, scope_label, chapter_id, chapter_title, page_ids_json,
+      page_numbers_json, source_page_numbers_json, mode, target_wpm, actual_wpm, adjusted_wpm, words_read, duration_seconds,
       start_position, end_position, pause_count, regression_count, comprehension_score, self_rating,
       notes, started_at, ended_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
     ON CONFLICT(id) DO UPDATE SET
+      scope_type = excluded.scope_type,
+      scope_label = excluded.scope_label,
+      chapter_id = excluded.chapter_id,
+      chapter_title = excluded.chapter_title,
+      page_ids_json = excluded.page_ids_json,
+      page_numbers_json = excluded.page_numbers_json,
+      source_page_numbers_json = excluded.source_page_numbers_json,
       comprehension_score = excluded.comprehension_score,
       self_rating = excluded.self_rating,
       notes = excluded.notes`,
     [
       session.id,
       session.documentId,
+      session.scopeType ?? 'document',
+      session.scopeLabel ?? null,
+      session.chapterId ?? null,
+      session.chapterTitle ?? null,
+      JSON.stringify(session.pageIds ?? []),
+      JSON.stringify(session.pageNumbers ?? []),
+      JSON.stringify(session.sourcePageNumbers ?? []),
       session.mode,
       session.targetWpm,
       session.actualWpm,

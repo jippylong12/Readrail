@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
+import { useState } from 'react'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ReaderRail } from '../components/ReaderRail'
-import type { DocumentRecord, ReaderMode } from '../types/domain'
+import type { DocumentChapterRecord, DocumentPageRecord, DocumentRecord, ReaderMode } from '../types/domain'
+import type { ReaderScopeSelection } from '../app/readerScopes'
 
 const documentRecord: DocumentRecord = {
   id: 'document-1',
@@ -19,10 +21,54 @@ const documentRecord: DocumentRecord = {
   archivedAt: null,
 }
 
+function buildChapter(document: DocumentRecord, id = 'chapter-1', title = 'Main text'): DocumentChapterRecord {
+  return {
+    id,
+    documentId: document.id,
+    title,
+    sortOrder: 0,
+    createdAt: document.createdAt,
+    updatedAt: document.updatedAt,
+  }
+}
+
+function buildPage(
+  document: DocumentRecord,
+  chapterId: string,
+  text = document.content,
+  pageNumber = 1,
+  sourcePageNumber: number | null = pageNumber,
+): DocumentPageRecord {
+  return {
+    id: `page-${pageNumber}`,
+    documentId: document.id,
+    chapterId,
+    sortOrder: pageNumber - 1,
+    pageNumber,
+    sourcePageNumber,
+    title: null,
+    text,
+    wordCount: text.split(/\s+/).filter(Boolean).length,
+    reviewStatus: 'reviewed',
+    ocrConfidence: null,
+    ocrNotes: null,
+    uncertainSpans: [],
+    sourceFileId: null,
+    sourceFileName: null,
+    sourceKind: null,
+    sourceLocalPath: null,
+    sourceSha256: null,
+    createdAt: document.createdAt,
+    updatedAt: document.updatedAt,
+  }
+}
+
 function renderReader(defaultMode: ReaderMode = 'rail') {
+  const chapter = buildChapter(documentRecord)
   return render(
     <ReaderRail
       baselineResult={null}
+      chapters={[chapter]}
       defaultChunkSize={4}
       defaultMode={defaultMode}
       defaultPageLayout={1}
@@ -30,10 +76,13 @@ function renderReader(defaultMode: ReaderMode = 'rail') {
       document={documentRecord}
       fontSize={20}
       lineHeight={1.65}
+      pages={[buildPage(documentRecord, chapter.id)]}
+      scopeSelection={{ scopeType: 'document' }}
       segmentStartWordIndex={0}
       onBackToLibrary={vi.fn()}
       onSegmentReset={vi.fn()}
       onSegmentStart={vi.fn()}
+      onScopeChange={vi.fn()}
       onStartTest={vi.fn()}
     />,
   )
@@ -79,9 +128,11 @@ describe('ReaderRail focus mode', () => {
   it('starts the test flow after reading begins and leaves focus mode', async () => {
     const user = userEvent.setup()
     const onStartTest = vi.fn()
+    const chapter = buildChapter(documentRecord)
     const { container } = render(
       <ReaderRail
         baselineResult={null}
+        chapters={[chapter]}
         defaultChunkSize={4}
         defaultMode="rail"
         defaultPageLayout={1}
@@ -89,10 +140,13 @@ describe('ReaderRail focus mode', () => {
         document={documentRecord}
         fontSize={20}
         lineHeight={1.65}
+        pages={[buildPage(documentRecord, chapter.id)]}
+        scopeSelection={{ scopeType: 'document' }}
         segmentStartWordIndex={0}
         onBackToLibrary={vi.fn()}
-      onSegmentReset={vi.fn()}
+        onSegmentReset={vi.fn()}
         onSegmentStart={vi.fn()}
+        onScopeChange={vi.fn()}
         onStartTest={onStartTest}
       />,
     )
@@ -132,13 +186,117 @@ describe('ReaderRail focus mode', () => {
   })
 })
 
+describe('ReaderRail scope setup', () => {
+  it('switches from full document to a contiguous page range', async () => {
+    const user = userEvent.setup()
+    const chapter = buildChapter(documentRecord, 'chapter-1', 'Chapter One')
+    const pages = [
+      buildPage(documentRecord, chapter.id, 'First page words.', 1, 41),
+      buildPage(documentRecord, chapter.id, 'Second page selected.', 2, 42),
+      buildPage(documentRecord, chapter.id, 'Third page selected.', 3, 43),
+    ]
+
+    function ScopedReader() {
+      const [scopeSelection, setScopeSelection] = useState<ReaderScopeSelection>({ scopeType: 'document' })
+      return (
+        <ReaderRail
+          baselineResult={null}
+          chapters={[chapter]}
+          defaultChunkSize={4}
+          defaultMode="rail"
+          defaultPageLayout={1}
+          defaultWpm={240}
+          document={documentRecord}
+          fontSize={20}
+          lineHeight={1.65}
+          pages={pages}
+          scopeSelection={scopeSelection}
+          segmentStartWordIndex={0}
+          onBackToLibrary={vi.fn()}
+          onSegmentReset={vi.fn()}
+          onSegmentStart={vi.fn()}
+          onScopeChange={setScopeSelection}
+          onStartTest={vi.fn()}
+        />
+      )
+    }
+
+    render(<ScopedReader />)
+
+    await user.click(screen.getByRole('button', { name: 'Pages' }))
+    await user.selectOptions(screen.getByLabelText('End page'), '3')
+
+    expect(screen.getAllByText('Chapter One, pages 41-43')).toHaveLength(2)
+    expect(screen.getByText('First page words.')).toBeTruthy()
+    expect(screen.getByText('Second page selected.')).toBeTruthy()
+    expect(screen.getByText('Third page selected.')).toBeTruthy()
+  })
+
+  it('reads only the selected scoped page text and reports document-level offsets', async () => {
+    const user = userEvent.setup()
+    const onStartTest = vi.fn()
+    const chapter = buildChapter(documentRecord, 'chapter-1', 'Chapter One')
+    const pages = [
+      buildPage(documentRecord, chapter.id, 'First page only.', 1),
+      buildPage(documentRecord, chapter.id, 'Second page scoped.', 2),
+      buildPage(documentRecord, chapter.id, 'Third page excluded.', 3),
+    ]
+
+    render(
+      <ReaderRail
+        baselineResult={null}
+        chapters={[chapter]}
+        defaultChunkSize={3}
+        defaultMode="rail"
+        defaultPageLayout={1}
+        defaultWpm={240}
+        document={{ ...documentRecord, wordCount: 9 }}
+        fontSize={20}
+        lineHeight={1.65}
+        pages={pages}
+        scopeSelection={{ scopeType: 'pages', chapterId: chapter.id, startPageNumber: 2, endPageNumber: 2 }}
+        segmentStartWordIndex={0}
+        onBackToLibrary={vi.fn()}
+        onSegmentReset={vi.fn()}
+        onSegmentStart={vi.fn()}
+        onScopeChange={vi.fn()}
+        onStartTest={onStartTest}
+      />,
+    )
+
+    expect(screen.queryByText('First page only.')).toBeNull()
+    expect(screen.getByText('Second page scoped.')).toBeTruthy()
+    expect(screen.queryByText('Third page excluded.')).toBeNull()
+
+    await user.click(screen.getByRole('button', { name: 'Play' }))
+    await user.click(screen.getByRole('button', { name: 'Test' }))
+
+    expect(onStartTest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        startWordIndex: 3,
+        endWordIndex: 6,
+        scopeStartWordIndex: 0,
+        scopeEndWordIndex: 3,
+        wordsRead: 3,
+        scope: expect.objectContaining({
+          scopeType: 'pages',
+          scopeLabel: 'Chapter One, page 2',
+          pageNumbers: [2],
+        }),
+      }),
+    )
+  })
+})
+
 describe('ReaderRail comprehension prompts', () => {
   it('pauses below the threshold without suggesting a test', async () => {
     const user = userEvent.setup()
     const onSegmentReset = vi.fn()
+    const chapter = buildChapter(documentRecord)
     render(
       <ReaderRail
         baselineResult={null}
+        chapters={[chapter]}
         defaultChunkSize={4}
         defaultMode="rail"
         defaultPageLayout={1}
@@ -146,10 +304,13 @@ describe('ReaderRail comprehension prompts', () => {
         document={documentRecord}
         fontSize={20}
         lineHeight={1.65}
+        pages={[buildPage(documentRecord, chapter.id)]}
+        scopeSelection={{ scopeType: 'document' }}
         segmentStartWordIndex={0}
         onBackToLibrary={vi.fn()}
-      onSegmentReset={onSegmentReset}
+        onSegmentReset={onSegmentReset}
         onSegmentStart={vi.fn()}
+        onScopeChange={vi.fn()}
         onStartTest={vi.fn()}
       />,
     )
@@ -170,10 +331,12 @@ describe('ReaderRail comprehension prompts', () => {
       content: Array.from({ length: 1005 }, (_, index) => `word${index}`).join(' '),
       wordCount: 1005,
     }
+    const chapter = buildChapter(longDocument)
 
     render(
       <ReaderRail
         baselineResult={null}
+        chapters={[chapter]}
         defaultChunkSize={1000}
         defaultMode="rail"
         defaultPageLayout={1}
@@ -181,10 +344,13 @@ describe('ReaderRail comprehension prompts', () => {
         document={longDocument}
         fontSize={20}
         lineHeight={1.65}
+        pages={[buildPage(longDocument, chapter.id)]}
+        scopeSelection={{ scopeType: 'document' }}
         segmentStartWordIndex={0}
         onBackToLibrary={vi.fn()}
-      onSegmentReset={onSegmentReset}
+        onSegmentReset={onSegmentReset}
         onSegmentStart={vi.fn()}
+        onScopeChange={vi.fn()}
         onStartTest={vi.fn()}
       />,
     )
@@ -208,10 +374,12 @@ describe('ReaderRail comprehension prompts', () => {
       content: 'one two three four',
       wordCount: 4,
     }
+    const chapter = buildChapter(shortDocument)
 
     render(
       <ReaderRail
         baselineResult={null}
+        chapters={[chapter]}
         defaultChunkSize={4}
         defaultMode="rail"
         defaultPageLayout={1}
@@ -219,10 +387,13 @@ describe('ReaderRail comprehension prompts', () => {
         document={shortDocument}
         fontSize={20}
         lineHeight={1.65}
+        pages={[buildPage(shortDocument, chapter.id)]}
+        scopeSelection={{ scopeType: 'document' }}
         segmentStartWordIndex={0}
         onBackToLibrary={vi.fn()}
-      onSegmentReset={vi.fn()}
+        onSegmentReset={vi.fn()}
         onSegmentStart={vi.fn()}
+        onScopeChange={vi.fn()}
         onStartTest={onStartTest}
       />,
     )

@@ -23,7 +23,7 @@ type DocumentDetailProps = {
     pageNumber: number,
     options?: { replace?: boolean },
   ) => void
-  onOpenReader: (documentId: string) => void
+  onOpenReader: (documentId: string, chapterId?: string | null) => void
   onCreateChapter: (documentId: string, title?: string) => void
   onRenameChapter: (chapterId: string, title: string) => void
   onMoveChapter: (documentId: string, chapterId: string, direction: -1 | 1) => void
@@ -116,7 +116,7 @@ export function DocumentDetail({
             <button className="secondary-button" onClick={onBack} type="button">
               Back to library
             </button>
-            <button className="primary-button" onClick={() => onOpenReader(document.id)} type="button">
+            <button className="primary-button" onClick={() => onOpenReader(document.id, selectedChapter?.id ?? null)} type="button">
               Open reader
             </button>
           </div>

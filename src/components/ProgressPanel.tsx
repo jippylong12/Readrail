@@ -1,21 +1,26 @@
 import { useMemo, useState } from 'react'
 import { CheckCircle2, CircleDot, XCircle } from 'lucide-react'
-import type { CoachingState, DocumentRecord, QuizAttempt, QuizQuestionReview } from '../types/domain'
+import type { CoachingState, DocumentRecord, QuizAttempt, QuizQuestionReview, ReadingSession } from '../types/domain'
 
 type ProgressPanelProps = {
   coaching: CoachingState
   documents: DocumentRecord[]
   quizAttempts: QuizAttempt[]
+  sessions: ReadingSession[]
   onOpenReader: (documentId: string) => void
 }
 
-export function ProgressPanel({ coaching, documents, quizAttempts, onOpenReader }: ProgressPanelProps) {
+export function ProgressPanel({ coaching, documents, quizAttempts, sessions, onOpenReader }: ProgressPanelProps) {
   const [selectedAttemptId, setSelectedAttemptId] = useState<string | null>(quizAttempts[0]?.id ?? null)
   const selectedAttempt = quizAttempts.find((attempt) => attempt.id === selectedAttemptId) ?? quizAttempts[0] ?? null
   const latestAttempt = quizAttempts[0] ?? null
   const documentById = useMemo(
     () => new Map(documents.map((document) => [document.id, document])),
     [documents],
+  )
+  const sessionById = useMemo(
+    () => new Map(sessions.map((session) => [session.id, session])),
+    [sessions],
   )
 
   return (
@@ -79,10 +84,11 @@ export function ProgressPanel({ coaching, documents, quizAttempts, onOpenReader 
               <tbody>
                 {quizAttempts.map((attempt) => {
                   const document = documentById.get(attempt.documentId)
+                  const session = attempt.readingSessionId ? sessionById.get(attempt.readingSessionId) ?? null : null
                   return (
                     <tr className={attempt.id === selectedAttempt?.id ? 'active' : ''} key={attempt.id}>
                       <td>{formatDate(attempt.createdAt)}</td>
-                      <td>{document?.title ?? 'Unknown reading'}</td>
+                      <td>{formatReadingLabel(document?.title ?? 'Unknown reading', session)}</td>
                       <td>{`${attempt.startWordIndex}-${attempt.endWordIndex}`}</td>
                       <td>{`${attempt.comprehensionPercent}%`}</td>
                       <td>{`${attempt.rawWpm} WPM`}</td>
@@ -106,6 +112,7 @@ export function ProgressPanel({ coaching, documents, quizAttempts, onOpenReader 
         <QuizReview
           attempt={selectedAttempt}
           documentTitle={documentById.get(selectedAttempt.documentId)?.title ?? 'Unknown reading'}
+          session={selectedAttempt.readingSessionId ? sessionById.get(selectedAttempt.readingSessionId) ?? null : null}
           onOpenReader={() => onOpenReader(selectedAttempt.documentId)}
         />
       )}
@@ -116,10 +123,12 @@ export function ProgressPanel({ coaching, documents, quizAttempts, onOpenReader 
 function QuizReview({
   attempt,
   documentTitle,
+  session,
   onOpenReader,
 }: {
   attempt: QuizAttempt
   documentTitle: string
+  session: ReadingSession | null
   onOpenReader: () => void
 }) {
   return (
@@ -127,7 +136,7 @@ function QuizReview({
       <div className="panel-header compact">
         <div>
           <span className="eyebrow">Quiz review</span>
-          <h2>{documentTitle}</h2>
+          <h2>{formatReadingLabel(documentTitle, session)}</h2>
         </div>
         <button className="secondary-button" onClick={onOpenReader} type="button">
           Open reader
@@ -216,4 +225,12 @@ function Metric({ label, value }: { label: string; value: number | string }) {
 
 function formatDate(createdAt: string): string {
   return new Date(createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+function formatReadingLabel(documentTitle: string, session: ReadingSession | null): string {
+  if (!session?.scopeLabel || session.scopeType === 'document') {
+    return documentTitle
+  }
+
+  return `${documentTitle} - ${session.scopeLabel}`
 }

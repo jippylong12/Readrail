@@ -18,6 +18,8 @@ export type RouteState = {
   documentId: string | null
   chapterId?: string | null
   pageNumber?: number | null
+  startPageNumber?: number | null
+  endPageNumber?: number | null
 }
 
 export type RouteDefinition = {
@@ -62,7 +64,17 @@ export function routeFromPath(pathname: string): RouteState {
   }
 
   if (segments[0] === 'reader') {
-    return { route: 'reader', documentId: segments[1] ?? null }
+    const startPageNumber = segments[4] === 'pages' && segments[5] ? Number(segments[5]) : null
+    const endPageNumber = segments[4] === 'pages' && segments[6] ? Number(segments[6]) : startPageNumber
+    return {
+      route: 'reader',
+      documentId: segments[1] ?? null,
+      chapterId: segments[2] === 'chapters' ? segments[3] ?? null : null,
+      startPageNumber:
+        startPageNumber !== null && Number.isFinite(startPageNumber) ? Math.max(1, Math.round(startPageNumber)) : null,
+      endPageNumber:
+        endPageNumber !== null && Number.isFinite(endPageNumber) ? Math.max(1, Math.round(endPageNumber)) : null,
+    }
   }
 
   if (segments[0] === 'test') {
@@ -102,7 +114,18 @@ export function pathForRoute(routeState: RouteState): string {
       }
       return `/library/documents/${encodeURIComponent(routeState.documentId)}`
     case 'reader':
-      return routeState.documentId ? `/reader/${encodeURIComponent(routeState.documentId)}` : '/reader'
+      if (!routeState.documentId) {
+        return '/reader'
+      }
+      if (routeState.chapterId) {
+        const chapterPath = `/reader/${encodeURIComponent(routeState.documentId)}/chapters/${encodeURIComponent(routeState.chapterId)}`
+        if (routeState.startPageNumber) {
+          const endPageNumber = routeState.endPageNumber ?? routeState.startPageNumber
+          return `${chapterPath}/pages/${encodeURIComponent(routeState.startPageNumber.toString())}/${encodeURIComponent(endPageNumber.toString())}`
+        }
+        return chapterPath
+      }
+      return `/reader/${encodeURIComponent(routeState.documentId)}`
     case 'test':
       return '/test'
     case 'progress':

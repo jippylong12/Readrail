@@ -28,6 +28,8 @@ export function exportProgressCsv(input: ProgressExportInput): string {
     'session_id',
     'document_id',
     'document_title',
+    'scope_type',
+    'scope_label',
     'mode',
     'target_wpm',
     'actual_wpm',
@@ -53,6 +55,8 @@ export function exportProgressCsv(input: ProgressExportInput): string {
       session.id,
       session.documentId,
       document?.title ?? '',
+      session.scopeType ?? 'document',
+      session.scopeLabel ?? '',
       session.mode,
       session.targetWpm,
       session.actualWpm,
@@ -90,6 +94,20 @@ function getSessionStructuredContext(
 } {
   const orderedPages = getOrderedDocumentPages(document.id, chapters, pages)
   const chapterById = new Map(chapters.map((chapter) => [chapter.id, chapter]))
+  if (session.scopeType && session.scopeType !== 'document') {
+    const matchingPages = session.pageIds?.length
+      ? session.pageIds
+          .map((pageId) => orderedPages.find((page) => page.id === pageId))
+          .filter((page): page is DocumentPageRecord => Boolean(page))
+      : []
+    return {
+      chapterIds: session.chapterId ? [session.chapterId] : uniqueStrings(matchingPages.map((page) => page.chapterId)),
+      chapterTitles: session.chapterTitle ? [session.chapterTitle] : uniqueStrings(matchingPages.map((page) => chapterById.get(page.chapterId)?.title ?? '')),
+      pageNumbers: session.pageNumbers?.map(String) ?? matchingPages.map((page) => String(page.pageNumber)),
+      sourcePageNumbers: session.sourcePageNumbers?.map((pageNumber) => pageNumber?.toString() ?? '') ?? matchingPages.map((page) => page.sourcePageNumber?.toString() ?? ''),
+      pageTitles: matchingPages.map((page) => page.title ?? ''),
+    }
+  }
   const sessionStart = Math.max(0, session.startPosition)
   const sessionEnd = Math.max(sessionStart, session.endPosition)
   let wordCursor = 0

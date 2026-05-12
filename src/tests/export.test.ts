@@ -24,15 +24,36 @@ describe('progress export', () => {
   it('exports CSV headers with structured context columns', () => {
     const header = exportProgressCsv(buildExportInput({ sessions: [] })).split('\n')[0]
 
-    expect(header).toContain('session_id,document_id,document_title,mode')
+    expect(header).toContain('session_id,document_id,document_title,scope_type,scope_label,mode')
     expect(header).toContain('chapter_ids,chapter_titles,page_numbers,source_page_numbers,page_titles')
   })
 
   it('exports CSV rows with derived structured chapter and page ranges', () => {
     const rows = exportProgressCsv(buildExportInput()).split('\n')
 
-    expect(rows[1]).toContain('session-1,doc-1,Structured book,rail')
+    expect(rows[1]).toContain('session-1,doc-1,Structured book,document,,rail')
     expect(rows[1]).toContain('chapter-intro,Introduction,1;2,21;22,Opening;Second page')
+  })
+
+  it('exports explicit scoped session metadata when available', () => {
+    const input = buildExportInput()
+    const rows = exportProgressCsv(buildExportInput({
+      sessions: [
+        {
+          ...input.sessions[0],
+          scopeType: 'pages',
+          scopeLabel: 'Introduction, page 2',
+          chapterId: 'chapter-intro',
+          chapterTitle: 'Introduction',
+          pageIds: ['page-intro-2'],
+          pageNumbers: [2],
+          sourcePageNumbers: [22],
+        },
+      ],
+    })).split('\n')
+
+    expect(rows[1]).toContain('session-1,doc-1,Structured book,pages,"Introduction, page 2",rail')
+    expect(rows[1]).toContain('chapter-intro,Introduction,2,22,Second page')
   })
 })
 

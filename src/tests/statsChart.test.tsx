@@ -90,6 +90,6 @@ describe('StatsChart aggregate surface', () => {
 
     expect(screen.getByText('1 active documents')).toBeTruthy()
     expect(screen.getByText('Words read')).toBeTruthy()
-    expect(screen.getByText('300')).toBeTruthy()
+    expect(screen.getAllByText('300')).toHaveLength(2)
   })
 })

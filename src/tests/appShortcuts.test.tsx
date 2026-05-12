@@ -170,7 +170,7 @@ describe('app section shortcuts', () => {
 
     await user.click(screen.getByRole('button', { name: 'Open reader' }))
     expect(screen.getByRole('heading', { name: activeDocument.title })).toBeTruthy()
-    expect(window.location.pathname).toBe('/reader/document-1')
+    expect(window.location.pathname).toBe('/reader/document-1/chapters/chapter%3Adocument-1%3Adefault')
 
     await user.click(screen.getByRole('button', { name: 'Back to library' }))
     expect(screen.getByRole('heading', { name: 'Reading documents' })).toBeTruthy()
@@ -363,6 +363,20 @@ describe('route helpers', () => {
       chapterId: 'chapter-2',
       pageNumber: 1,
     })).toBe('/library/documents/document-1/chapters/chapter-2')
+    expect(routeFromPath('/reader/document-1/chapters/chapter-2/pages/4/7')).toEqual({
+      route: 'reader',
+      documentId: 'document-1',
+      chapterId: 'chapter-2',
+      startPageNumber: 4,
+      endPageNumber: 7,
+    })
+    expect(pathForRoute({
+      route: 'reader',
+      documentId: 'document-1',
+      chapterId: 'chapter-2',
+      startPageNumber: 4,
+      endPageNumber: 7,
+    })).toBe('/reader/document-1/chapters/chapter-2/pages/4/7')
   })
 })
 

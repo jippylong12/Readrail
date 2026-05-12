@@ -1,11 +1,26 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { chunkText, getChunkDurationMs } from '../lib/text/chunking'
-import type { BaselineAssessmentResult, DocumentRecord, PageLayout, ReaderMode } from '../types/domain'
+import type {
+  BaselineAssessmentResult,
+  DocumentChapterRecord,
+  DocumentPageRecord,
+  DocumentRecord,
+  PageLayout,
+  ReaderMode,
+} from '../types/domain'
 import { clampWpm, formatDuration } from '../lib/reading/pacing'
 import { cleanReadingText } from '../lib/text/cleanup'
 import { splitIntoPages, getActivePage } from '../lib/text/pages'
 import { countWords, estimatePages } from '../lib/text/wordCount'
 import { ReaderControls } from './ReaderControls'
+import {
+  buildReaderScope,
+  getReaderPageDisplayNumber,
+  type BuiltReaderScope,
+  type ReaderScopeSelection,
+  type ReaderSessionScopeMetadata,
+} from '../app/readerScopes'
+import { getOrderedChapterPages, getOrderedDocumentChapters } from '../app/structuredDocuments'
 
 export const COMPREHENSION_TEST_THRESHOLD_WORDS = 1000
 
@@ -14,15 +29,22 @@ export type ReaderSegmentInput = {
   targetWpm: number
   startWordIndex: number
   endWordIndex: number
+  scopeStartWordIndex: number
+  scopeEndWordIndex: number
   wordsRead: number
   durationSeconds: number
   pauseCount: number
   regressionCount: number
+  scope: ReaderSessionScopeMetadata
+  scopeContent: string
 }
 
 type ReaderRailProps = {
   baselineResult: BaselineAssessmentResult | null
+  chapters: DocumentChapterRecord[]
   document: DocumentRecord | null
+  pages: DocumentPageRecord[]
+  scopeSelection: ReaderScopeSelection
   defaultMode: ReaderMode
   defaultWpm: number
   defaultChunkSize: number
@@ -33,13 +55,17 @@ type ReaderRailProps = {
   onBackToLibrary: () => void
   onSegmentReset: (documentId: string, wordIndex: number) => void
   onSegmentStart: (documentId: string, segment: { startWordIndex: number; startedAt: string; targetWpm: number }) => void
+  onScopeChange: (selection: ReaderScopeSelection) => void
   onStartTest: (input: ReaderSegmentInput) => void
   onUpdateDocument?: (id: string, updates: Partial<Pick<DocumentRecord, 'title' | 'content'>>) => void
 }
 
 export function ReaderRail({
   baselineResult,
+  chapters,
   document,
+  pages,
+  scopeSelection,
   defaultMode,
   defaultWpm,
   defaultChunkSize,
@@ -50,6 +76,7 @@ export function ReaderRail({
   onBackToLibrary,
   onSegmentReset,
   onSegmentStart,
+  onScopeChange,
   onStartTest,
   onUpdateDocument,
 }: ReaderRailProps) {
@@ -64,7 +91,6 @@ export function ReaderRail({
   const [regressionCount, setRegressionCount] = useState(0)
   const [isFocusMode, setIsFocusMode] = useState(false)
   const [hasStartedReading, setHasStartedReading] = useState(false)
-  const [segmentStartWordIndex, setSegmentStartWordIndex] = useState(initialSegmentStartWordIndex)
   const [segmentStartElapsedSeconds, setSegmentStartElapsedSeconds] = useState(0)
   const [suggestion, setSuggestion] = useState<'threshold' | null>(null)
   const [isEditingDocument, setIsEditingDocument] = useState(false)
@@ -73,7 +99,14 @@ export function ReaderRail({
   const [editError, setEditError] = useState<string | null>(null)
   const startedRef = useRef<number | null>(null)
 
-  const chunks = useMemo(() => chunkText(document?.content ?? '', chunkSize), [chunkSize, document?.content])
+  const activeScope = useMemo(
+    () => (document ? buildReaderScope(document, chapters, pages, scopeSelection) : null),
+    [chapters, document, pages, scopeSelection],
+  )
+  const [segmentStartWordIndex, setSegmentStartWordIndex] = useState(() =>
+    getLocalSegmentStart(initialSegmentStartWordIndex, activeScope),
+  )
+  const chunks = useMemo(() => chunkText(activeScope?.content ?? '', chunkSize), [activeScope?.content, chunkSize])
   const activeChunk = chunks[activeIndex]
   const currentWordIndex = activeChunk?.endWord ?? 0
   const untestedWordCount = Math.max(0, currentWordIndex - segmentStartWordIndex)
@@ -147,17 +180,30 @@ export function ReaderRail({
   }
 
   function buildSegment(endWordIndex = currentWordIndex): ReaderSegmentInput {
-    const normalizedEndWordIndex = Math.max(0, Math.min(endWordIndex, document?.wordCount ?? endWordIndex))
-    const normalizedStartWordIndex = Math.max(0, Math.min(segmentStartWordIndex, normalizedEndWordIndex))
+    const normalizedScopeEndWordIndex = Math.max(0, Math.min(endWordIndex, activeScope?.wordCount ?? endWordIndex))
+    const normalizedScopeStartWordIndex = Math.max(0, Math.min(segmentStartWordIndex, normalizedScopeEndWordIndex))
+    const scopeStartOffset = activeScope?.startWordOffset ?? 0
     return {
       mode,
       targetWpm,
-      startWordIndex: normalizedStartWordIndex,
-      endWordIndex: normalizedEndWordIndex,
-      wordsRead: Math.max(0, normalizedEndWordIndex - normalizedStartWordIndex),
+      startWordIndex: scopeStartOffset + normalizedScopeStartWordIndex,
+      endWordIndex: scopeStartOffset + normalizedScopeEndWordIndex,
+      scopeStartWordIndex: normalizedScopeStartWordIndex,
+      scopeEndWordIndex: normalizedScopeEndWordIndex,
+      wordsRead: Math.max(0, normalizedScopeEndWordIndex - normalizedScopeStartWordIndex),
       durationSeconds: Math.max(1, elapsedSeconds - segmentStartElapsedSeconds),
       pauseCount,
       regressionCount,
+      scope: {
+        scopeType: activeScope?.scopeType ?? 'document',
+        scopeLabel: activeScope?.scopeLabel ?? 'Full document',
+        chapterId: activeScope?.chapterId ?? null,
+        chapterTitle: activeScope?.chapterTitle ?? null,
+        pageIds: activeScope?.pageIds ?? [],
+        pageNumbers: activeScope?.pageNumbers ?? [],
+        sourcePageNumbers: activeScope?.sourcePageNumbers ?? [],
+      },
+      scopeContent: activeScope?.content ?? '',
     }
   }
 
@@ -172,7 +218,7 @@ export function ReaderRail({
     setSegmentStartElapsedSeconds(elapsedSeconds)
     if (document) {
       onSegmentStart(document.id, {
-        startWordIndex,
+        startWordIndex: (activeScope?.startWordOffset ?? 0) + startWordIndex,
         startedAt: new Date().toISOString(),
         targetWpm,
       })
@@ -185,8 +231,21 @@ export function ReaderRail({
     setSegmentStartElapsedSeconds(elapsedSeconds)
     setSuggestion(null)
     if (document) {
-      onSegmentReset(document.id, normalizedWordIndex)
+      onSegmentReset(document.id, (activeScope?.startWordOffset ?? 0) + normalizedWordIndex)
     }
+  }
+
+  function resetReaderRuntime(): void {
+    setActiveIndex(0)
+    setIsRunning(false)
+    setIsFocusMode(false)
+    setHasStartedReading(false)
+    setElapsedSeconds(0)
+    setPauseCount(0)
+    setRegressionCount(0)
+    setSegmentStartWordIndex(0)
+    setSegmentStartElapsedSeconds(0)
+    setSuggestion(null)
   }
 
   function startTest(): void {
@@ -261,6 +320,7 @@ export function ReaderRail({
         <div>
           <span className="eyebrow">Reader</span>
           <h1>{document.title}</h1>
+          {activeScope && <p className="reader-scope-kicker">{activeScope.scopeLabel}</p>}
         </div>
         <div className="reader-header-actions">
           <div className="reader-metrics">
@@ -307,6 +367,18 @@ export function ReaderRail({
           </div>
           {editError && <p className="form-message error">{editError}</p>}
         </form>
+      )}
+
+      {activeScope && (
+        <ReaderScopeSetup
+          chapters={chapters}
+          document={document}
+          onBeforeScopeChange={resetReaderRuntime}
+          onScopeChange={onScopeChange}
+          pages={pages}
+          scope={activeScope}
+          selection={scopeSelection}
+        />
       )}
 
       <ReaderControls
@@ -376,6 +448,177 @@ export function ReaderRail({
       </div>
     </section>
   )
+}
+
+type ReaderScopeSetupProps = {
+  chapters: DocumentChapterRecord[]
+  document: DocumentRecord
+  onScopeChange: (selection: ReaderScopeSelection) => void
+  onBeforeScopeChange: () => void
+  pages: DocumentPageRecord[]
+  scope: BuiltReaderScope
+  selection: ReaderScopeSelection
+}
+
+function ReaderScopeSetup({
+  chapters,
+  document,
+  onScopeChange,
+  onBeforeScopeChange,
+  pages,
+  scope,
+  selection,
+}: ReaderScopeSetupProps) {
+  const orderedChapters = useMemo(() => getOrderedDocumentChapters(document.id, chapters), [chapters, document.id])
+  const selectedChapterId = scope.selectedChapterId ?? orderedChapters[0]?.id ?? null
+  const selectedChapterPages = useMemo(
+    () => (selectedChapterId ? getOrderedChapterPages(selectedChapterId, pages) : []),
+    [pages, selectedChapterId],
+  )
+  const firstPageNumber = selectedChapterPages[0]?.pageNumber ?? null
+  const selectedStartPageNumber = scope.selectedStartPageNumber ?? firstPageNumber
+  const selectedEndPageNumber = scope.selectedEndPageNumber ?? selectedStartPageNumber
+
+  function changeScopeType(scopeType: ReaderScopeSelection['scopeType']): void {
+    onBeforeScopeChange()
+    if (scopeType === 'document') {
+      onScopeChange({ scopeType: 'document' })
+      return
+    }
+
+    if (!selectedChapterId) {
+      return
+    }
+
+    if (scopeType === 'chapter') {
+      onScopeChange({ scopeType: 'chapter', chapterId: selectedChapterId })
+      return
+    }
+
+    onScopeChange({
+      scopeType: 'pages',
+      chapterId: selectedChapterId,
+      startPageNumber: firstPageNumber,
+      endPageNumber: firstPageNumber,
+    })
+  }
+
+  function changeChapter(chapterId: string): void {
+    onBeforeScopeChange()
+    const chapterPages = getOrderedChapterPages(chapterId, pages)
+    const firstChapterPageNumber = chapterPages[0]?.pageNumber ?? null
+    if (selection.scopeType === 'pages') {
+      onScopeChange({
+        scopeType: 'pages',
+        chapterId,
+        startPageNumber: firstChapterPageNumber,
+        endPageNumber: firstChapterPageNumber,
+      })
+      return
+    }
+
+    onScopeChange({ scopeType: 'chapter', chapterId })
+  }
+
+  function changePageRange(boundary: 'start' | 'end', pageNumber: number): void {
+    onBeforeScopeChange()
+    const startPageNumber = boundary === 'start' ? pageNumber : selectedStartPageNumber
+    const endPageNumber = boundary === 'end' ? pageNumber : selectedEndPageNumber
+    if (!selectedChapterId || !startPageNumber || !endPageNumber) {
+      return
+    }
+
+    onScopeChange({
+      scopeType: 'pages',
+      chapterId: selectedChapterId,
+      startPageNumber: Math.min(startPageNumber, endPageNumber),
+      endPageNumber: Math.max(startPageNumber, endPageNumber),
+    })
+  }
+
+  return (
+    <section className="reader-scope-panel" aria-label="Reader setup">
+      <div className="reader-scope-summary">
+        <span className="eyebrow">Scope</span>
+        <strong>{scope.scopeLabel}</strong>
+        <span>
+          {scope.pageCount.toLocaleString()} page(s) - {scope.wordCount.toLocaleString()} words
+        </span>
+      </div>
+
+      <div className="reader-scope-controls">
+        <div className="segmented scope-segmented" role="group" aria-label="Reading scope">
+          {(['document', 'chapter', 'pages'] as const).map((scopeType) => (
+            <button
+              aria-pressed={scope.scopeType === scopeType}
+              className={scope.scopeType === scopeType ? 'active' : ''}
+              disabled={
+                (scopeType !== 'document' && orderedChapters.length === 0)
+                || (scopeType === 'pages' && selectedChapterPages.length === 0)
+              }
+              key={scopeType}
+              onClick={() => changeScopeType(scopeType)}
+              type="button"
+            >
+              {scopeType === 'document' ? 'Document' : scopeType === 'chapter' ? 'Chapter' : 'Pages'}
+            </button>
+          ))}
+        </div>
+
+        {scope.scopeType !== 'document' && (
+          <label className="field compact">
+            Chapter
+            <select onChange={(event) => changeChapter(event.target.value)} value={selectedChapterId ?? ''}>
+              {orderedChapters.map((chapter) => (
+                <option key={chapter.id} value={chapter.id}>
+                  {chapter.title}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+
+        {scope.scopeType === 'pages' && (
+          <>
+            <label className="field compact">
+              Start page
+              <select
+                onChange={(event) => changePageRange('start', Number(event.target.value))}
+                value={selectedStartPageNumber ?? ''}
+              >
+                {selectedChapterPages.map((page) => (
+                  <option key={page.id} value={page.pageNumber}>
+                    Page {getReaderPageDisplayNumber(page)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field compact">
+              End page
+              <select
+                onChange={(event) => changePageRange('end', Number(event.target.value))}
+                value={selectedEndPageNumber ?? ''}
+              >
+                {selectedChapterPages.map((page) => (
+                  <option key={page.id} value={page.pageNumber}>
+                    Page {getReaderPageDisplayNumber(page)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </>
+        )}
+      </div>
+    </section>
+  )
+}
+
+function getLocalSegmentStart(documentWordIndex: number, scope: BuiltReaderScope | null): number {
+  if (!scope || documentWordIndex < scope.startWordOffset || documentWordIndex > scope.endWordOffset) {
+    return 0
+  }
+
+  return Math.max(0, Math.min(scope.wordCount, documentWordIndex - scope.startWordOffset))
 }
 
 type Chunk = { id: string; text: string; startWord: number; endWord: number; startsNewParagraph?: boolean }

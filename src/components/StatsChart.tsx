@@ -11,6 +11,7 @@ type StatsChartProps = {
 export function StatsChart({ baselineResult, documents, sessions }: StatsChartProps) {
   const summary = summarizeSessions(sessions)
   const trends = buildTrendRows(sessions)
+  const documentById = new Map(documents.map((document) => [document.id, document]))
 
   return (
     <section className="panel stats-panel">
@@ -80,6 +81,41 @@ export function StatsChart({ baselineResult, documents, sessions }: StatsChartPr
             </ResponsiveContainer>
           </div>
         </div>
+      )}
+
+      {sessions.length > 0 && (
+        <section className="recent-sessions">
+          <div className="panel-header compact">
+            <div>
+              <span className="eyebrow">Recent</span>
+              <h2>Session scopes</h2>
+            </div>
+          </div>
+          <div className="attempt-table-wrap">
+            <table className="attempt-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Reading</th>
+                  <th>Scope</th>
+                  <th>Words</th>
+                  <th>WPM</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sessions.slice(0, 5).map((session) => (
+                  <tr key={session.id}>
+                    <td>{new Date(session.startedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</td>
+                    <td>{documentById.get(session.documentId)?.title ?? 'Unknown reading'}</td>
+                    <td>{session.scopeLabel ?? 'Full document'}</td>
+                    <td>{session.wordsRead.toLocaleString()}</td>
+                    <td>{session.actualWpm}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
       )}
     </section>
   )

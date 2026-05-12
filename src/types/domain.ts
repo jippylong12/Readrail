@@ -1,6 +1,7 @@
 export type SourceType = 'paste' | 'text_file' | 'pdf_text' | 'photo_ocr' | 'manual'
 
 export type ReaderMode = 'rail' | 'chunk' | 'rsvp'
+export type ReadingScopeType = 'document' | 'chapter' | 'pages'
 
 export type PageLayout = 1 | 2 | 3 | 4
 
@@ -132,6 +133,13 @@ export type DocumentPageRecord = {
 export type ReadingSession = {
   id: string
   documentId: string
+  scopeType?: ReadingScopeType
+  scopeLabel?: string | null
+  chapterId?: string | null
+  chapterTitle?: string | null
+  pageIds?: string[]
+  pageNumbers?: number[]
+  sourcePageNumbers?: Array<number | null>
   mode: ReaderMode
   targetWpm: number
   actualWpm: number
