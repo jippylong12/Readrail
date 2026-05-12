@@ -257,6 +257,56 @@ export type OcrJobItem = {
   updatedAt: string
 }
 
+export type AiUsageStage = 'ocr_extraction' | 'ocr_cleaner' | 'ocr_formatter' | 'generated_quiz'
+
+export type AiUsageStatus = 'running' | 'succeeded' | 'failed'
+
+export type AiCostConfidence = 'exact' | 'estimated' | 'unknown'
+
+export type AiUsageTokenBreakdown = {
+  inputTokens: number | null
+  outputTokens: number | null
+  thinkingTokens: number | null
+  totalTokens: number | null
+  cachedInputTokens: number | null
+  textInputTokens: number | null
+  imageInputTokens: number | null
+  audioInputTokens: number | null
+  videoInputTokens: number | null
+}
+
+export type AiPricingSnapshot = {
+  effectiveDate: string | null
+  modelId: string | null
+  currency: string | null
+  inputRatePerMillionTokens: number | null
+  outputRatePerMillionTokens: number | null
+  thinkingRatePerMillionTokens: number | null
+  estimatedInputCost: number | null
+  estimatedOutputCost: number | null
+  estimatedThinkingCost: number | null
+  estimatedTotalCost: number | null
+  confidence: AiCostConfidence
+}
+
+export type AiUsageLineItem = {
+  id: string
+  documentId: string | null
+  ocrJobId: string | null
+  ocrItemId: string | null
+  sourceFileName: string | null
+  stage: AiUsageStage
+  provider: string
+  model: string
+  status: AiUsageStatus
+  startedAt: string
+  completedAt: string | null
+  failureMessage: string | null
+  rawProviderMetadata: Record<string, unknown> | null
+  tokenBreakdown: AiUsageTokenBreakdown
+  pricingSnapshot: AiPricingSnapshot | null
+}
+
 export type QuizAttempt = {
   id: string
   documentId: string

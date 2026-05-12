@@ -1,6 +1,11 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type {
+  AiPricingSnapshot,
+  AiUsageLineItem,
+  AiUsageStage,
+  AiUsageStatus,
+  AiUsageTokenBreakdown,
   AppSettings,
   BaselineAssessmentResult,
   CoachingState,
@@ -28,10 +33,12 @@ import { cleanReadingText } from '../lib/text/cleanup'
 import { countWords, estimatePages } from '../lib/text/wordCount'
 import {
   deleteDocumentPageFromDatabase,
+  saveAiUsageLineItemToDatabase,
   saveDocumentToDatabase,
   saveOcrJobToDatabase,
   saveSessionToDatabase,
 } from '../lib/db/repository'
+import type { AiUsageLineItemQuery } from '../lib/db/repository'
 import {
   STRUCTURED_DOCUMENT_VERSION,
   createDefaultDocumentStructure,
@@ -115,6 +122,32 @@ type CompleteSessionInput = {
   notes: string
 }
 
+export type CreateAiUsageLineItemInput = {
+  id?: string
+  documentId?: string | null
+  ocrJobId?: string | null
+  ocrItemId?: string | null
+  sourceFileName?: string | null
+  stage: AiUsageStage
+  provider: string
+  model: string
+  status?: AiUsageStatus
+  startedAt?: string
+  completedAt?: string | null
+  failureMessage?: string | null
+  rawProviderMetadata?: Record<string, unknown> | null
+  tokenBreakdown?: Partial<AiUsageTokenBreakdown> | null
+  pricingSnapshot?: AiPricingSnapshot | null
+}
+
+export type UpdateAiUsageLineItemInput = Partial<
+  Omit<AiUsageLineItem, 'id' | 'rawProviderMetadata' | 'tokenBreakdown' | 'pricingSnapshot'>
+> & {
+  rawProviderMetadata?: Record<string, unknown> | null
+  tokenBreakdown?: Partial<AiUsageTokenBreakdown> | null
+  pricingSnapshot?: AiPricingSnapshot | null
+}
+
 type AppState = {
   documents: DocumentRecord[]
   documentChapters: DocumentChapterRecord[]
@@ -130,6 +163,7 @@ type AppState = {
   baselineResult: BaselineAssessmentResult | null
   quizAttempts: QuizAttempt[]
   coaching: CoachingState
+  aiUsageLineItems: AiUsageLineItem[]
   createDocument: (input: CreateDocumentInput) => DocumentRecord
   createOcrDocument: (input: CreateOcrDocumentInput) => DocumentRecord
   appendOcrPagesToDocument: (
@@ -138,6 +172,9 @@ type AppState = {
     targetChapterId?: string | null,
   ) => DocumentRecord | null
   saveOcrJob: (job: OcrJob, items: OcrJobItem[]) => void
+  createAiUsageLineItem: (input: CreateAiUsageLineItemInput) => AiUsageLineItem
+  updateAiUsageLineItem: (id: string, updates: UpdateAiUsageLineItemInput) => AiUsageLineItem | null
+  queryAiUsageLineItems: (query?: AiUsageLineItemQuery) => AiUsageLineItem[]
   startOcrJob: (input: StartOcrJobInput) => string | null
   retryOcrJobItem: (jobId: string, itemId: string, input: RetryOcrJobItemInput) => void
   replaceOcrJobItemFile: (jobId: string, itemId: string, file: File, input: RetryOcrJobItemInput) => void
@@ -222,6 +259,83 @@ export const defaultOnboardingState: OnboardingState = {
 
 export const defaultTourProgressState: TourProgressState = {
   completedTourIds: [],
+}
+
+export const defaultAiUsageTokenBreakdown: AiUsageTokenBreakdown = {
+  inputTokens: null,
+  outputTokens: null,
+  thinkingTokens: null,
+  totalTokens: null,
+  cachedInputTokens: null,
+  textInputTokens: null,
+  imageInputTokens: null,
+  audioInputTokens: null,
+  videoInputTokens: null,
+}
+
+function buildAiUsageLineItem(input: CreateAiUsageLineItemInput): AiUsageLineItem {
+  return {
+    id: input.id ?? crypto.randomUUID(),
+    documentId: input.documentId ?? null,
+    ocrJobId: input.ocrJobId ?? null,
+    ocrItemId: input.ocrItemId ?? null,
+    sourceFileName: input.sourceFileName ?? null,
+    stage: input.stage,
+    provider: input.provider,
+    model: input.model,
+    status: input.status ?? 'running',
+    startedAt: input.startedAt ?? new Date().toISOString(),
+    completedAt: input.completedAt ?? null,
+    failureMessage: input.failureMessage ?? null,
+    rawProviderMetadata: input.rawProviderMetadata ?? null,
+    tokenBreakdown: mergeAiUsageTokenBreakdown(undefined, input.tokenBreakdown),
+    pricingSnapshot: input.pricingSnapshot ?? null,
+  }
+}
+
+function mergeAiUsageLineItem(
+  lineItem: AiUsageLineItem,
+  updates: UpdateAiUsageLineItemInput,
+): AiUsageLineItem {
+  return {
+    ...lineItem,
+    ...updates,
+    rawProviderMetadata:
+      updates.rawProviderMetadata === undefined ? lineItem.rawProviderMetadata : updates.rawProviderMetadata,
+    tokenBreakdown: mergeAiUsageTokenBreakdown(lineItem.tokenBreakdown, updates.tokenBreakdown),
+    pricingSnapshot: updates.pricingSnapshot === undefined ? lineItem.pricingSnapshot : updates.pricingSnapshot,
+  }
+}
+
+function mergeAiUsageTokenBreakdown(
+  current: AiUsageTokenBreakdown | undefined,
+  updates: Partial<AiUsageTokenBreakdown> | null | undefined,
+): AiUsageTokenBreakdown {
+  const base = current ?? defaultAiUsageTokenBreakdown
+  if (updates === undefined) {
+    return { ...base }
+  }
+  if (updates === null) {
+    return { ...defaultAiUsageTokenBreakdown }
+  }
+  return {
+    ...base,
+    ...updates,
+  }
+}
+
+function queryAiUsageLineItemsFromState(
+  lineItems: AiUsageLineItem[],
+  query: AiUsageLineItemQuery = {},
+): AiUsageLineItem[] {
+  return lineItems
+    .filter((lineItem) => query.documentId === undefined || lineItem.documentId === query.documentId)
+    .filter((lineItem) => query.ocrJobId === undefined || lineItem.ocrJobId === query.ocrJobId)
+    .filter((lineItem) => query.ocrItemId === undefined || lineItem.ocrItemId === query.ocrItemId)
+    .filter((lineItem) => query.stage === undefined || lineItem.stage === query.stage)
+    .filter((lineItem) => query.provider === undefined || lineItem.provider === query.provider)
+    .filter((lineItem) => query.model === undefined || lineItem.model === query.model)
+    .filter((lineItem) => query.status === undefined || lineItem.status === query.status)
 }
 
 function buildDefaultCoachingState(recommendedWpm = defaultSettings.reader.defaultWpm): CoachingState {
@@ -698,7 +812,7 @@ function uniqueStrings(values: string[]): string[] {
 
 export const useAppStore = create<AppState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       documents: [],
       documentChapters: [],
       documentPages: [],
@@ -713,6 +827,7 @@ export const useAppStore = create<AppState>()(
       baselineResult: null,
       quizAttempts: [],
       coaching: buildDefaultCoachingState(),
+      aiUsageLineItems: [],
       createDocument: (input) => {
         const now = new Date().toISOString()
         const content = cleanReadingText(input.content, { preservePageBreaks: true })
@@ -869,6 +984,34 @@ export const useAppStore = create<AppState>()(
         }))
         void saveOcrJobToDatabase(job, items)
       },
+      createAiUsageLineItem: (input) => {
+        const lineItem = buildAiUsageLineItem(input)
+        set((state) => ({
+          aiUsageLineItems: [lineItem, ...state.aiUsageLineItems.filter((candidate) => candidate.id !== lineItem.id)],
+        }))
+        void saveAiUsageLineItemToDatabase(lineItem)
+        return lineItem
+      },
+      updateAiUsageLineItem: (id, updates) => {
+        let changedLineItem: AiUsageLineItem | null = null
+        set((state) => {
+          let found = false
+          const aiUsageLineItems = state.aiUsageLineItems.map((lineItem) => {
+            if (lineItem.id !== id) {
+              return lineItem
+            }
+            found = true
+            changedLineItem = mergeAiUsageLineItem(lineItem, updates)
+            return changedLineItem
+          })
+          return found ? { aiUsageLineItems } : state
+        })
+        if (changedLineItem) {
+          void saveAiUsageLineItemToDatabase(changedLineItem)
+        }
+        return changedLineItem
+      },
+      queryAiUsageLineItems: (query = {}) => queryAiUsageLineItemsFromState(get().aiUsageLineItems, query),
       startOcrJob: (input) => {
         if (!input.files.length) {
           return null
@@ -1723,11 +1866,12 @@ export const useAppStore = create<AppState>()(
           baselineResult: null,
           quizAttempts: [],
           coaching: buildDefaultCoachingState(),
+          aiUsageLineItems: [],
         }),
     }),
     {
       name: 'readrail-local-state',
-      version: 7,
+      version: 8,
       migrate: (persistedState: unknown, fromVersion: number) => {
         const state = persistedState as Record<string, unknown>
         const settings = state.settings as AppSettings | undefined
@@ -1780,6 +1924,10 @@ export const useAppStore = create<AppState>()(
         if (fromVersion < 7) {
           state.sessions = seedSessionScopeMetadata(state.sessions as ReadingSession[] | undefined)
         }
+        // v7 -> v8: seed durable AI usage ledger collection.
+        if (fromVersion < 8) {
+          state.aiUsageLineItems = state.aiUsageLineItems || []
+        }
         return state
       },
       partialize: (state) => ({
@@ -1796,6 +1944,7 @@ export const useAppStore = create<AppState>()(
         baselineResult: state.baselineResult,
         quizAttempts: state.quizAttempts,
         coaching: state.coaching,
+        aiUsageLineItems: state.aiUsageLineItems,
       }),
     },
   ),
