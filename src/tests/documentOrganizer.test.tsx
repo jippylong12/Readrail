@@ -103,6 +103,40 @@ describe('DocumentOrganizer', () => {
 
     expect(onPagesPerPageChange).toHaveBeenCalledWith(25)
   })
+
+  it('adds a manual page to the selected chapter', async () => {
+    const user = userEvent.setup()
+    const onAddPage = vi.fn()
+    renderOrganizer({ onAddPage })
+
+    expect(screen.queryByLabelText('New page label')).toBeNull()
+
+    await user.click(screen.getByRole('button', { name: 'Add page' }))
+    await user.type(screen.getByLabelText('New page label'), 'Fresh page')
+    await user.type(screen.getByLabelText('New source page'), '23')
+    await user.type(screen.getByLabelText('Page text'), 'New manually entered page text.')
+    await user.click(screen.getByRole('button', { name: 'Save page' }))
+
+    expect(onAddPage).toHaveBeenCalledWith(documentRecord.id, 'chapter-intro', {
+      title: 'Fresh page',
+      sourcePageNumber: 23,
+      text: 'New manually entered page text.',
+    })
+    expect(screen.queryByLabelText('New page label')).toBeNull()
+  })
+
+  it('cancels a manual page draft', async () => {
+    const user = userEvent.setup()
+    const onAddPage = vi.fn()
+    renderOrganizer({ onAddPage })
+
+    await user.click(screen.getByRole('button', { name: 'Add page' }))
+    await user.type(screen.getByLabelText('Page text'), 'Draft page text.')
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    expect(onAddPage).not.toHaveBeenCalled()
+    expect(screen.queryByLabelText('Page text')).toBeNull()
+  })
 })
 
 function renderOrganizer(overrides: Partial<ComponentProps<typeof DocumentOrganizer>> = {}) {
@@ -110,6 +144,7 @@ function renderOrganizer(overrides: Partial<ComponentProps<typeof DocumentOrgani
     <DocumentOrganizer
       chapters={chapters}
       document={documentRecord}
+      onAddPage={vi.fn()}
       onCreateChapter={vi.fn()}
       onDeleteChapter={vi.fn()}
       onDeletePage={vi.fn()}

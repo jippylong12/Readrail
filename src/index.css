@@ -300,6 +300,13 @@ h3 {
   gap: 12px;
 }
 
+.manual-document-grid {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) minmax(110px, 0.5fr);
+  gap: 10px;
+  align-items: end;
+}
+
 .manual-check-form,
 .manual-retest-form {
   display: grid;
@@ -976,6 +983,38 @@ h3 {
   grid-template-columns: minmax(180px, 1fr) auto;
   gap: 8px;
   align-items: end;
+}
+
+.organizer-add-page {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-muted) 52%, var(--surface));
+  padding: 9px;
+}
+
+.organizer-add-page-fields {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(110px, 0.4fr);
+  gap: 8px;
+}
+
+.organizer-new-page-textarea {
+  min-height: 120px;
+}
+
+.organizer-add-page-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.organizer-add-page-footer span {
+  color: var(--muted);
+  font-weight: 800;
 }
 
 .organizer-browser {
@@ -2564,7 +2603,9 @@ h3 {
     padding-left: 12px;
   }
 
-  .organizer-add-chapter {
+  .manual-document-grid,
+  .organizer-add-chapter,
+  .organizer-add-page-fields {
     grid-template-columns: 1fr;
   }
 
@@ -2616,6 +2657,7 @@ h3 {
   .ocr-file-controls button,
   .ocr-file-controls .field,
   .organizer-add-chapter button,
+  .organizer-add-page button,
   .organizer-page-fields .field,
   .organizer-actions button,
   .append-target-field {

@@ -228,6 +228,37 @@ describe('structured document store behavior', () => {
     })
   })
 
+  it('creates manual documents with an explicit first chapter and page', () => {
+    const document = useAppStore.getState().createDocument({
+      title: 'Manual book',
+      chapterTitle: 'Opening chapter',
+      pageTitle: 'Preface page',
+      sourcePageNumber: 12,
+      content: 'Manually typed opening text.',
+      sourceType: 'manual',
+    })
+
+    const state = useAppStore.getState()
+    expect(document).toMatchObject({
+      title: 'Manual book',
+      sourceType: 'manual',
+      content: 'Manually typed opening text.',
+      wordCount: 4,
+    })
+    expect(state.documentChapters[0]).toMatchObject({
+      documentId: document.id,
+      title: 'Opening chapter',
+    })
+    expect(state.documentPages[0]).toMatchObject({
+      documentId: document.id,
+      chapterId: state.documentChapters[0].id,
+      title: 'Preface page',
+      sourcePageNumber: 12,
+      text: 'Manually typed opening text.',
+      reviewStatus: 'reviewed',
+    })
+  })
+
   it('creates a structured OCR document with one page record per reviewed page', () => {
     const document = useAppStore.getState().createOcrDocument({
       title: 'Reviewed scan',

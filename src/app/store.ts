@@ -60,6 +60,9 @@ type CreateDocumentInput = {
   title: string
   content: string
   sourceType: SourceType
+  chapterTitle?: string
+  pageTitle?: string | null
+  sourcePageNumber?: number | null
 }
 
 export type OcrPageInput = {
@@ -946,7 +949,11 @@ export const useAppStore = create<AppState>()(
           updatedAt: now,
           archivedAt: null,
         }
-        const structure = createDefaultDocumentStructure(document)
+        const structure = createDefaultDocumentStructure(document, {
+          chapterTitle: input.chapterTitle,
+          pageTitle: input.pageTitle,
+          sourcePageNumber: input.sourcePageNumber,
+        })
 
         set((state) => ({
           documents: [document, ...state.documents],

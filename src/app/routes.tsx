@@ -52,7 +52,7 @@ export function routeFromPath(pathname: string): RouteState {
   const searchParams = new URLSearchParams(query)
 
   if (segments[0] === 'library') {
-    if (segments[1] === 'import') {
+    if (segments[1] === 'manual' || segments[1] === 'import') {
       return { route: 'library-import', documentId: null }
     }
     if (segments[1] === 'ocr') {
@@ -121,7 +121,7 @@ export function routeFromPath(pathname: string): RouteState {
 export function pathForRoute(routeState: RouteState): string {
   switch (routeState.route) {
     case 'library-import':
-      return '/library/import'
+      return '/library/manual'
     case 'library-ocr':
       return '/library/ocr'
     case 'library-document':

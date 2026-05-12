@@ -5,6 +5,7 @@ import {
   getOrderedChapterPages,
   getOrderedDocumentChapters,
 } from '../app/structuredDocuments'
+import { countWords } from '../lib/text/wordCount'
 import type { DocumentChapterRecord, DocumentPageRecord, DocumentRecord } from '../types/domain'
 
 type DocumentOrganizerProps = {
@@ -12,6 +13,15 @@ type DocumentOrganizerProps = {
   chapters: DocumentChapterRecord[]
   pages: DocumentPageRecord[]
   onCreateChapter: (documentId: string, title?: string) => void
+  onAddPage: (
+    documentId: string,
+    chapterId: string,
+    input: {
+      title: string
+      sourcePageNumber: number | null
+      text: string
+    },
+  ) => void
   onRenameChapter: (chapterId: string, title: string) => void
   onMoveChapter: (documentId: string, chapterId: string, direction: -1 | 1) => void
   onDeleteChapter: (chapterId: string) => void
@@ -36,6 +46,7 @@ export function DocumentOrganizer({
   chapters,
   pages,
   onCreateChapter,
+  onAddPage,
   onRenameChapter,
   onMoveChapter,
   onDeleteChapter,
@@ -52,6 +63,10 @@ export function DocumentOrganizer({
   selectedChapterId,
 }: DocumentOrganizerProps) {
   const [newChapterTitle, setNewChapterTitle] = useState('')
+  const [newPageTitle, setNewPageTitle] = useState('')
+  const [newPageSourceNumber, setNewPageSourceNumber] = useState('')
+  const [newPageText, setNewPageText] = useState('')
+  const [isAddingPage, setIsAddingPage] = useState(false)
   const [editingChapterId, setEditingChapterId] = useState<string | null>(null)
   const [chapterTitleDraft, setChapterTitleDraft] = useState('')
   const [pageLabelDrafts, setPageLabelDrafts] = useState<Record<string, string>>({})
@@ -75,10 +90,34 @@ export function DocumentOrganizer({
   const selectedVisiblePageCount = visibleSelectablePageIds.filter((pageId) => validSelectedPageIds.has(pageId)).length
   const selectedPageCount = validSelectedPageIds.size
   const selectedPageDeleteDisabled = selectedPageCount === 0 || selectedPageCount >= pages.length
+  const newPageWordCount = countWordsInText(newPageText)
 
   function submitChapter(): void {
     onCreateChapter(document.id, newChapterTitle)
     setNewChapterTitle('')
+  }
+
+  function submitPage(): void {
+    if (!selectedChapter || newPageWordCount === 0) {
+      return
+    }
+
+    onAddPage(document.id, selectedChapter.id, {
+      title: newPageTitle,
+      sourcePageNumber: parseOptionalPageNumber(newPageSourceNumber),
+      text: newPageText,
+    })
+    setNewPageTitle('')
+    setNewPageSourceNumber('')
+    setNewPageText('')
+    setIsAddingPage(false)
+  }
+
+  function cancelPageDraft(): void {
+    setNewPageTitle('')
+    setNewPageSourceNumber('')
+    setNewPageText('')
+    setIsAddingPage(false)
   }
 
   function saveChapterTitle(chapterId: string): void {
@@ -261,6 +300,13 @@ export function DocumentOrganizer({
                   <div className="organizer-actions">
                     <button
                       className="ghost-button"
+                      onClick={() => setIsAddingPage(true)}
+                      type="button"
+                    >
+                      Add page
+                    </button>
+                    <button
+                      className="ghost-button"
                       disabled={selectedChapterIndex <= 0}
                       onClick={() => onMoveChapter(document.id, selectedChapter.id, -1)}
                       type="button"
@@ -298,6 +344,56 @@ export function DocumentOrganizer({
                 </>
               )}
             </div>
+
+            {isAddingPage && (
+              <form
+                className="organizer-add-page"
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  submitPage()
+                }}
+              >
+                <div className="organizer-add-page-fields">
+                  <label className="field">
+                    New page label
+                    <input
+                      onChange={(event) => setNewPageTitle(event.target.value)}
+                      placeholder={`Page ${selectedChapterPages.length + 1}`}
+                      value={newPageTitle}
+                    />
+                  </label>
+                  <label className="field">
+                    New source page
+                    <input
+                      inputMode="numeric"
+                      onChange={(event) => setNewPageSourceNumber(event.target.value)}
+                      placeholder={`${selectedChapterPages.length + 1}`}
+                      value={newPageSourceNumber}
+                    />
+                  </label>
+                </div>
+                <label className="field">
+                  Page text
+                  <textarea
+                    className="organizer-new-page-textarea"
+                    onChange={(event) => setNewPageText(event.target.value)}
+                    placeholder="Paste or type this page's text."
+                    value={newPageText}
+                  />
+                </label>
+                <div className="organizer-add-page-footer">
+                  <span>{newPageWordCount.toLocaleString()} words</span>
+                  <div className="button-row compact">
+                    <button className="secondary-button" disabled={newPageWordCount === 0} type="submit">
+                      Save page
+                    </button>
+                    <button className="ghost-button" onClick={cancelPageDraft} type="button">
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              </form>
+            )}
 
             <div className="organizer-pagination" aria-label="Chapter page navigation">
               <button
@@ -531,5 +627,9 @@ function parseOptionalPageNumber(value: string): number | null {
   }
 
   const parsed = Number(trimmed)
-  return Number.isFinite(parsed) ? parsed : null
+  return Number.isFinite(parsed) ? Math.max(1, Math.round(parsed)) : null
+}
+
+function countWordsInText(value: string): number {
+  return countWords(value)
 }

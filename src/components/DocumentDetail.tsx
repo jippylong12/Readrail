@@ -148,6 +148,27 @@ export function DocumentDetail({
         <DocumentOrganizer
           chapters={orderedChapters}
           document={document}
+          onAddPage={(documentId, chapterId, input) => {
+            const nextChapterPageNumber = getOrderedChapterPages(chapterId, documentPages).length + 1
+            onAppendPages(
+              documentId,
+              [
+                {
+                  pageNumber: nextChapterPageNumber,
+                  text: input.text,
+                  title: input.title,
+                  reviewStatus: 'reviewed',
+                  sourcePageNumber: input.sourcePageNumber,
+                  ocrConfidence: null,
+                  ocrNotes: null,
+                  uncertainSpans: [],
+                  sourceFileName: null,
+                  sourceKind: 'text',
+                },
+              ],
+              chapterId,
+            )
+          }}
           onCreateChapter={onCreateChapter}
           onDeleteChapter={onDeleteChapter}
           onDeletePage={onDeletePage}

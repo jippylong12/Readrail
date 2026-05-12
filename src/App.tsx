@@ -185,10 +185,23 @@ function App() {
   const activeTourId = replayTourId ?? (routeTourId && !completedTourIds.includes(routeTourId) ? routeTourId : null)
 
   const createAndOpenDocument = useCallback(
-    (title: string, content: string, sourceType: 'paste' | 'text_file' | 'photo_ocr' = 'paste') => {
-      const document = createDocument({ title, content, sourceType })
+    (input: {
+      title: string
+      chapterTitle: string
+      pageTitle: string
+      sourcePageNumber: number | null
+      content: string
+    }) => {
+      const document = createDocument({
+        title: input.title,
+        content: input.content,
+        sourceType: 'manual',
+        chapterTitle: input.chapterTitle,
+        pageTitle: input.pageTitle,
+        sourcePageNumber: input.sourcePageNumber,
+      })
       setActiveDocument(document.id)
-      navigate({ route: 'reader', documentId: document.id })
+      navigate({ route: 'library-document', documentId: document.id })
     },
     [createDocument, navigate, setActiveDocument],
   )
@@ -210,7 +223,11 @@ function App() {
       }
 
       setActiveDocument(document.id)
-      navigate({ route: 'library-document', documentId: document.id })
+      navigate(
+        chapterId
+          ? { route: 'library-document', documentId: document.id, chapterId }
+          : { route: 'library-document', documentId: document.id },
+      )
     },
     [appendOcrPagesToDocument, navigate, setActiveDocument],
   )
@@ -512,7 +529,7 @@ function App() {
           <section className="library-tabs-panel" data-tour="library-tabs">
             <div className="segmented library-tabs" role="tablist" aria-label="Library sections">
               {([
-                ['library-import', 'Import'],
+                ['library-import', 'Manual'],
                 ['library-ocr', 'OCR'],
                 ['library-saved', 'Saved'],
               ] as const).map(([tabId, label]) => (
@@ -533,7 +550,7 @@ function App() {
           {route === 'library-import' && (
             <ImportPanel
               defaultWpm={settings.reader.defaultWpm}
-              onCreateDocument={(title, content, sourceType) => createAndOpenDocument(title, content, sourceType)}
+              onCreateDocument={createAndOpenDocument}
             />
           )}
 

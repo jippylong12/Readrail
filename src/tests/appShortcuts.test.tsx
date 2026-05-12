@@ -211,16 +211,16 @@ afterEach(() => {
 })
 
 describe('app section shortcuts', () => {
-  it('keeps Import, OCR, and Saved as tabs inside the Library route', async () => {
+  it('keeps Manual, OCR, and Saved as tabs inside the Library route', async () => {
     const user = userEvent.setup()
     render(<App />)
 
     expect(screen.getByRole('button', { name: 'Library' }).classList.contains('active')).toBe(true)
     expect(screen.getByRole('heading', { name: 'Reading documents' })).toBeTruthy()
 
-    await user.click(screen.getByRole('tab', { name: 'Import' }))
-    expect(screen.getByRole('heading', { name: 'Paste or text file' })).toBeTruthy()
-    expect(window.location.pathname).toBe('/library/import')
+    await user.click(screen.getByRole('tab', { name: 'Manual' }))
+    expect(screen.getByRole('heading', { name: 'Create document' })).toBeTruthy()
+    expect(window.location.pathname).toBe('/library/manual')
 
     await user.click(screen.getByRole('tab', { name: 'OCR' }))
     expect(screen.getByRole('heading', { name: 'Import pages from scans' })).toBeTruthy()
@@ -426,8 +426,8 @@ describe('app section shortcuts', () => {
     const user = userEvent.setup()
     render(<App />)
 
-    await user.click(screen.getByRole('tab', { name: 'Import' }))
-    const titleInput = screen.getByLabelText('Title')
+    await user.click(screen.getByRole('tab', { name: 'Manual' }))
+    const titleInput = screen.getByLabelText('Document title')
     await user.click(titleInput)
 
     const inputEvent = new KeyboardEvent('keydown', {
@@ -439,9 +439,9 @@ describe('app section shortcuts', () => {
     titleInput.dispatchEvent(inputEvent)
 
     expect(inputEvent.defaultPrevented).toBe(false)
-    expect(screen.getByRole('heading', { name: 'Paste or text file' })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Create document' })).toBeTruthy()
 
-    const textArea = screen.getByLabelText('Text')
+    const textArea = screen.getByLabelText('First page text')
     const textAreaEvent = new KeyboardEvent('keydown', {
       bubbles: true,
       cancelable: true,
@@ -451,7 +451,7 @@ describe('app section shortcuts', () => {
     textArea.dispatchEvent(textAreaEvent)
 
     expect(textAreaEvent.defaultPrevented).toBe(false)
-    expect(screen.getByRole('heading', { name: 'Paste or text file' })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Create document' })).toBeTruthy()
 
     dispatchSectionShortcut('g', 'control')
     const select = screen.getByLabelText('Default mode')

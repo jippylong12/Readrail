@@ -50,7 +50,7 @@ export function AppShell({ activeRoute, activeDocument, onRouteChange, onReplayT
         <div className="session-card">
           <span className="eyebrow">Current</span>
           <strong>{activeDocument?.title ?? 'No document selected'}</strong>
-          <span>{activeDocument ? `${activeDocument.wordCount.toLocaleString()} words` : 'Import text to begin'}</span>
+          <span>{activeDocument ? `${activeDocument.wordCount.toLocaleString()} words` : 'Create a document to begin'}</span>
         </div>
 
         <button className="secondary-button help-button" onClick={onReplayTour} type="button">

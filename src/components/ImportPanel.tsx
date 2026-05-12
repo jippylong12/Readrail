@@ -4,22 +4,33 @@ import { countWords, estimateReadingMinutes } from '../lib/text/wordCount'
 
 type ImportPanelProps = {
   defaultWpm: number
-  onCreateDocument: (title: string, content: string, sourceType: 'paste' | 'text_file') => void
+  onCreateDocument: (input: {
+    title: string
+    chapterTitle: string
+    pageTitle: string
+    sourcePageNumber: number | null
+    content: string
+  }) => void
 }
 
 const sampleText =
-  'Paste a chapter, article, or note here. Readrail cleans broken line endings, repairs hyphenation, estimates reading time, and keeps the original reading material local.'
+  'Paste the first page of this document here. Readrail cleans broken line endings, repairs hyphenation, estimates reading time, and keeps the original reading material local.'
 
 export function ImportPanel({ defaultWpm, onCreateDocument }: ImportPanelProps) {
   const [title, setTitle] = useState('')
+  const [chapterTitle, setChapterTitle] = useState('')
+  const [pageTitle, setPageTitle] = useState('')
+  const [sourcePageNumber, setSourcePageNumber] = useState('')
   const [content, setContent] = useState(sampleText)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const cleaned = cleanReadingText(content)
   const wordCount = countWords(cleaned)
+  const canSave = title.trim().length > 0 && wordCount > 0
 
   async function importFile(file: File): Promise<void> {
     const text = await file.text()
     setTitle(file.name.replace(/\.(txt|md)$/i, ''))
+    setPageTitle(file.name.replace(/\.(txt|md)$/i, ''))
     setContent(text)
   }
 
@@ -27,11 +38,11 @@ export function ImportPanel({ defaultWpm, onCreateDocument }: ImportPanelProps) 
     <section className="panel import-panel" data-tour="import">
       <div className="panel-header compact">
         <div>
-          <span className="eyebrow">Import</span>
-          <h2>Paste or text file</h2>
+          <span className="eyebrow">Manual</span>
+          <h2>Create document</h2>
         </div>
         <button className="secondary-button" onClick={() => fileInputRef.current?.click()} type="button">
-          Import file
+          Load text file
         </button>
       </div>
 
@@ -49,12 +60,38 @@ export function ImportPanel({ defaultWpm, onCreateDocument }: ImportPanelProps) 
       />
 
       <label className="field">
-        Title
-        <input onChange={(event) => setTitle(event.target.value)} placeholder="Chapter 4 notes" value={title} />
+        Document title
+        <input onChange={(event) => setTitle(event.target.value)} placeholder="The Great Book" value={title} />
       </label>
 
+      <div className="manual-document-grid">
+        <label className="field">
+          First chapter
+          <input
+            onChange={(event) => setChapterTitle(event.target.value)}
+            placeholder="Chapter 1"
+            value={chapterTitle}
+          />
+        </label>
+
+        <label className="field">
+          First page label
+          <input onChange={(event) => setPageTitle(event.target.value)} placeholder="Opening page" value={pageTitle} />
+        </label>
+
+        <label className="field">
+          Source page
+          <input
+            inputMode="numeric"
+            onChange={(event) => setSourcePageNumber(event.target.value)}
+            placeholder="1"
+            value={sourcePageNumber}
+          />
+        </label>
+      </div>
+
       <label className="field">
-        Text
+        First page text
         <textarea onChange={(event) => setContent(event.target.value)} value={content} />
       </label>
 
@@ -64,13 +101,31 @@ export function ImportPanel({ defaultWpm, onCreateDocument }: ImportPanelProps) 
         </span>
         <button
           className="primary-button"
-          disabled={wordCount === 0}
-          onClick={() => onCreateDocument(title, cleaned, title ? 'text_file' : 'paste')}
+          disabled={!canSave}
+          onClick={() =>
+            onCreateDocument({
+              title,
+              chapterTitle,
+              pageTitle,
+              sourcePageNumber: parseOptionalPageNumber(sourcePageNumber),
+              content: cleaned,
+            })
+          }
           type="button"
         >
-          Save document
+          Save manual document
         </button>
       </div>
     </section>
   )
+}
+
+function parseOptionalPageNumber(value: string): number | null {
+  const trimmed = value.trim()
+  if (!trimmed) {
+    return null
+  }
+
+  const parsed = Number(trimmed)
+  return Number.isFinite(parsed) ? Math.max(1, Math.round(parsed)) : null
 }

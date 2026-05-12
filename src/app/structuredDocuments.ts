@@ -29,14 +29,24 @@ export function defaultDocumentPageId(documentId: string): string {
   return `page:${documentId}:default`
 }
 
-export function createDefaultDocumentStructure(document: DocumentRecord): {
+export function createDefaultDocumentStructure(
+  document: DocumentRecord,
+  options: {
+    chapterTitle?: string
+    pageTitle?: string | null
+    sourcePageNumber?: number | null
+  } = {},
+): {
   chapter: DocumentChapterRecord
   page: DocumentPageRecord
 } {
-  const chapter = createDefaultChapter(document)
+  const chapter = createDefaultChapter(document, options.chapterTitle)
   return {
     chapter,
-    page: createDefaultPage(document, chapter.id),
+    page: createDefaultPage(document, chapter.id, {
+      pageTitle: options.pageTitle,
+      sourcePageNumber: options.sourcePageNumber,
+    }),
   }
 }
 
@@ -167,26 +177,33 @@ export function normalizeDocumentStructureVersion(document: LegacyDocumentRecord
   }
 }
 
-export function createDefaultChapter(document: DocumentRecord): DocumentChapterRecord {
+export function createDefaultChapter(document: DocumentRecord, title?: string): DocumentChapterRecord {
   return {
     id: defaultDocumentChapterId(document.id),
     documentId: document.id,
-    title: 'Main text',
+    title: title?.trim() || 'Main text',
     sortOrder: 0,
     createdAt: document.createdAt,
     updatedAt: document.updatedAt,
   }
 }
 
-export function createDefaultPage(document: DocumentRecord, chapterId: string): DocumentPageRecord {
+export function createDefaultPage(
+  document: DocumentRecord,
+  chapterId: string,
+  options: {
+    pageTitle?: string | null
+    sourcePageNumber?: number | null
+  } = {},
+): DocumentPageRecord {
   return {
     id: defaultDocumentPageId(document.id),
     documentId: document.id,
     chapterId,
     sortOrder: 0,
     pageNumber: 1,
-    sourcePageNumber: null,
-    title: null,
+    sourcePageNumber: options.sourcePageNumber ?? null,
+    title: options.pageTitle?.trim() || null,
     text: document.content,
     wordCount: document.wordCount,
     reviewStatus: 'reviewed',
