@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Readrail",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "identifier": "com.jippylong12.readrail",
   "build": {
     "frontendDist": "../dist",
