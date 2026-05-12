@@ -98,6 +98,7 @@ function App() {
   const resetTour = useAppStore((state) => state.resetTour)
   const resetAllTours = useAppStore((state) => state.resetAllTours)
   const resetAllData = useAppStore((state) => state.resetAllData)
+  const createAiUsageLineItem = useAppStore((state) => state.createAiUsageLineItem)
   const route = navigation.route
   const readerScopeSelection = useMemo(() => readerScopeSelectionFromRoute(navigation), [navigation])
   const routedDocument = navigation.documentId
@@ -300,7 +301,14 @@ function App() {
           normalizedSession.scope.scopeType === 'document'
             ? quizDocument.title
             : `${quizDocument.title} - ${normalizedSession.scope.scopeLabel}`
-        const quiz = await generateQuizFromReading(apiKey, quizTitle, quizText, wordsRead)
+        const quiz = await generateQuizFromReading(apiKey, quizTitle, quizText, wordsRead, {
+          usageAttribution: {
+            documentId: quizDocument.id,
+          },
+          recordUsage: (lineItem) => {
+            createAiUsageLineItem(lineItem)
+          },
+        })
         setPendingQuiz({
           document: quizDocument,
           error: null,
@@ -318,7 +326,7 @@ function App() {
         })
       }
     },
-    [displayedDocument, loadGeminiApiKey, navigate],
+    [createAiUsageLineItem, displayedDocument, loadGeminiApiKey, navigate],
   )
 
   function cancelPendingQuiz(): void {

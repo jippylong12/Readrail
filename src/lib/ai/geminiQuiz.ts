@@ -1,4 +1,9 @@
 import { GoogleGenAI, ThinkingLevel } from '@google/genai'
+import {
+  captureGeminiUsage,
+  type GeminiUsageAttribution,
+  type GeminiUsageRecorder,
+} from './geminiUsage'
 
 export type GeminiQuizOption = {
   id: string
@@ -30,6 +35,14 @@ type NormalizedQuestion = {
 type RawGeminiQuiz = {
   title?: unknown
   questions?: unknown
+}
+
+type GeminiQuizClient = Pick<GoogleGenAI['models'], 'generateContent'>
+
+export type GenerateQuizFromReadingOptions = {
+  recordUsage?: GeminiUsageRecorder
+  usageAttribution?: GeminiUsageAttribution
+  client?: GoogleGenAI | { models: GeminiQuizClient }
 }
 
 export const GEMINI_QUIZ_MODEL = 'gemini-3-flash-preview'
@@ -133,30 +146,42 @@ export function getQuizQuestionCount(wordCount: number): number {
   return 5
 }
 
-export async function generateQuizFromReading(apiKey: string, title: string, content: string, wordCount: number): Promise<GeminiQuiz> {
-  const ai = new GoogleGenAI({ apiKey })
+export async function generateQuizFromReading(
+  apiKey: string,
+  title: string,
+  content: string,
+  wordCount: number,
+  options: GenerateQuizFromReadingOptions = {},
+): Promise<GeminiQuiz> {
+  const ai = options.client ?? new GoogleGenAI({ apiKey })
   const questionCount = getQuizQuestionCount(wordCount)
 
-  const response = await ai.models.generateContent({
+  return captureGeminiUsage({
     model: GEMINI_QUIZ_MODEL,
-    contents: [
-      {
-        role: 'user',
-        parts: [
+    stage: 'generated_quiz',
+    attribution: options.usageAttribution,
+    recordUsage: options.recordUsage,
+    generateContent: () =>
+      ai.models.generateContent({
+        model: GEMINI_QUIZ_MODEL,
+        contents: [
           {
-            text: `${QUIZ_PROMPT}\n\nGenerate exactly ${questionCount} questions.\n\nTitle: ${title}\n\nReading:\n${content.slice(0, 12000)}`,
+            role: 'user',
+            parts: [
+              {
+                text: `${QUIZ_PROMPT}\n\nGenerate exactly ${questionCount} questions.\n\nTitle: ${title}\n\nReading:\n${content.slice(0, 12000)}`,
+              },
+            ],
           },
         ],
-      },
-    ],
-    config: {
-      responseMimeType: 'application/json',
-      responseJsonSchema: buildQuizResponseJsonSchema(questionCount),
-      thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-    },
+        config: {
+          responseMimeType: 'application/json',
+          responseJsonSchema: buildQuizResponseJsonSchema(questionCount),
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+        },
+      }),
+    consumeResponse: (response) => normalizeGeminiQuiz(JSON.parse(response.text ?? '{}') as RawGeminiQuiz, title, questionCount),
   })
-
-  return normalizeGeminiQuiz(JSON.parse(response.text ?? '{}') as RawGeminiQuiz, title, questionCount)
 }
 
 export function normalizeGeminiQuiz(raw: RawGeminiQuiz, fallbackTitle: string, expectedQuestionCount?: number): GeminiQuiz {

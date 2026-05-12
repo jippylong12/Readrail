@@ -439,6 +439,17 @@ function normalizeTokenBreakdown(value: Partial<AiUsageTokenBreakdown> | null): 
     imageInputTokens: normalizeNullableNumber(value?.imageInputTokens),
     audioInputTokens: normalizeNullableNumber(value?.audioInputTokens),
     videoInputTokens: normalizeNullableNumber(value?.videoInputTokens),
+    documentInputTokens: normalizeNullableNumber(value?.documentInputTokens),
+    textOutputTokens: normalizeNullableNumber(value?.textOutputTokens),
+    imageOutputTokens: normalizeNullableNumber(value?.imageOutputTokens),
+    audioOutputTokens: normalizeNullableNumber(value?.audioOutputTokens),
+    videoOutputTokens: normalizeNullableNumber(value?.videoOutputTokens),
+    documentOutputTokens: normalizeNullableNumber(value?.documentOutputTokens),
+    cachedTextInputTokens: normalizeNullableNumber(value?.cachedTextInputTokens),
+    cachedImageInputTokens: normalizeNullableNumber(value?.cachedImageInputTokens),
+    cachedAudioInputTokens: normalizeNullableNumber(value?.cachedAudioInputTokens),
+    cachedVideoInputTokens: normalizeNullableNumber(value?.cachedVideoInputTokens),
+    cachedDocumentInputTokens: normalizeNullableNumber(value?.cachedDocumentInputTokens),
   }
 }
 

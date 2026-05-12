@@ -273,6 +273,17 @@ export type AiUsageTokenBreakdown = {
   imageInputTokens: number | null
   audioInputTokens: number | null
   videoInputTokens: number | null
+  documentInputTokens: number | null
+  textOutputTokens: number | null
+  imageOutputTokens: number | null
+  audioOutputTokens: number | null
+  videoOutputTokens: number | null
+  documentOutputTokens: number | null
+  cachedTextInputTokens: number | null
+  cachedImageInputTokens: number | null
+  cachedAudioInputTokens: number | null
+  cachedVideoInputTokens: number | null
+  cachedDocumentInputTokens: number | null
 }
 
 export type AiPricingSnapshot = {

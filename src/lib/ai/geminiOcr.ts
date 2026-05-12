@@ -1,5 +1,10 @@
 import { GoogleGenAI, ThinkingLevel } from '@google/genai'
 import type { OcrUncertainSpan } from '../../types/domain'
+import {
+  captureGeminiUsage,
+  type GeminiUsageAttribution,
+  type GeminiUsageRecorder,
+} from './geminiUsage'
 
 export const GEMINI_OCR_MODEL = 'gemini-3.1-flash-lite'
 export const GEMINI_OCR_RESPONSE_SCHEMA = {
@@ -98,8 +103,13 @@ export type OcrPipelineProgress = {
   message: string
 }
 
+type OcrGenerationClient = Pick<GoogleGenAI['models'], 'generateContent'>
+
 export type RunGeminiOcrOptions = {
   onProgress?: (progress: OcrPipelineProgress) => void
+  recordUsage?: GeminiUsageRecorder
+  usageAttribution?: GeminiUsageAttribution
+  client?: GoogleGenAI | { models: OcrGenerationClient }
 }
 
 export async function runGeminiOcrFromFiles(
@@ -107,7 +117,7 @@ export async function runGeminiOcrFromFiles(
   files: File[],
   options: RunGeminiOcrOptions = {},
 ): Promise<OcrResult> {
-  const ai = new GoogleGenAI({ apiKey })
+  const ai = options.client ?? new GoogleGenAI({ apiKey })
   const fileParts = await Promise.all(files.map(fileToInlinePart))
 
   options.onProgress?.({
@@ -115,26 +125,31 @@ export async function runGeminiOcrFromFiles(
     status: 'running',
     message: 'Reading scans with Gemini OCR.',
   })
-  const response = await ai.models.generateContent({
+  const rawResult = await captureGeminiUsage({
     model: GEMINI_OCR_MODEL,
-    contents: [
-      {
-        role: 'user',
-        parts: [
+    stage: 'ocr_extraction',
+    attribution: options.usageAttribution,
+    recordUsage: options.recordUsage,
+    generateContent: () =>
+      ai.models.generateContent({
+        model: GEMINI_OCR_MODEL,
+        contents: [
           {
-            text:
-              'Perform faithful OCR only. Preserve headings, paragraph breaks, lists, page breaks, and reading order. ' +
-              'Mark uncertain words with [?word]. Return strict JSON with titleGuess, pages, and warnings. Do not summarize or add missing content.',
+            role: 'user',
+            parts: [
+              {
+                text:
+                  'Perform faithful OCR only. Preserve headings, paragraph breaks, lists, page breaks, and reading order. ' +
+                  'Mark uncertain words with [?word]. Return strict JSON with titleGuess, pages, and warnings. Do not summarize or add missing content.',
+              },
+              ...fileParts,
+            ],
           },
-          ...fileParts,
         ],
-      },
-    ],
-    config: GEMINI_OCR_GENERATE_CONFIG,
+        config: GEMINI_OCR_GENERATE_CONFIG,
+      }),
+    consumeResponse: (response) => normalizeOcrResult(JSON.parse(response.text ?? '{}')),
   })
-
-  const text = response.text ?? '{}'
-  const rawResult = normalizeOcrResult(JSON.parse(text))
   options.onProgress?.({
     stage: 'ocr',
     status: 'done',
@@ -142,8 +157,6 @@ export async function runGeminiOcrFromFiles(
   })
   return runOcrPostProcessing(ai, rawResult, options)
 }
-
-type OcrGenerationClient = Pick<GoogleGenAI['models'], 'generateContent'>
 
 export async function runOcrPostProcessing(
   client: GoogleGenAI | { models: OcrGenerationClient },
@@ -161,15 +174,19 @@ export async function runOcrPostProcessing(
     })
     cleaned = mergeOcrResults(
       locallyCleaned,
-      normalizeOcrResult(
-        JSON.parse(
-          (await client.models.generateContent({
+      await captureGeminiUsage({
+        model: GEMINI_OCR_MODEL,
+        stage: 'ocr_cleaner',
+        attribution: options.usageAttribution,
+        recordUsage: options.recordUsage,
+        generateContent: () =>
+          client.models.generateContent({
             model: GEMINI_OCR_MODEL,
             contents: buildCleanupPrompt(locallyCleaned),
             config: GEMINI_OCR_CLEANUP_CONFIG,
-          })).text ?? '{}',
-        ),
-      ),
+          }),
+        consumeResponse: (response) => normalizeOcrResult(JSON.parse(response.text ?? '{}')),
+      }),
     )
     options.onProgress?.({
       stage: 'cleaner',
@@ -199,15 +216,19 @@ export async function runOcrPostProcessing(
     })
     const formatted = mergeOcrResults(
       cleaned,
-      normalizeOcrResult(
-        JSON.parse(
-          (await client.models.generateContent({
+      await captureGeminiUsage({
+        model: GEMINI_OCR_MODEL,
+        stage: 'ocr_formatter',
+        attribution: options.usageAttribution,
+        recordUsage: options.recordUsage,
+        generateContent: () =>
+          client.models.generateContent({
             model: GEMINI_OCR_MODEL,
             contents: buildFormatterPrompt(cleaned),
             config: GEMINI_OCR_FORMAT_CONFIG,
-          })).text ?? '{}',
-        ),
-      ),
+          }),
+        consumeResponse: (response) => normalizeOcrResult(JSON.parse(response.text ?? '{}')),
+      }),
     )
     options.onProgress?.({
       stage: 'formatter',

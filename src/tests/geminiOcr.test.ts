@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { ThinkingLevel } from '@google/genai'
 import { describe, expect, it, vi } from 'vitest'
 import {
@@ -8,6 +9,7 @@ import {
   GEMINI_OCR_GENERATE_CONFIG,
   GEMINI_OCR_MODEL,
   normalizeOcrResult,
+  runGeminiOcrFromFiles,
   runOcrPostProcessing,
 } from '../lib/ai/geminiOcr'
 
@@ -168,12 +170,158 @@ describe('Gemini OCR normalization', () => {
     )
   })
 
+  it('records OCR extraction, cleaner, and formatter usage with Gemini token metadata', async () => {
+    const generateContent = vi
+      .fn()
+      .mockResolvedValueOnce(buildGeminiResponse('ocr-response', 100, 20, {
+        promptTokensDetails: [
+          { modality: 'TEXT', tokenCount: 35 },
+          { modality: 'IMAGE', tokenCount: 65 },
+        ],
+      }))
+      .mockResolvedValueOnce(buildGeminiResponse('cleaner-response', 70, 12))
+      .mockResolvedValueOnce(buildGeminiResponse('formatter-response', 60, 10))
+    const recordUsage = vi.fn()
+
+    await runGeminiOcrFromFiles('api-key', [new File(['scan'], 'scan.png', { type: 'image/png' })], {
+      client: { models: { generateContent } },
+      usageAttribution: {
+        documentId: 'doc-1',
+        ocrJobId: 'job-1',
+        ocrItemId: 'item-1',
+        sourceFileName: 'scan.png',
+      },
+      recordUsage,
+    })
+
+    expect(recordUsage).toHaveBeenCalledTimes(3)
+    expect(recordUsage.mock.calls.map((call) => call[0].stage)).toEqual([
+      'ocr_extraction',
+      'ocr_cleaner',
+      'ocr_formatter',
+    ])
+    expect(recordUsage.mock.calls[0][0]).toMatchObject({
+      documentId: 'doc-1',
+      ocrJobId: 'job-1',
+      ocrItemId: 'item-1',
+      sourceFileName: 'scan.png',
+      provider: 'google',
+      model: GEMINI_OCR_MODEL,
+      status: 'succeeded',
+      rawProviderMetadata: {
+        responseId: 'ocr-response',
+        usageMetadata: {
+          promptTokenCount: 100,
+          candidatesTokenCount: 20,
+          thoughtsTokenCount: 5,
+          totalTokenCount: 125,
+          cachedContentTokenCount: 8,
+        },
+      },
+      tokenBreakdown: {
+        inputTokens: 100,
+        outputTokens: 20,
+        thinkingTokens: 5,
+        totalTokens: 125,
+        cachedInputTokens: 8,
+        textInputTokens: 35,
+        imageInputTokens: 65,
+      },
+      pricingSnapshot: {
+        modelId: GEMINI_OCR_MODEL,
+        confidence: 'estimated',
+      },
+    })
+  })
+
+  it('records failed OCR extraction usage when the provider rejects', async () => {
+    const generateContent = vi.fn().mockRejectedValueOnce(new Error('Gemini OCR unavailable'))
+    const recordUsage = vi.fn()
+
+    await expect(
+      runGeminiOcrFromFiles('api-key', [new File(['scan'], 'scan.png', { type: 'image/png' })], {
+        client: { models: { generateContent } },
+        recordUsage,
+      }),
+    ).rejects.toThrow('Gemini OCR unavailable')
+
+    expect(recordUsage).toHaveBeenCalledTimes(1)
+    expect(recordUsage.mock.calls[0][0]).toMatchObject({
+      stage: 'ocr_extraction',
+      status: 'failed',
+      failureMessage: 'Gemini OCR unavailable',
+      rawProviderMetadata: null,
+      tokenBreakdown: {
+        inputTokens: null,
+        outputTokens: null,
+        thinkingTokens: null,
+        totalTokens: null,
+      },
+      pricingSnapshot: {
+        confidence: 'unknown',
+      },
+    })
+  })
+
+  it('records unknown-cost OCR usage when Gemini omits usage metadata', async () => {
+    const generateContent = vi
+      .fn()
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          pages: [{ pageNumber: 1, text: 'Clean text', uncertainSpans: [] }],
+          warnings: [],
+        }),
+        responseId: 'cleaner-no-usage',
+      })
+      .mockResolvedValueOnce(buildGeminiResponse('formatter-response', 60, 10))
+    const recordUsage = vi.fn()
+
+    await runOcrPostProcessing(
+      { models: { generateContent } },
+      {
+        titleGuess: null,
+        pages: [
+          {
+            pageNumber: 1,
+            sourcePageNumber: null,
+            text: 'Clean text',
+            uncertainSpans: [],
+            confidence: null,
+            notes: null,
+            sourceFileName: null,
+          },
+        ],
+        warnings: [],
+      },
+      { recordUsage },
+    )
+
+    expect(recordUsage.mock.calls[0][0]).toMatchObject({
+      stage: 'ocr_cleaner',
+      status: 'succeeded',
+      rawProviderMetadata: {
+        responseId: 'cleaner-no-usage',
+        usageMetadata: null,
+      },
+      tokenBreakdown: {
+        inputTokens: null,
+        outputTokens: null,
+        thinkingTokens: null,
+        totalTokens: null,
+      },
+      pricingSnapshot: {
+        confidence: 'unknown',
+      },
+    })
+  })
+
   it('falls back to local cleanup when cleaner and formatter passes fail', async () => {
     const generateContent = vi
       .fn()
       .mockRejectedValueOnce(new Error('cleaner unavailable'))
       .mockRejectedValueOnce(new Error('formatter unavailable'))
     const progress = vi.fn()
+    const recordUsage = vi.fn()
 
     const result = await runOcrPostProcessing(
       { models: { generateContent } },
@@ -192,7 +340,7 @@ describe('Gemini OCR normalization', () => {
         ],
         warnings: [],
       },
-      { onProgress: progress },
+      { onProgress: progress, recordUsage },
     )
 
     expect(generateContent).toHaveBeenCalledTimes(2)
@@ -234,5 +382,36 @@ describe('Gemini OCR normalization', () => {
     expect(result.pages[0].sourcePageNumber).toBe(156)
     expect(result.warnings.join(' ')).toContain('Cleaner pass failed')
     expect(result.warnings.join(' ')).toContain('Formatter pass failed')
+    expect(recordUsage).toHaveBeenCalledTimes(2)
+    expect(recordUsage.mock.calls.map((call) => [call[0].stage, call[0].status, call[0].failureMessage])).toEqual([
+      ['ocr_cleaner', 'failed', 'cleaner unavailable'],
+      ['ocr_formatter', 'failed', 'formatter unavailable'],
+    ])
   })
 })
+
+function buildGeminiResponse(
+  responseId: string,
+  promptTokenCount: number,
+  candidatesTokenCount: number,
+  metadataOverrides: Record<string, unknown> = {},
+) {
+  return {
+    text: JSON.stringify({
+      pages: [{ pageNumber: 1, text: 'Clean text', uncertainSpans: [] }],
+      warnings: [],
+    }),
+    responseId,
+    modelVersion: GEMINI_OCR_MODEL,
+    createTime: '2026-05-12T10:00:00.000Z',
+    usageMetadata: {
+      promptTokenCount,
+      candidatesTokenCount,
+      thoughtsTokenCount: 5,
+      totalTokenCount: promptTokenCount + candidatesTokenCount + 5,
+      cachedContentTokenCount: 8,
+      candidatesTokensDetails: [{ modality: 'TEXT', tokenCount: candidatesTokenCount }],
+      ...metadataOverrides,
+    },
+  }
+}

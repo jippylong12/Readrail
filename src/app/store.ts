@@ -271,6 +271,17 @@ export const defaultAiUsageTokenBreakdown: AiUsageTokenBreakdown = {
   imageInputTokens: null,
   audioInputTokens: null,
   videoInputTokens: null,
+  documentInputTokens: null,
+  textOutputTokens: null,
+  imageOutputTokens: null,
+  audioOutputTokens: null,
+  videoOutputTokens: null,
+  documentOutputTokens: null,
+  cachedTextInputTokens: null,
+  cachedImageInputTokens: null,
+  cachedAudioInputTokens: null,
+  cachedVideoInputTokens: null,
+  cachedDocumentInputTokens: null,
 }
 
 function buildAiUsageLineItem(input: CreateAiUsageLineItemInput): AiUsageLineItem {
@@ -601,6 +612,15 @@ async function processOcrJobItem(
   try {
     const preparedFiles = await prepareFilesForOcr([activeFile], shouldStripImageMetadata)
     const result = await runGeminiOcrFromFiles(apiKey, preparedFiles.files, {
+      usageAttribution: {
+        documentId: snapshot.job.documentId,
+        ocrJobId: jobId,
+        ocrItemId: itemId,
+        sourceFileName: activeItem.sourceFileName,
+      },
+      recordUsage: (lineItem) => {
+        useAppStore.getState().createAiUsageLineItem(lineItem)
+      },
       onProgress: (progress) =>
         setOcrRuntimeState(jobId, {
           progressMessage: `${itemProgressPrefix}: ${progress.message}`,
