@@ -39,6 +39,17 @@ export type BuiltReaderScope = ReaderSessionScopeMetadata & {
   selectedEndPageNumber: number | null
 }
 
+export type ReaderScopeDescriptor = ReaderSessionScopeMetadata & {
+  selectedPages: DocumentPageRecord[]
+  wordCount: number
+  pageCount: number
+  startWordOffset: number
+  endWordOffset: number
+  selectedChapterId: string | null
+  selectedStartPageNumber: number | null
+  selectedEndPageNumber: number | null
+}
+
 type OrderedPageWithOffset = {
   page: DocumentPageRecord
   startWordOffset: number
@@ -51,12 +62,30 @@ export function buildReaderScope(
   pages: DocumentPageRecord[],
   selection: ReaderScopeSelection,
 ): BuiltReaderScope {
+  const descriptor = buildReaderScopeDescriptor(document, chapters, pages, selection)
+  const documentChapters = getOrderedDocumentChapters(document.id, chapters)
+  const documentPages = getOrderedDocumentPages(document.id, chapters, pages)
+  const content =
+    descriptor.scopeType === 'document'
+      ? renderStructuredContent(document.id, documentChapters, documentPages) || document.content
+      : renderPagesContent(descriptor.selectedPages)
+
+  return {
+    ...descriptor,
+    content,
+  }
+}
+
+export function buildReaderScopeDescriptor(
+  document: DocumentRecord,
+  chapters: DocumentChapterRecord[],
+  pages: DocumentPageRecord[],
+  selection: ReaderScopeSelection,
+): ReaderScopeDescriptor {
   const documentChapters = getOrderedDocumentChapters(document.id, chapters)
   const documentPages = getOrderedDocumentPages(document.id, chapters, pages)
   const pagesWithOffsets = buildPageOffsets(documentPages)
-  const fallbackContent = renderStructuredContent(document.id, documentChapters, documentPages) || document.content
   const documentScope = buildScopeFromPages({
-    content: fallbackContent,
     document,
     label: 'Full document',
     pagesWithOffsets,
@@ -81,7 +110,6 @@ export function buildReaderScope(
       ...documentScope,
       chapterId: selectedChapter.id,
       chapterTitle: selectedChapter.title,
-      content: '',
       endWordOffset: documentScope.startWordOffset,
       pageCount: 0,
       pageIds: [],
@@ -89,6 +117,9 @@ export function buildReaderScope(
       scopeLabel: selectedChapter.title,
       scopeType: 'chapter',
       selectedChapterId: selectedChapter.id,
+      selectedEndPageNumber: null,
+      selectedPages: [],
+      selectedStartPageNumber: null,
       sourcePageNumbers: [],
       wordCount: 0,
     }
@@ -138,24 +169,21 @@ export function normalizeReaderScopeSelection(
 }
 
 function buildScopeFromPages({
-  content,
   document,
   label,
   pagesWithOffsets,
   scopeType,
   selectedChapter,
 }: {
-  content?: string
   document: DocumentRecord
   label: string
   pagesWithOffsets: OrderedPageWithOffset[]
   scopeType: ReadingScopeType
   selectedChapter: DocumentChapterRecord | null
-}): BuiltReaderScope {
+}): ReaderScopeDescriptor {
   const selectedPages = pagesWithOffsets.map(({ page }) => page)
   const startWordOffset = pagesWithOffsets[0]?.startWordOffset ?? 0
   const endWordOffset = pagesWithOffsets[pagesWithOffsets.length - 1]?.endWordOffset ?? document.wordCount
-  const scopeContent = content ?? selectedPages.map((page) => page.text.trim()).filter(Boolean).join('\n\n\f\n\n')
   const selectedWordCount = selectedPages.reduce((total, page) => total + page.wordCount, 0)
 
   return {
@@ -166,7 +194,7 @@ function buildScopeFromPages({
     pageIds: selectedPages.map((page) => page.id),
     pageNumbers: selectedPages.map((page) => page.pageNumber),
     sourcePageNumbers: selectedPages.map((page) => page.sourcePageNumber),
-    content: scopeContent,
+    selectedPages,
     wordCount: selectedPages.length > 0 ? selectedWordCount : document.wordCount,
     pageCount: selectedPages.length,
     startWordOffset,
@@ -223,6 +251,10 @@ function findClosestPageIndex(pages: DocumentPageRecord[], pageNumber: number): 
   }
 
   return pages.length - 1
+}
+
+function renderPagesContent(pages: DocumentPageRecord[]): string {
+  return pages.map((page) => page.text.trim()).filter(Boolean).join('\n\n\f\n\n')
 }
 
 function formatPageRangeLabel(chapterTitle: string, pages: DocumentPageRecord[]): string {
