@@ -4,7 +4,7 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ReaderRail } from '../components/ReaderRail'
-import type { DocumentChapterRecord, DocumentPageRecord, DocumentRecord, ReaderMode } from '../types/domain'
+import type { DocumentChapterRecord, DocumentPageRecord, DocumentRecord, PageLayout, ReaderMode } from '../types/domain'
 import type { ReaderScopeSelection } from '../app/readerScopes'
 
 const documentRecord: DocumentRecord = {
@@ -63,7 +63,7 @@ function buildPage(
   }
 }
 
-function renderReader(defaultMode: ReaderMode = 'rail') {
+function renderReader(defaultMode: ReaderMode = 'rail', defaultPageLayout: PageLayout = 1) {
   const chapter = buildChapter(documentRecord)
   return render(
     <ReaderRail
@@ -71,12 +71,54 @@ function renderReader(defaultMode: ReaderMode = 'rail') {
       chapters={[chapter]}
       defaultChunkSize={4}
       defaultMode={defaultMode}
-      defaultPageLayout={1}
+      defaultPageLayout={defaultPageLayout}
       defaultWpm={240}
       document={documentRecord}
       fontSize={20}
       lineHeight={1.65}
       pages={[buildPage(documentRecord, chapter.id)]}
+      scopeSelection={{ scopeType: 'document' }}
+      segmentStartWordIndex={0}
+      onBackToLibrary={vi.fn()}
+      onSegmentReset={vi.fn()}
+      onSegmentStart={vi.fn()}
+      onScopeChange={vi.fn()}
+      onStartTest={vi.fn()}
+    />,
+  )
+}
+
+function buildLongDocument(wordCount = 10): DocumentRecord {
+  const content = Array.from({ length: wordCount }, (_, index) => `viewportfitword${index}`.repeat(10)).join(' ')
+  return {
+    ...documentRecord,
+    id: 'long-reader-document',
+    content,
+    wordCount,
+  }
+}
+
+function renderLongReader({
+  defaultPageLayout = 2,
+  wordCount = 10,
+}: {
+  defaultPageLayout?: PageLayout
+  wordCount?: number
+} = {}) {
+  const longDocument = buildLongDocument(wordCount)
+  const chapter = buildChapter(longDocument)
+  return render(
+    <ReaderRail
+      baselineResult={null}
+      chapters={[chapter]}
+      defaultChunkSize={1}
+      defaultMode="rail"
+      defaultPageLayout={defaultPageLayout}
+      defaultWpm={900}
+      document={longDocument}
+      fontSize={20}
+      lineHeight={1.65}
+      pages={[buildPage(longDocument, chapter.id)]}
       scopeSelection={{ scopeType: 'document' }}
       segmentStartWordIndex={0}
       onBackToLibrary={vi.fn()}
@@ -183,6 +225,49 @@ describe('ReaderRail focus mode', () => {
 
     expect(container.querySelector('.reading-surface.rsvp')).toBeTruthy()
     expect(screen.getByText('Focus mode should keep')).toBeTruthy()
+  })
+
+  it('keeps compact focus layout hooks and reader controls available', async () => {
+    const user = userEvent.setup()
+    const { container } = renderLongReader({ defaultPageLayout: 2 })
+
+    await user.click(screen.getByRole('button', { name: 'Focus' }))
+
+    const readerPanel = container.querySelector('.reader-panel')
+    const paneLayout = container.querySelector('.page-panes')
+
+    expect(readerPanel?.getAttribute('data-focus-mode')).toBe('true')
+    expect(readerPanel?.classList.contains('reader-panel-focus')).toBe(true)
+    expect(paneLayout?.getAttribute('data-effective-pane-count')).toBe('2')
+    expect(screen.getByRole('button', { name: 'Play' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Exit Focus' })).toBeTruthy()
+  })
+})
+
+describe('ReaderRail virtual panes', () => {
+  it('renders selected pane counts as viewport panes instead of all source text columns', () => {
+    const { container } = renderLongReader({ defaultPageLayout: 3, wordCount: 8 })
+    const paneLayout = container.querySelector('.page-panes')
+
+    expect(paneLayout?.getAttribute('data-effective-pane-count')).toBe('3')
+    expect(container.querySelectorAll('.page-pane')).toHaveLength(3)
+    expect(screen.getByText(/viewportfitword0/)).toBeTruthy()
+    expect(screen.queryByText(/viewportfitword7/)).toBeNull()
+  })
+
+  it('advances the visible pane window as playback moves the active chunk', async () => {
+    const user = userEvent.setup()
+    const { container } = renderLongReader({ defaultPageLayout: 2, wordCount: 8 })
+
+    expect(container.querySelector('.page-panes')?.getAttribute('data-visible-pane-start')).toBe('0')
+
+    await user.click(screen.getByRole('button', { name: 'Play' }))
+
+    await waitFor(() => {
+      expect(container.querySelector('.page-panes')?.getAttribute('data-visible-pane-start')).toBe('4')
+    }, { timeout: 1800 })
+    expect(screen.queryByText(/viewportfitword0/)).toBeNull()
+    expect(screen.getByText(/viewportfitword4/)).toBeTruthy()
   })
 })
 

@@ -10,7 +10,7 @@ import type {
 } from '../types/domain'
 import { clampWpm, formatDuration } from '../lib/reading/pacing'
 import { cleanReadingText } from '../lib/text/cleanup'
-import { splitIntoPages, getActivePage } from '../lib/text/pages'
+import { buildVirtualReaderPaneLayout, type ReaderPaneMetrics, type VirtualReaderPane } from '../lib/text/pages'
 import { countWords, estimatePages } from '../lib/text/wordCount'
 import { ReaderControls } from './ReaderControls'
 import {
@@ -23,6 +23,7 @@ import {
 import { getOrderedChapterPages, getOrderedDocumentChapters } from '../app/structuredDocuments'
 
 export const COMPREHENSION_TEST_THRESHOLD_WORDS = 1000
+const DEFAULT_READER_SURFACE_SIZE = { width: 960, height: 420 }
 
 export type ReaderSegmentInput = {
   mode: ReaderMode
@@ -98,6 +99,8 @@ export function ReaderRail({
   const [draftText, setDraftText] = useState(document?.content ?? '')
   const [editError, setEditError] = useState<string | null>(null)
   const startedRef = useRef<number | null>(null)
+  const readingSurfaceRef = useRef<HTMLDivElement | null>(null)
+  const [readerSurfaceSize, setReaderSurfaceSize] = useState(DEFAULT_READER_SURFACE_SIZE)
 
   const activeScope = useMemo(
     () => (document ? buildReaderScope(document, chapters, pages, scopeSelection) : null),
@@ -116,6 +119,53 @@ export function ReaderRail({
     [draftText],
   )
   const draftWordCount = countWords(cleanedDraftText)
+  const paneMetrics = useMemo<ReaderPaneMetrics>(
+    () => ({
+      containerHeight: readerSurfaceSize.height,
+      containerWidth: readerSurfaceSize.width,
+      fontSize,
+      lineHeight,
+      requestedPaneCount: pageLayout,
+    }),
+    [fontSize, lineHeight, pageLayout, readerSurfaceSize.height, readerSurfaceSize.width],
+  )
+
+  useEffect(() => {
+    const element = readingSurfaceRef.current
+    if (!element) {
+      return undefined
+    }
+
+    const measuredElement = element
+
+    function measureSurface(): void {
+      const rect = measuredElement.getBoundingClientRect()
+      if (rect.width <= 0 || rect.height <= 0) {
+        return
+      }
+
+      setReaderSurfaceSize((size) => {
+        const width = Math.round(rect.width)
+        const height = Math.round(rect.height)
+        if (size.width === width && size.height === height) {
+          return size
+        }
+
+        return { width, height }
+      })
+    }
+
+    measureSurface()
+
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(measureSurface)
+      observer.observe(element)
+      return () => observer.disconnect()
+    }
+
+    window.addEventListener('resize', measureSurface)
+    return () => window.removeEventListener('resize', measureSurface)
+  }, [isFocusMode, mode])
 
   useEffect(() => {
     if (!isRunning || !activeChunk) {
@@ -426,24 +476,16 @@ export function ReaderRail({
         <span style={{ width: `${progress}%` }} />
       </div>
 
-      <div className={`reading-surface ${mode}`} data-tour="reader-surface" style={{ fontSize, lineHeight }}>
+      <div
+        className={`reading-surface ${mode}`}
+        data-tour="reader-surface"
+        ref={readingSurfaceRef}
+        style={{ fontSize, lineHeight }}
+      >
         {mode === 'rsvp' ? (
           <div className="rsvp-frame">{activeChunk?.text ?? 'Done'}</div>
-        ) : pageLayout === 1 ? (
-          chunks.map((chunk, index) => (
-            <span key={chunk.id}>
-              {chunk.startsNewParagraph && <span className="para-break" aria-hidden="true" />}
-              <span className={index === activeIndex ? 'active-chunk' : ''}>
-                {chunk.text}{' '}
-              </span>
-            </span>
-          ))
         ) : (
-          <MultiPageLayout
-            activeIndex={activeIndex}
-            chunks={chunks}
-            pageLayout={pageLayout}
-          />
+          <ReaderPaneLayout activeIndex={activeIndex} chunks={chunks} metrics={paneMetrics} />
         )}
       </div>
     </section>
@@ -626,47 +668,56 @@ type Chunk = { id: string; text: string; startWord: number; endWord: number; sta
 type MultiPageLayoutProps = {
   chunks: Chunk[]
   activeIndex: number
-  pageLayout: PageLayout
+  metrics: ReaderPaneMetrics
 }
 
-function MultiPageLayout({ chunks, activeIndex, pageLayout }: MultiPageLayoutProps) {
-  const activeChunkRef = useRef<HTMLSpanElement | null>(null)
-  const pages = useMemo(() => splitIntoPages(chunks, pageLayout), [chunks, pageLayout])
-  const activePage = getActivePage(activeIndex, chunks.length, pageLayout)
-
-  useEffect(() => {
-    activeChunkRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-  }, [activeIndex])
+function ReaderPaneLayout({ chunks, activeIndex, metrics }: MultiPageLayoutProps) {
+  const paneLayout = useMemo(
+    () => buildVirtualReaderPaneLayout(chunks, activeIndex, metrics),
+    [activeIndex, chunks, metrics],
+  )
 
   return (
     <div
       className="page-panes"
-      data-page-count={pages.length}
-      style={{ gridTemplateColumns: `repeat(${pages.length}, minmax(0, 1fr))` }}
+      data-effective-pane-count={paneLayout.effectivePaneCount}
+      data-page-count={paneLayout.visiblePanes.length}
+      data-visible-pane-start={paneLayout.visibleStartPaneIndex}
+      style={{ gridTemplateColumns: `repeat(${paneLayout.visiblePanes.length || 1}, minmax(0, 1fr))` }}
     >
-      {pages.map((pageChunks, pageIndex) => {
-        const isActivePage = pageIndex === activePage
+      {paneLayout.visiblePanes.map((pane, visibleIndex) => (
+        <ReaderPane
+          activeIndex={activeIndex}
+          chunks={chunks}
+          isActivePane={paneLayout.visibleStartPaneIndex + visibleIndex === paneLayout.activePaneIndex}
+          key={pane.id}
+          pane={pane}
+        />
+      ))}
+    </div>
+  )
+}
+
+type ReaderPaneProps = {
+  activeIndex: number
+  chunks: Chunk[]
+  isActivePane: boolean
+  pane: VirtualReaderPane<Chunk>
+}
+
+function ReaderPane({ activeIndex, chunks, isActivePane, pane }: ReaderPaneProps) {
+  return (
+    <div className={`page-pane${isActivePane ? ' page-pane-active' : ''}`}>
+      {pane.chunks.map((chunk) => {
+        const globalIndex = chunks.indexOf(chunk)
+        const isActive = globalIndex === activeIndex
         return (
-          <div
-            className={`page-pane${isActivePage ? ' page-pane-active' : ''}`}
-            key={pageIndex}
-          >
-            {pageChunks.map((chunk) => {
-              const globalIndex = chunks.indexOf(chunk)
-              const isActive = globalIndex === activeIndex
-              return (
-                <span key={chunk.id}>
-                  {chunk.startsNewParagraph && <span className="para-break" aria-hidden="true" />}
-                  <span
-                    className={isActive ? 'active-chunk' : ''}
-                    ref={isActive ? activeChunkRef : null}
-                  >
-                    {chunk.text}{' '}
-                  </span>
-                </span>
-              )
-            })}
-          </div>
+          <span key={chunk.id}>
+            {chunk.startsNewParagraph && <span className="para-break" aria-hidden="true" />}
+            <span className={isActive ? 'active-chunk' : ''}>
+              {chunk.text}{' '}
+            </span>
+          </span>
         )
       })}
     </div>

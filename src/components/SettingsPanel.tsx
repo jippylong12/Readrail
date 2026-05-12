@@ -128,17 +128,17 @@ export function SettingsPanel({
             </select>
           </label>
           <label className="field">
-            Default page layout
+            Default pane layout
             <select
               onChange={(event) =>
                 onSettingsChange({ reader: { ...settings.reader, defaultPageLayout: Number(event.target.value) as PageLayout } })
               }
               value={settings.reader.defaultPageLayout}
             >
-              <option value={1}>1 page</option>
-              <option value={2}>2 pages</option>
-              <option value={3}>3 pages</option>
-              <option value={4}>4 pages</option>
+              <option value={1}>1 pane</option>
+              <option value={2}>2 panes</option>
+              <option value={3}>3 panes</option>
+              <option value={4}>4 panes</option>
             </select>
           </label>
           <label className="field">

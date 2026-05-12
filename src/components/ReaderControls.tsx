@@ -111,16 +111,16 @@ export function ReaderControls({
           </button>
         </div>
 
-        <div className="layout-picker" aria-label="Page layout">
-          <span className="layout-picker-label">Pages</span>
-          <div className="segmented layout-segmented" role="group" aria-label="Page count">
+        <div className="layout-picker" aria-label="Pane layout">
+          <span className="layout-picker-label">Panes</span>
+          <div className="segmented layout-segmented" role="group" aria-label="Pane count">
             {([1, 2, 3, 4] as PageLayout[]).map((count) => (
               <button
                 className={count === pageLayout ? 'active' : ''}
                 key={count}
                 onClick={() => onPageLayoutChange(count)}
                 type="button"
-                aria-label={`${count} page${count > 1 ? 's' : ''}`}
+                aria-label={`${count} pane${count > 1 ? 's' : ''}`}
                 aria-pressed={count === pageLayout}
               >
                 {count}

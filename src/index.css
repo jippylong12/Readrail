@@ -1131,17 +1131,23 @@ h3 {
   display: inline-block;
 }
 
+.reader-panel {
+  display: flex;
+  min-height: calc(100vh - 56px);
+  flex-direction: column;
+}
+
 .reader-panel-focus {
   position: fixed;
   inset: 0;
   z-index: 30;
   display: grid;
   grid-template-rows: auto auto auto auto minmax(0, 1fr);
-  overflow: auto;
+  overflow: hidden;
   border: 0;
   border-radius: 0;
   background: var(--bg);
-  padding: clamp(16px, 3vw, 34px);
+  padding: clamp(10px, 1.8vw, 18px);
 }
 
 .reader-panel-focus .panel-header,
@@ -1154,7 +1160,47 @@ h3 {
 }
 
 .reader-panel-focus .panel-header {
-  margin-bottom: 16px;
+  margin-bottom: 8px;
+}
+
+.reader-panel-focus h1 {
+  font-size: 1.35rem;
+}
+
+.reader-panel-focus .eyebrow {
+  margin-bottom: 2px;
+}
+
+.reader-panel-focus .reader-scope-kicker {
+  margin-top: 2px;
+}
+
+.reader-panel-focus .reader-scope-panel {
+  gap: 10px;
+  margin-bottom: 8px;
+  padding: 10px;
+}
+
+.reader-panel-focus .reader-controls {
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.reader-panel-focus .reader-control-strip {
+  grid-template-columns: minmax(220px, 0.8fr) minmax(112px, 0.4fr) minmax(150px, 0.8fr) 64px minmax(240px, auto);
+  gap: 10px;
+}
+
+.reader-panel-focus .segmented button,
+.reader-panel-focus .field input,
+.reader-panel-focus .field select,
+.reader-panel-focus .search-input {
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.reader-panel-focus .progress-track {
+  height: 6px;
 }
 
 .reader-panel-focus .reading-surface {
@@ -1325,10 +1371,11 @@ h3 {
 }
 
 .reading-surface {
+  flex: 1;
   min-height: 420px;
   margin-top: 20px;
   padding: 28px;
-  overflow: auto;
+  overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface) 70%, var(--surface-muted));
@@ -1361,7 +1408,7 @@ h3 {
   text-align: center;
 }
 
-/* ── Page layout picker ──────────────────────────────── */
+/* Pane layout picker */
 
 .layout-picker {
   display: grid;
@@ -1378,7 +1425,7 @@ h3 {
   grid-template-columns: repeat(4, 1fr);
 }
 
-/* ── Multi-page pane layout ──────────────────────────── */
+/* Virtual pane layout */
 
 .page-panes {
   display: grid;
@@ -1390,7 +1437,7 @@ h3 {
 }
 
 .page-pane {
-  overflow: auto;
+  overflow: hidden;
   padding: 20px 22px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -1405,16 +1452,14 @@ h3 {
   background: color-mix(in srgb, var(--primary) 5%, var(--surface));
 }
 
-/* Focus mode pane enhancements */
 .reader-panel-focus .page-panes {
-  gap: 20px;
+  gap: 16px;
 }
 
 .reader-panel-focus .page-pane {
-  padding: 28px 26px;
-  line-height: 1.85;
-  font-size: 1.06em;
-  border-radius: 10px;
+  padding: 20px 22px;
+  line-height: inherit;
+  font-size: inherit;
 }
 
 .reader-test-suggestion {
@@ -2252,12 +2297,14 @@ h3 {
     grid-template-columns: minmax(0, 1fr) 38px;
   }
 
-  .page-panes {
-    grid-template-columns: 1fr !important;
-  }
-
   .onboarding-panel {
     padding: 20px;
+  }
+}
+
+@media (max-width: 720px) {
+  .page-panes {
+    grid-template-columns: 1fr !important;
   }
 }
 

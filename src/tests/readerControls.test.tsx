@@ -69,23 +69,23 @@ describe('ReaderControls', () => {
     expect(screen.getByText(/do not optimize raw speed alone/i)).toBeTruthy()
   })
 
-  it('renders a 1/2/3/4 page layout picker', () => {
+  it('renders a 1/2/3/4 pane layout picker', () => {
     renderControls(1)
 
-    expect(screen.getByRole('group', { name: 'Page count' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: '1 page' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: '2 pages' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: '3 pages' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: '4 pages' })).toBeTruthy()
+    expect(screen.getByRole('group', { name: 'Pane count' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '1 pane' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '2 panes' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '3 panes' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '4 panes' })).toBeTruthy()
   })
 
-  it('marks the active page count button as pressed', () => {
+  it('marks the active pane count button as pressed', () => {
     renderControls(3)
 
-    const button3 = screen.getByRole('button', { name: '3 pages' })
+    const button3 = screen.getByRole('button', { name: '3 panes' })
     expect(button3.getAttribute('aria-pressed')).toBe('true')
 
-    const button1 = screen.getByRole('button', { name: '1 page' })
+    const button1 = screen.getByRole('button', { name: '1 pane' })
     expect(button1.getAttribute('aria-pressed')).toBe('false')
   })
 
@@ -93,7 +93,7 @@ describe('ReaderControls', () => {
     const user = userEvent.setup()
     const { onPageLayoutChange } = renderControls(1)
 
-    await user.click(screen.getByRole('button', { name: '4 pages' }))
+    await user.click(screen.getByRole('button', { name: '4 panes' }))
 
     expect(onPageLayoutChange).toHaveBeenCalledWith(4)
   })
