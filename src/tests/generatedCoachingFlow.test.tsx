@@ -179,6 +179,7 @@ describe('generated coaching flow', () => {
     await saveBrowserGeminiKey(user)
 
     await user.click(screen.getByRole('button', { name: 'Play' }))
+    await user.click(screen.getByRole('button', { name: 'Pause' }))
     await user.click(screen.getByRole('button', { name: 'Test' }))
 
     await waitFor(() => expect(generateQuizFromReadingMock).toHaveBeenCalledTimes(1))
@@ -209,6 +210,7 @@ describe('generated coaching flow', () => {
     await saveBrowserGeminiKey(user, '/reader/document-1/chapters/chapter-1/pages/2/2')
 
     await user.click(screen.getByRole('button', { name: 'Play' }))
+    await user.click(screen.getByRole('button', { name: 'Pause' }))
     await user.click(screen.getByRole('button', { name: 'Test' }))
 
     await waitFor(() => expect(generateQuizFromReadingMock).toHaveBeenCalledTimes(1))
@@ -279,6 +281,7 @@ describe('generated coaching flow', () => {
     render(<App />)
 
     await user.click(screen.getByRole('button', { name: 'Play' }))
+    await user.click(screen.getByRole('button', { name: 'Pause' }))
     await user.click(screen.getByRole('button', { name: 'Test' }))
 
     expect(await screen.findByRole('heading', { name: 'Quiz unavailable' })).toBeTruthy()
@@ -297,6 +300,7 @@ describe('generated coaching flow', () => {
     await saveBrowserGeminiKey(user)
 
     await user.click(screen.getByRole('button', { name: 'Play' }))
+    await user.click(screen.getByRole('button', { name: 'Pause' }))
     await user.click(screen.getByRole('button', { name: 'Test' }))
 
     expect(await screen.findByText('quiz provider unavailable')).toBeTruthy()

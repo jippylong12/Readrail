@@ -46,6 +46,7 @@ type PendingSession = {
   regressionCount: number
   scope: ReaderSessionScopeMetadata
   scopeContent: string
+  scopeContentStartWordIndex: number
 }
 
 type PendingQuiz = {
@@ -326,11 +327,28 @@ function App() {
 
       const endWordIndex = Math.max(0, Math.min(session.endWordIndex || currentDocument.wordCount, currentDocument.wordCount))
       const startWordIndex = Math.max(0, Math.min(session.startWordIndex, endWordIndex))
-      const scopeWordCount = session.scopeContent.split(/\s+/).filter(Boolean).length
-      const scopeEndWordIndex = Math.max(0, Math.min(session.scopeEndWordIndex || scopeWordCount, scopeWordCount))
-      const scopeStartWordIndex = Math.max(0, Math.min(session.scopeStartWordIndex, scopeEndWordIndex))
+      const scopeContentStartWordIndex = Math.max(0, Math.round(session.scopeContentStartWordIndex))
+      const scopeContentWordCount = session.scopeContent.split(/\s+/).filter(Boolean).length
+      const scopeContentEndWordIndex = scopeContentStartWordIndex + scopeContentWordCount
+      const requestedScopeEndWordIndex = session.scopeEndWordIndex || scopeContentEndWordIndex
+      const scopeEndWordIndex = Math.max(
+        scopeContentStartWordIndex,
+        Math.min(requestedScopeEndWordIndex, scopeContentEndWordIndex),
+      )
+      const scopeStartWordIndex = Math.max(
+        scopeContentStartWordIndex,
+        Math.min(session.scopeStartWordIndex, scopeEndWordIndex),
+      )
       const wordsRead = Math.max(1, scopeEndWordIndex - scopeStartWordIndex)
-      const normalizedSession = { ...session, startWordIndex, endWordIndex, scopeStartWordIndex, scopeEndWordIndex, wordsRead }
+      const normalizedSession = {
+        ...session,
+        startWordIndex,
+        endWordIndex,
+        scopeStartWordIndex,
+        scopeEndWordIndex,
+        scopeContentStartWordIndex,
+        wordsRead,
+      }
       const quizDocument = currentDocument
       navigate({ route: 'test', documentId: null })
       setPendingQuiz({
@@ -347,7 +365,11 @@ function App() {
           throw new Error('Add a Gemini API key in Settings before testing comprehension.')
         }
 
-        const quizText = excerptWords(normalizedSession.scopeContent, scopeStartWordIndex, scopeEndWordIndex)
+        const quizText = excerptWords(
+          normalizedSession.scopeContent,
+          scopeStartWordIndex - scopeContentStartWordIndex,
+          scopeEndWordIndex - scopeContentStartWordIndex,
+        )
         const quizTitle =
           normalizedSession.scope.scopeType === 'document'
             ? quizDocument.title

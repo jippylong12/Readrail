@@ -64,7 +64,9 @@ describe('manual coaching flow', () => {
     render(<App />)
 
     await user.click(screen.getByRole('button', { name: 'Play' }))
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Test' })).toHaveProperty('disabled', false))
+    expect(screen.queryByRole('button', { name: 'Test' })).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Pause' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Test' })).toBeTruthy())
     await user.click(screen.getByRole('button', { name: 'Test' }))
 
     expect(await screen.findByRole('heading', { name: 'Quiz unavailable' })).toBeTruthy()

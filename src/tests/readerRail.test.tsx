@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { useState } from 'react'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ReaderRail } from '../components/ReaderRail'
@@ -101,10 +101,14 @@ function buildLongDocument(wordCount = 10): DocumentRecord {
 }
 
 function renderLongReader({
+  defaultChunkSize = 1,
   defaultPageLayout = 2,
+  defaultWpm = 900,
   wordCount = 10,
 }: {
+  defaultChunkSize?: number
   defaultPageLayout?: PageLayout
+  defaultWpm?: number
   wordCount?: number
 } = {}) {
   const longDocument = buildLongDocument(wordCount)
@@ -113,10 +117,10 @@ function renderLongReader({
     <ReaderRail
       baselineResult={null}
       chapters={[chapter]}
-      defaultChunkSize={1}
+      defaultChunkSize={defaultChunkSize}
       defaultMode="rail"
       defaultPageLayout={defaultPageLayout}
-      defaultWpm={900}
+      defaultWpm={defaultWpm}
       document={longDocument}
       fontSize={20}
       lineHeight={1.65}
@@ -199,9 +203,11 @@ describe('ReaderRail focus mode', () => {
     const readerPanel = container.querySelector('.reader-panel')
 
     await user.click(screen.getByRole('button', { name: 'Focus' }))
-    expect(screen.getByRole('button', { name: 'Test' })).toHaveProperty('disabled', true)
+    expect(screen.queryByRole('button', { name: 'Test' })).toBeNull()
 
     await user.click(screen.getByRole('button', { name: 'Play' }))
+    expect(screen.queryByRole('button', { name: 'Test' })).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Pause' }))
     await user.click(screen.getByRole('button', { name: 'Test' }))
 
     expect(onStartTest).toHaveBeenCalledWith(
@@ -249,6 +255,108 @@ describe('ReaderRail focus mode', () => {
 })
 
 describe('ReaderRail virtual panes', () => {
+  it('rewinds one chunk, pauses playback, and resumes on the next play click', async () => {
+    vi.useFakeTimers()
+    const { container } = renderLongReader({
+      defaultChunkSize: 1,
+      defaultPageLayout: 1,
+      defaultWpm: 900,
+      wordCount: 8,
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Play' }))
+    for (let index = 0; index < 3; index += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(280)
+      })
+    }
+
+    expect(container.querySelector('.active-chunk')?.textContent).toContain('viewportfitword3')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Rewind' }))
+
+    expect(screen.getByRole('button', { name: 'Play' })).toBeTruthy()
+    expect(container.querySelector('.active-chunk')?.textContent).toContain('viewportfitword2')
+    expect(container.querySelector('.active-chunk')?.textContent).not.toContain('viewportfitword0')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Play' }))
+    expect(screen.getByRole('button', { name: 'Pause' })).toBeTruthy()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(280)
+    })
+
+    expect(container.querySelector('.active-chunk')?.textContent).toContain('viewportfitword3')
+  })
+
+  it('rereads from the current segment start and requires a new pause before testing', async () => {
+    vi.useFakeTimers()
+    const { container } = renderLongReader({
+      defaultChunkSize: 1,
+      defaultPageLayout: 1,
+      defaultWpm: 900,
+      wordCount: 8,
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Play' }))
+    for (let index = 0; index < 3; index += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(280)
+      })
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'Pause' }))
+
+    expect(screen.getByRole('button', { name: 'Test' })).toBeTruthy()
+    expect(container.querySelector('.active-chunk')?.textContent).toContain('viewportfitword3')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reread' }))
+
+    expect(screen.queryByRole('button', { name: 'Test' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Play' })).toBeTruthy()
+    expect(container.querySelector('.active-chunk')?.textContent).toContain('viewportfitword0')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Play' }))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(280)
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Pause' }))
+
+    expect(screen.getByRole('button', { name: 'Test' })).toBeTruthy()
+    expect(container.querySelector('.active-chunk')?.textContent).toContain('viewportfitword1')
+  })
+
+  it('renders only the initial bounded content window for long documents', () => {
+    const { container } = renderLongReader({ defaultPageLayout: 1, wordCount: 1_505 })
+    const readingSurface = container.querySelector('.reading-surface')
+
+    expect(readingSurface?.getAttribute('data-window-start')).toBe('0')
+    expect(readingSurface?.getAttribute('data-window-end')).toBe('1000')
+    expect(screen.getByText(/viewportfitword0/)).toBeTruthy()
+    expect(screen.queryByText(/viewportfitword1000/)).toBeNull()
+  })
+
+  it('advances the content window and drops old rendered words during playback', async () => {
+    const user = userEvent.setup()
+    const { container } = renderLongReader({
+      defaultChunkSize: 500,
+      defaultPageLayout: 1,
+      defaultWpm: 120_000,
+      wordCount: 1_505,
+    })
+    const readingSurface = container.querySelector('.reading-surface')
+
+    await user.click(screen.getByRole('button', { name: 'Play' }))
+
+    await waitFor(() => {
+      expect(readingSurface?.getAttribute('data-window-start')).toBe('500')
+    }, { timeout: 800 })
+
+    expect(readingSurface?.getAttribute('data-window-end')).toBe('1500')
+    expect(screen.queryByText(/viewportfitword0/)).toBeNull()
+    expect(screen.getByText(/viewportfitword500/)).toBeTruthy()
+    expect(screen.queryByText(/viewportfitword1500/)).toBeNull()
+  })
+
   it('renders selected pane counts as viewport panes instead of all source text columns', () => {
     const { container } = renderLongReader({ defaultPageLayout: 3, wordCount: 8 })
     const paneLayout = container.querySelector('.page-panes')
@@ -458,6 +566,8 @@ describe('ReaderRail scope setup', () => {
     expect(screen.queryByText('Third page excluded.')).toBeNull()
 
     await user.click(screen.getByRole('button', { name: 'Play' }))
+    expect(screen.queryByRole('button', { name: 'Test' })).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Pause' }))
     await user.click(screen.getByRole('button', { name: 'Test' }))
 
     expect(onStartTest).toHaveBeenCalledWith(
@@ -555,8 +665,8 @@ describe('ReaderRail comprehension prompts', () => {
     expect(screen.queryByText("You've read a while. Test comprehension?")).toBeNull()
   })
 
-  it('suggests a test after one hour of target-WPM words on pause and decline resets the segment', async () => {
-    const user = userEvent.setup()
+  it('suggests a test after one hour of target-WPM words within the active window', async () => {
+    vi.useFakeTimers()
     const onSegmentReset = vi.fn()
     const longDocument: DocumentRecord = {
       ...documentRecord,
@@ -570,7 +680,7 @@ describe('ReaderRail comprehension prompts', () => {
       <ReaderRail
         baselineResult={null}
         chapters={[chapter]}
-        defaultChunkSize={4800}
+        defaultChunkSize={100}
         defaultMode="rail"
         defaultPageLayout={1}
         defaultWpm={80}
@@ -589,12 +699,17 @@ describe('ReaderRail comprehension prompts', () => {
       />,
     )
 
-    await user.click(screen.getByRole('button', { name: 'Play' }))
-    await user.click(screen.getByRole('button', { name: 'Pause' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Play' }))
+    for (let index = 0; index < 47; index += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(75_000)
+      })
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'Pause' }))
 
     expect(screen.getByText("You've read a while. Test comprehension?")).toBeTruthy()
 
-    await user.click(screen.getByRole('button', { name: 'Not now' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Not now' }))
 
     expect(onSegmentReset).toHaveBeenCalledWith('long-document', 4800)
   })

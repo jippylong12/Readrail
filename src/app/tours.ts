@@ -43,7 +43,7 @@ export const TOUR_DEFINITIONS: Record<TourId, TourDefinition> = {
       {
         target: '[data-tour="reader-actions"]',
         title: 'Pause, rewind, and reread',
-        body: 'Play starts or resumes the current untested segment. Pause stops timing, Rewind steps back several chunks, and Reread records a regression for session context.',
+        body: 'Play starts the current untested segment. Pause stops timing, Rewind steps back one chunk, and Reread returns to the segment start.',
       },
       {
         target: '[data-tour="reader-surface"]',

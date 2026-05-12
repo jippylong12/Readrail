@@ -179,9 +179,11 @@ export function ReaderControls({
               </>
             )}
           </button>
-          <button className="finish-button" disabled={!isTestAvailable} onClick={onTest} type="button">
-            Test
-          </button>
+          {isTestAvailable && (
+            <button className="finish-button" onClick={onTest} type="button">
+              Test
+            </button>
+          )}
         </div>
       </div>
 
