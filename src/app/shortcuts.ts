@@ -31,6 +31,13 @@ export const ROUTE_SHORTCUTS: RouteShortcut[] = [
     ariaKeyShortcuts: 'Meta+P Control+P',
   },
   {
+    route: 'costs',
+    key: 'c',
+    display: '⌘C',
+    title: 'Costs (Command+C / Control+C)',
+    ariaKeyShortcuts: 'Meta+C Control+C',
+  },
+  {
     route: 'stats',
     key: 's',
     display: '⌘S',

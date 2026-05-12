@@ -343,6 +343,9 @@ describe('app section shortcuts', () => {
     expect(dispatchSectionShortcut('r', 'meta').defaultPrevented).toBe(true)
     expect(screen.getByRole('heading', { name: activeDocument.title })).toBeTruthy()
 
+    expect(dispatchSectionShortcut('c', 'meta').defaultPrevented).toBe(true)
+    expect(screen.getByRole('heading', { name: 'AI usage costs' })).toBeTruthy()
+
     expect(dispatchSectionShortcut('s', 'meta').defaultPrevented).toBe(true)
     expect(screen.getByRole('heading', { name: 'Progress trends' })).toBeTruthy()
 
@@ -353,13 +356,14 @@ describe('app section shortcuts', () => {
     expect(screen.getByRole('heading', { name: 'Reading documents' })).toBeTruthy()
   })
 
-  it('opens Costs from top-level navigation without registering a shortcut', async () => {
+  it('opens Costs from top-level navigation with a registered shortcut hint', async () => {
     const user = userEvent.setup()
     render(<App />)
 
     const costsButton = screen.getByRole('button', { name: 'Costs' })
-    expect(costsButton.getAttribute('aria-keyshortcuts')).toBeNull()
-    expect(costsButton.getAttribute('title')).toBeNull()
+    expect(costsButton.getAttribute('aria-keyshortcuts')).toBe('Meta+C Control+C')
+    expect(costsButton.getAttribute('title')).toBe('Costs (Command+C / Control+C)')
+    expect(screen.getByText('⌘C')).toBeTruthy()
 
     await user.click(costsButton)
 
@@ -373,6 +377,9 @@ describe('app section shortcuts', () => {
 
     expect(dispatchSectionShortcut('r', 'control').defaultPrevented).toBe(true)
     expect(screen.getByRole('heading', { name: activeDocument.title })).toBeTruthy()
+
+    expect(dispatchSectionShortcut('c', 'control').defaultPrevented).toBe(true)
+    expect(screen.getByRole('heading', { name: 'AI usage costs' })).toBeTruthy()
 
     expect(dispatchSectionShortcut('s', 'control').defaultPrevented).toBe(true)
     expect(screen.getByRole('heading', { name: 'Progress trends' })).toBeTruthy()

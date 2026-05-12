@@ -2276,6 +2276,15 @@ h3 {
   .append-target-field {
     width: 100%;
   }
+
+  .review-answer-list .review-answer {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .review-answer-status {
+    justify-content: flex-start;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
