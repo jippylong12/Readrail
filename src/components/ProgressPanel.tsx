@@ -1,5 +1,6 @@
 import { type FormEvent, useMemo, useState } from 'react'
 import { CheckCircle2, CircleDot, XCircle } from 'lucide-react'
+import { buildCoachingProgressSummary, type CoachingTrendMetric } from '../lib/reading/coaching'
 import type { CoachingState, DocumentRecord, QuizAttempt, QuizQuestionReview, ReadingSession } from '../types/domain'
 
 export type ManualRetestInput = {
@@ -29,8 +30,12 @@ export function ProgressPanel({
 }: ProgressPanelProps) {
   const [selectedAttemptId, setSelectedAttemptId] = useState<string | null>(quizAttempts[0]?.id ?? null)
   const [isRetestOpen, setIsRetestOpen] = useState(false)
+  const progressSummary = useMemo(
+    () => buildCoachingProgressSummary(quizAttempts, sessions, coaching.recommendedWpm),
+    [coaching.recommendedWpm, quizAttempts, sessions],
+  )
   const selectedAttempt = quizAttempts.find((attempt) => attempt.id === selectedAttemptId) ?? quizAttempts[0] ?? null
-  const latestAttempt = quizAttempts[0] ?? null
+  const latestAttempt = progressSummary.latestAttempt
   const documentById = useMemo(
     () => new Map(documents.map((document) => [document.id, document])),
     [documents],
@@ -59,16 +64,27 @@ export function ProgressPanel({
         </div>
 
         <div className="summary-grid" data-tour="progress-summary">
-          <Metric label="Recommended WPM" value={`${coaching.recommendedWpm} WPM`} />
+          <Metric label="Recommended WPM" value={`${progressSummary.recommendation.recommendedWpm} WPM`} />
           <Metric label="Last quiz score" value={latestAttempt ? `${latestAttempt.comprehensionPercent}%` : 'N/A'} />
           <Metric label="Last raw pace" value={latestAttempt ? `${latestAttempt.rawWpm} WPM` : 'N/A'} />
-          <Metric label="Attempts" value={quizAttempts.length} />
+          <Metric label="Attempts" value={progressSummary.attempts.total} />
         </div>
 
         {latestAttempt ? (
-          <div className="recommendation-callout">
-            <span className="eyebrow">WPM adjustment</span>
-            <p>{latestAttempt.explanation}</p>
+          <div className={`recommendation-callout ${progressSummary.recommendation.action}`}>
+            <div className="recommendation-header">
+              <div>
+                <span className="eyebrow">WPM adjustment</span>
+                <h2>{formatRecommendationAction(progressSummary.recommendation.action)}</h2>
+              </div>
+              <span className="status-badge">{formatAttemptKind(latestAttempt.kind)}</span>
+            </div>
+            <p>{progressSummary.recommendation.explanation}</p>
+            <ul className="recommendation-evidence">
+              {progressSummary.recommendation.evidence.map((evidence) => (
+                <li key={evidence}>{evidence}</li>
+              ))}
+            </ul>
           </div>
         ) : (
           <div className="empty-state">
@@ -87,6 +103,35 @@ export function ProgressPanel({
             }}
           />
         )}
+      </section>
+
+      <section className="panel progress-panel">
+        <div className="panel-header compact">
+          <div>
+            <span className="eyebrow">Trends</span>
+            <h2>Comprehension-aware growth</h2>
+          </div>
+        </div>
+
+        <div className="trend-grid">
+          <TrendCard label="Raw WPM" metric={progressSummary.trends.rawWpm} suffix=" WPM" />
+          <TrendCard label="Adjusted WPM" metric={progressSummary.trends.adjustedWpm} suffix=" WPM" />
+          <TrendCard label="Comprehension" metric={progressSummary.trends.comprehension} suffix="%" />
+          <TrendCard label="Words tested" metric={progressSummary.trends.wordsTested} />
+        </div>
+
+        <div className="coaching-rollup-grid">
+          <Metric label="Total words read" value={progressSummary.readingVolume.totalWords.toLocaleString()} />
+          <Metric label="Last 7 days" value={progressSummary.readingVolume.recentWords.toLocaleString()} />
+          <Metric label="Reading sessions" value={progressSummary.readingVolume.totalSessions} />
+          <Metric label="Streak" value={`${progressSummary.readingVolume.streakDays} days`} />
+        </div>
+
+        <div className="attempt-kind-rollup" aria-label="Attempt kinds">
+          <KindCount label="Generated quizzes" value={progressSummary.attempts.generated} />
+          <KindCount label="Manual checks" value={progressSummary.attempts.manual} />
+          <KindCount label="Retests" value={progressSummary.attempts.retest} />
+        </div>
       </section>
 
       <section className="panel progress-panel" data-tour="progress-history">
@@ -397,6 +442,46 @@ function Metric({ label, value }: { label: string; value: number | string }) {
   )
 }
 
+function TrendCard({ label, metric, suffix = '' }: { label: string; metric: CoachingTrendMetric; suffix?: string }) {
+  return (
+    <div className={`trend-card ${metric.direction}`}>
+      <span>{label}</span>
+      <strong>{formatMetricValue(metric.current, suffix)}</strong>
+      <small>{formatMetricDelta(metric, suffix)}</small>
+    </div>
+  )
+}
+
+function KindCount({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="kind-count">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  )
+}
+
+function formatMetricValue(value: number | null, suffix: string): string {
+  return value === null ? 'N/A' : `${value.toLocaleString()}${suffix}`
+}
+
+function formatMetricDelta(metric: CoachingTrendMetric, suffix: string): string {
+  if (metric.current === null) {
+    return 'No checks yet'
+  }
+
+  if (metric.delta === null) {
+    return 'No prior check'
+  }
+
+  if (metric.delta === 0) {
+    return `No change from ${formatMetricValue(metric.previous, suffix)}`
+  }
+
+  const sign = metric.delta > 0 ? '+' : ''
+  return `${sign}${metric.delta.toLocaleString()}${suffix} from previous`
+}
+
 function formatDate(createdAt: string): string {
   return new Date(createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
 }
@@ -433,4 +518,17 @@ function formatAttemptKind(kind: QuizAttempt['kind']): string {
     return 'Retest'
   }
   return 'Generated quiz'
+}
+
+function formatRecommendationAction(action: 'check' | 'reduce' | 'hold' | 'increase'): string {
+  if (action === 'reduce') {
+    return 'Reduce pace'
+  }
+  if (action === 'increase') {
+    return 'Small increase'
+  }
+  if (action === 'hold') {
+    return 'Hold pace'
+  }
+  return 'Check comprehension'
 }

@@ -84,6 +84,6 @@ describe('manual coaching flow', () => {
       questionResults: [],
       questions: [],
     })
-    expect(screen.getByText('Manual check')).toBeTruthy()
+    expect(screen.getAllByText('Manual check').length).toBeGreaterThan(0)
   })
 })

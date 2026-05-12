@@ -7,6 +7,8 @@ import {
 } from '../lib/reading/baseline'
 import { comprehensionBand, recommendedNextWpm } from '../lib/reading/comprehension'
 import {
+  buildCoachingProgressSummary,
+  buildCoachingRecommendation,
   buildGeneratedQuizAttempt,
   buildManualQuizAttempt,
   buildRetestQuizAttempt,
@@ -130,7 +132,7 @@ describe('reading math', () => {
     expect(attempt.targetWpm).toBe(240)
     expect(attempt.rawWpm).toBe(200)
     expect(attempt.adjustedWpm).toBe(164)
-    expect(attempt.recommendedWpm).toBe(255)
+    expect(attempt.recommendedWpm).toBe(240)
   })
 
   it('builds manual and retest coaching attempts without generated review data', () => {
@@ -215,4 +217,131 @@ describe('reading math', () => {
     })
     expect(recommendCoachingWpm(240, 260, 50)).toBe(220)
   })
+
+  it('keeps recommendations conservative until comprehension is stable', () => {
+    expect(buildCoachingRecommendation(240, 240, 84)).toMatchObject({
+      action: 'hold',
+      recommendedWpm: 240,
+    })
+    expect(buildCoachingRecommendation(240, 240, 84, [buildAttempt({ id: 'previous', comprehensionPercent: 82 })])).toMatchObject({
+      action: 'increase',
+      recommendedWpm: 255,
+    })
+    expect(buildCoachingRecommendation(240, 240, 92)).toMatchObject({
+      action: 'increase',
+      recommendedWpm: 255,
+    })
+    expect(buildCoachingRecommendation(240, 240, 55).explanation).toContain('understanding can recover')
+  })
+
+  it('summarizes coaching trends, attempt kinds, reading volume, and streaks', () => {
+    const attempts = [
+      buildAttempt({
+        id: 'latest',
+        kind: 'manual',
+        rawWpm: 250,
+        adjustedWpm: 212,
+        comprehensionPercent: 85,
+        wordCount: 420,
+        createdAt: '2026-05-12T12:00:00.000Z',
+      }),
+      buildAttempt({
+        id: 'previous',
+        kind: 'generated',
+        rawWpm: 220,
+        adjustedWpm: 176,
+        comprehensionPercent: 80,
+        wordCount: 360,
+        createdAt: '2026-05-11T12:00:00.000Z',
+      }),
+      buildAttempt({
+        id: 'retest',
+        kind: 'retest',
+        rawWpm: 210,
+        adjustedWpm: 189,
+        comprehensionPercent: 90,
+        wordCount: 500,
+        createdAt: '2026-05-01T12:00:00.000Z',
+      }),
+    ]
+    const sessions = [
+      buildSession({ id: 'today', wordsRead: 420, startedAt: '2026-05-12T09:00:00.000Z' }),
+      buildSession({ id: 'yesterday', wordsRead: 360, startedAt: '2026-05-11T09:00:00.000Z' }),
+      buildSession({ id: 'old', wordsRead: 1000, startedAt: '2026-04-28T09:00:00.000Z' }),
+    ]
+
+    const summary = buildCoachingProgressSummary(attempts, sessions, 240, new Date('2026-05-12T18:00:00.000Z'))
+
+    expect(summary.attempts).toEqual({
+      total: 3,
+      generated: 1,
+      manual: 1,
+      retest: 1,
+    })
+    expect(summary.trends.rawWpm).toMatchObject({ current: 250, previous: 220, delta: 30, direction: 'up' })
+    expect(summary.trends.comprehension).toMatchObject({ current: 85, previous: 80, delta: 5, direction: 'up' })
+    expect(summary.readingVolume).toMatchObject({
+      totalWords: 1780,
+      recentWords: 780,
+      totalSessions: 3,
+      streakDays: 2,
+    })
+    expect(summary.recommendation).toMatchObject({
+      action: 'increase',
+      recommendedWpm: 255,
+    })
+  })
 })
+
+function buildAttempt(overrides: Partial<ReturnType<typeof buildGeneratedQuizAttempt>> = {}) {
+  return {
+    id: 'attempt-1',
+    documentId: 'doc-1',
+    readingSessionId: 'session-1',
+    kind: 'generated' as const,
+    scopeType: 'document' as const,
+    scopeLabel: null,
+    chapterId: null,
+    chapterTitle: null,
+    pageIds: [],
+    pageNumbers: [],
+    sourcePageNumbers: [],
+    startWordIndex: 0,
+    endWordIndex: 300,
+    wordCount: 300,
+    durationSeconds: 90,
+    targetWpm: 240,
+    rawWpm: 200,
+    comprehensionPercent: 80,
+    adjustedWpm: 160,
+    recommendedWpm: 240,
+    explanation: 'Hold pace.',
+    questionResults: [],
+    questions: [],
+    createdAt: '2026-05-10T09:00:00.000Z',
+    ...overrides,
+  }
+}
+
+function buildSession(overrides: Partial<ReadingSession> = {}): ReadingSession {
+  return {
+    id: 'session-1',
+    documentId: 'doc-1',
+    mode: 'rail',
+    targetWpm: 240,
+    actualWpm: 200,
+    adjustedWpm: 160,
+    wordsRead: 300,
+    durationSeconds: 90,
+    startPosition: 0,
+    endPosition: 300,
+    pauseCount: 0,
+    regressionCount: 0,
+    comprehensionScore: 80,
+    selfRating: null,
+    notes: '',
+    startedAt: '2026-05-10T09:00:00.000Z',
+    endedAt: '2026-05-10T09:01:30.000Z',
+    ...overrides,
+  }
+}

@@ -113,11 +113,19 @@ describe('ProgressPanel', () => {
     )
 
     expect(screen.getByRole('heading', { name: 'Coaching progress' })).toBeTruthy()
-    expect(screen.getByText('255 WPM')).toBeTruthy()
-    expect(screen.getAllByText('50%')).toHaveLength(2)
+    expect(screen.getByText('Reduce pace')).toBeTruthy()
+    expect(screen.getAllByText('220 WPM').length).toBeGreaterThan(0)
+    expect(screen.getByText('50% comprehension is below the 60% recovery threshold.')).toBeTruthy()
+    expect(screen.getAllByText('50%')).toHaveLength(3)
     expect(screen.getAllByText('Meaningful reading')).toHaveLength(2)
-    expect(screen.getByText('Generated quiz')).toBeTruthy()
+    expect(screen.getAllByText('Generated quiz').length).toBeGreaterThan(0)
     expect(screen.getAllByText('100-300')).toHaveLength(2)
+    expect(screen.getByRole('heading', { name: 'Comprehension-aware growth' })).toBeTruthy()
+    expect(screen.getAllByText('No prior check').length).toBeGreaterThan(0)
+    expect(screen.getByText('Total words read')).toBeTruthy()
+    expect(screen.getByText('Generated quizzes')).toBeTruthy()
+    expect(screen.getByText('Manual checks')).toBeTruthy()
+    expect(screen.getByText('Retests')).toBeTruthy()
     expect(screen.getByText(/What can the reader infer from the decision/)).toBeTruthy()
     expect(screen.getByText('Selected')).toBeTruthy()
     expect(screen.getByText('Correct')).toBeTruthy()
@@ -224,8 +232,9 @@ describe('ProgressPanel', () => {
       />,
     )
 
-    expect(screen.getByText('Manual check')).toBeTruthy()
+    expect(screen.getAllByText('Manual check').length).toBeGreaterThan(0)
     expect(screen.getByText('Retest')).toBeTruthy()
+    expect(screen.getByText('Manual checks')).toBeTruthy()
     expect(screen.getByText('Manual score recorded')).toBeTruthy()
 
     await user.click(screen.getAllByRole('button', { name: 'Open' })[1])

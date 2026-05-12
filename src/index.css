@@ -1575,16 +1575,94 @@ h3 {
 
 .recommendation-callout {
   display: grid;
-  gap: 6px;
+  gap: 10px;
   border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line));
   border-radius: 8px;
   background: color-mix(in srgb, var(--accent) 8%, var(--surface));
   padding: 14px;
 }
 
+.recommendation-callout.reduce {
+  border-color: color-mix(in srgb, var(--danger) 36%, var(--line));
+  background: color-mix(in srgb, var(--danger) 7%, var(--surface));
+}
+
+.recommendation-callout.hold {
+  border-color: color-mix(in srgb, var(--warning) 38%, var(--line));
+  background: color-mix(in srgb, var(--warning) 8%, var(--surface));
+}
+
+.recommendation-callout.increase {
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--line));
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+}
+
+.recommendation-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.recommendation-header h2 {
+  margin: 4px 0 0;
+}
+
 .recommendation-callout p {
   margin: 0;
   line-height: 1.5;
+}
+
+.recommendation-evidence {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+}
+
+.trend-grid,
+.coaching-rollup-grid,
+.attempt-kind-rollup {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.trend-card,
+.kind-count {
+  display: grid;
+  min-width: 0;
+  gap: 7px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-muted);
+}
+
+.trend-card span,
+.kind-count span {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.trend-card strong,
+.kind-count strong {
+  font-size: 1.15rem;
+}
+
+.trend-card small {
+  color: var(--muted);
+  font-weight: 750;
+}
+
+.trend-card.up small {
+  color: var(--accent);
+}
+
+.trend-card.down small {
+  color: var(--danger);
 }
 
 .attempt-table-wrap {
@@ -2118,7 +2196,10 @@ h3 {
   .journey-list,
   .mode-grid,
   .question-list,
-  .baseline-source-grid {
+  .baseline-source-grid,
+  .trend-grid,
+  .coaching-rollup-grid,
+  .attempt-kind-rollup {
     grid-template-columns: 1fr;
   }
 

@@ -387,6 +387,7 @@ function App() {
         pageIds: pendingQuiz.session.scope.pageIds,
         pageNumbers: pendingQuiz.session.scope.pageNumbers,
         sourcePageNumbers: pendingQuiz.session.scope.sourcePageNumbers,
+        recentAttempts: quizAttempts,
         questionResults: scoring.questionResults,
         questions: scoring.questions,
       }),
@@ -427,6 +428,7 @@ function App() {
         pageIds: pendingQuiz.session.scope.pageIds,
         pageNumbers: pendingQuiz.session.scope.pageNumbers,
         sourcePageNumbers: pendingQuiz.session.scope.sourcePageNumbers,
+        recentAttempts: quizAttempts,
       }),
     )
     setPendingQuiz(null)
@@ -455,6 +457,7 @@ function App() {
         pageIds: [],
         pageNumbers: [],
         sourcePageNumbers: [],
+        recentAttempts: quizAttempts,
       }),
     )
   }
