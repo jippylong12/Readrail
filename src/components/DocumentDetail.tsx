@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { DocumentOrganizer } from './DocumentOrganizer'
 import { OcrReview } from './OcrReview'
 import { getOrderedChapterPages, getOrderedDocumentChapters } from '../app/structuredDocuments'
@@ -35,7 +35,7 @@ type DocumentDetailProps = {
   onDeletePages: (pageIds: string[]) => number
   onUpdatePageMetadata: (
     pageId: string,
-    updates: Partial<Pick<DocumentPageRecord, 'sourcePageNumber' | 'title'>>,
+    updates: Partial<Pick<DocumentPageRecord, 'sourcePageNumber' | 'text' | 'title'>>,
   ) => void
   onAppendPages: (documentId: string, pages: OcrPageInput[], chapterId?: string | null) => void
   onCreateDocument: (title: string, pages: OcrPageInput[]) => void
@@ -74,7 +74,8 @@ export function DocumentDetail({
   const selectedChapter =
     orderedChapters.find((chapter) => chapter.id === routeChapterId) ?? orderedChapters[0] ?? null
   const selectedChapterPages = selectedChapter ? getOrderedChapterPages(selectedChapter.id, documentPages) : []
-  const pageCount = Math.max(1, Math.ceil(selectedChapterPages.length / DOCUMENT_DETAIL_PAGE_SIZE))
+  const [pagesPerPage, setPagesPerPage] = useState(10)
+  const pageCount = Math.max(1, Math.ceil(selectedChapterPages.length / pagesPerPage))
   const selectedPageNumber = Math.min(Math.max(1, routePageNumber ?? 1), pageCount)
 
   useEffect(() => {
@@ -157,14 +158,18 @@ export function DocumentDetail({
           onUpdatePageMetadata={onUpdatePageMetadata}
           pages={documentPages}
           pageNumber={selectedPageNumber}
-          pagesPerPage={DOCUMENT_DETAIL_PAGE_SIZE}
+          onPagesPerPageChange={(nextPagesPerPage) => {
+            setPagesPerPage(nextPagesPerPage)
+            onDocumentViewChange(document.id, selectedChapter?.id ?? null, 1, { replace: true })
+          }}
+          pagesPerPage={pagesPerPage}
           selectedChapterId={selectedChapter?.id ?? null}
         />
       </section>
 
       <OcrReview
         appendTargetDocumentId={document.id}
-        appendTargetChapterId={documentChapters[documentChapters.length - 1]?.id ?? null}
+        appendTargetChapterId={selectedChapter?.id ?? null}
         appendStartSourcePageNumber={nextSourcePageNumber}
         documents={documents}
         documentChapters={chapters}
@@ -179,5 +184,3 @@ export function DocumentDetail({
     </div>
   )
 }
-
-const DOCUMENT_DETAIL_PAGE_SIZE = 8

@@ -1,4 +1,5 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { ArrowDown, ArrowUp, Filter, GripVertical } from 'lucide-react'
 import { cleanReadingText } from '../lib/text/cleanup'
 import { countWords } from '../lib/text/wordCount'
 import { getDefaultPageTitle } from '../app/structuredDocuments'
@@ -61,8 +62,17 @@ type OcrReviewItemEntry = {
 type OcrReviewEntry = OcrReviewPageEntry | OcrReviewItemEntry
 
 type OcrReviewSummary = Record<OcrReviewEntryStatus, number>
+type OcrFileSortMode = 'name_asc' | 'name_desc' | 'modified_asc' | 'modified_desc' | 'manual'
 
 const MAX_OCR_FILES = 25
+const fileNameCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
+const OCR_FILE_SORT_OPTIONS: Array<{ mode: OcrFileSortMode; label: string }> = [
+  { mode: 'name_asc', label: 'Filename A-Z' },
+  { mode: 'name_desc', label: 'Filename Z-A' },
+  { mode: 'modified_asc', label: 'Modified oldest first' },
+  { mode: 'modified_desc', label: 'Modified newest first' },
+  { mode: 'manual', label: 'Manual order' },
+]
 
 export function OcrReview({
   hasKey,
@@ -80,11 +90,18 @@ export function OcrReview({
 }: OcrReviewProps) {
   const [fileDrafts, setFileDrafts] = useState<OcrFileDraft[]>([])
   const [appendDocumentId, setAppendDocumentId] = useState('')
-  const [appendChapterId, setAppendChapterId] = useState(appendTargetChapterId ?? '')
+  const [fileSortMode, setFileSortMode] = useState<OcrFileSortMode>('name_asc')
+  const [startSourcePageDraft, setStartSourcePageDraft] = useState(() =>
+    Math.max(1, Math.round(appendStartSourcePageNumber)).toString(),
+  )
+  const [isSortMenuOpen, setIsSortMenuOpen] = useState(false)
+  const [draggedFileDraftId, setDraggedFileDraftId] = useState<string | null>(null)
+  const [fileDragOverId, setFileDragOverId] = useState<string | null>(null)
   const [focusedReviewId, setFocusedReviewId] = useState<string | null>(null)
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null)
   const [selectionWarnings, setSelectionWarnings] = useState<string[]>([])
   const replacementInputs = useRef<Record<string, HTMLInputElement | null>>({})
+  const startSourcePageTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const ocrJobs = useAppStore((state) => state.ocrJobs)
   const ocrJobItems = useAppStore((state) => state.ocrJobItems)
   const ocrRuntimeJobs = useAppStore((state) => state.ocrRuntimeJobs)
@@ -105,7 +122,7 @@ export function OcrReview({
         .sort((left, right) => left.sortOrder - right.sortOrder)
     : []
   const selectedAppendChapterIdBeforeJob = appendTargetDocumentId
-    ? appendChapterId || appendTargetChapterId || appendTargetChapters[appendTargetChapters.length - 1]?.id || null
+    ? appendTargetChapterId || appendTargetChapters[appendTargetChapters.length - 1]?.id || null
     : null
   const scopedJobs = useMemo(
     () =>
@@ -171,6 +188,15 @@ export function OcrReview({
 
   const appendDocumentValue = appendDocumentId || availableDocuments[0]?.id || ''
 
+  useEffect(
+    () => () => {
+      if (startSourcePageTimer.current) {
+        clearTimeout(startSourcePageTimer.current)
+      }
+    },
+    [],
+  )
+
   function startOcr(selectedDrafts = fileDrafts): void {
     if (!selectedDrafts.length || !hasKey) {
       return
@@ -193,8 +219,9 @@ export function OcrReview({
   }
 
   function selectFiles(selectedFiles: File[]): void {
-    const limitedFiles = selectedFiles.slice(0, MAX_OCR_FILES)
+    const limitedFiles = sortFilesByMode(selectedFiles, 'name_asc').slice(0, MAX_OCR_FILES)
     const sourcePageStart = Math.max(1, Math.round(appendStartSourcePageNumber))
+    setStartSourcePageDraft(sourcePageStart.toString())
     setFileDrafts(
       limitedFiles.map((file, index) => ({
         id: `${file.name}-${file.lastModified}-${index}`,
@@ -203,6 +230,8 @@ export function OcrReview({
         sourcePageNumber: sourcePageStart + index,
       })),
     )
+    setFileSortMode('name_asc')
+    setIsSortMenuOpen(false)
     setFocusedReviewId(null)
     setSelectionWarnings(selectedFiles.length > MAX_OCR_FILES ? [`Only the first ${MAX_OCR_FILES} files will be processed.`] : [])
   }
@@ -222,8 +251,60 @@ export function OcrReview({
       const nextDrafts = [...drafts]
       const [movedDraft] = nextDrafts.splice(currentIndex, 1)
       nextDrafts.splice(targetIndex, 0, movedDraft)
-      return nextDrafts
+      return renumberFileDrafts(nextDrafts, appendStartSourcePageNumber)
     })
+    setFileSortMode('manual')
+  }
+
+  function applyFileSort(mode: OcrFileSortMode): void {
+    setFileDrafts((drafts) => {
+      const sortedDrafts = sortFileDraftsByMode(drafts, mode)
+      return renumberFileDrafts(sortedDrafts, appendStartSourcePageNumber)
+    })
+    setFileSortMode(mode)
+    setIsSortMenuOpen(false)
+  }
+
+  function applyStartSourcePage(value: string): void {
+    const startPage = normalizeSourcePageNumber(value)
+    if (startSourcePageTimer.current) {
+      clearTimeout(startSourcePageTimer.current)
+      startSourcePageTimer.current = null
+    }
+    if (startPage === null) {
+      return
+    }
+
+    setFileDrafts((drafts) => renumberFileDraftsFromStart(drafts, startPage))
+  }
+
+  function scheduleStartSourcePage(value: string): void {
+    if (startSourcePageTimer.current) {
+      clearTimeout(startSourcePageTimer.current)
+    }
+    startSourcePageTimer.current = setTimeout(() => {
+      applyStartSourcePage(value)
+    }, 2000)
+  }
+
+  function moveFileDraftTo(fileId: string, targetFileId: string): void {
+    if (fileId === targetFileId) {
+      return
+    }
+
+    setFileDrafts((drafts) => {
+      const currentIndex = drafts.findIndex((draft) => draft.id === fileId)
+      const targetIndex = drafts.findIndex((draft) => draft.id === targetFileId)
+      if (currentIndex < 0 || targetIndex < 0) {
+        return drafts
+      }
+
+      const nextDrafts = [...drafts]
+      const [movedDraft] = nextDrafts.splice(currentIndex, 1)
+      nextDrafts.splice(targetIndex, 0, movedDraft)
+      return renumberFileDrafts(nextDrafts, appendStartSourcePageNumber)
+    })
+    setFileSortMode('manual')
   }
 
   function handleCreateDocument(): void {
@@ -272,21 +353,6 @@ export function OcrReview({
                 : 'New pages will be added to this document.'}
             </span>
           </div>
-          {appendTargetChapters.length > 0 && !activeJob && (
-            <label className="field append-target-field">
-              Add to chapter
-              <select
-                onChange={(event) => setAppendChapterId(event.target.value)}
-                value={selectedAppendChapterIdBeforeJob ?? ''}
-              >
-                {appendTargetChapters.map((chapter) => (
-                  <option key={chapter.id} value={chapter.id}>
-                    {chapter.title}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
         </div>
       )}
 
@@ -329,32 +395,107 @@ export function OcrReview({
       {fileDrafts.length > 0 && !isRunning && !isReviewAvailable && (
         <div className="ocr-file-list" aria-label="Selected OCR file order">
           <div className="ocr-file-list-header">
-            <strong>{fileDrafts.length} file(s) selected</strong>
-            <span>Set the reading order and source page metadata before OCR.</span>
-            <span>Page title is optional; use it only when a page needs a short name in the organizer.</span>
+            <div>
+              <strong>{fileDrafts.length} file(s) selected</strong>
+              <span>Set the reading order and source page metadata before OCR.</span>
+              <span>Page title is optional; use it only when a page needs a short name in the organizer.</span>
+            </div>
+            <label className="field compact ocr-start-page-field">
+              Start page
+              <input
+                aria-label="Starting source page"
+                inputMode="numeric"
+                onBlur={() => applyStartSourcePage(startSourcePageDraft)}
+                onChange={(event) => {
+                  setStartSourcePageDraft(event.target.value)
+                  scheduleStartSourcePage(event.target.value)
+                }}
+                value={startSourcePageDraft}
+              />
+            </label>
+            <div className="ocr-sort-menu">
+              <button
+                aria-label="Sort OCR files"
+                aria-expanded={isSortMenuOpen}
+                aria-haspopup="menu"
+                className="icon-button"
+                onClick={() => setIsSortMenuOpen((isOpen) => !isOpen)}
+                title="Sort OCR files"
+                type="button"
+              >
+                <Filter aria-hidden="true" size={16} />
+              </button>
+              {isSortMenuOpen && (
+                <div className="ocr-sort-popout" role="menu">
+                  {OCR_FILE_SORT_OPTIONS.map((option) => (
+                    <button
+                      aria-current={fileSortMode === option.mode ? 'true' : undefined}
+                      key={option.mode}
+                      onClick={() => applyFileSort(option.mode)}
+                      role="menuitem"
+                      type="button"
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
           {fileDrafts.map((draft, index) => (
-            <article className="ocr-file-row" key={draft.id}>
+            <article
+              className={`ocr-file-row ${draggedFileDraftId === draft.id ? 'dragging' : ''} ${fileDragOverId === draft.id ? 'drag-over' : ''}`}
+              draggable
+              key={draft.id}
+              onDragEnd={() => {
+                setDraggedFileDraftId(null)
+                setFileDragOverId(null)
+              }}
+              onDragOver={(event) => {
+                event.preventDefault()
+                setFileDragOverId(draft.id)
+              }}
+              onDragStart={(event) => {
+                event.dataTransfer.effectAllowed = 'move'
+                event.dataTransfer.setData('text/plain', draft.id)
+                setDraggedFileDraftId(draft.id)
+              }}
+              onDrop={(event) => {
+                event.preventDefault()
+                const movedFileId = event.dataTransfer.getData('text/plain') || draggedFileDraftId
+                if (movedFileId) {
+                  moveFileDraftTo(movedFileId, draft.id)
+                }
+                setDraggedFileDraftId(null)
+                setFileDragOverId(null)
+              }}
+            >
               <div>
-                <span className="eyebrow">Item {index + 1}</span>
+                <span className="eyebrow">
+                  <GripVertical aria-hidden="true" size={14} /> Item {index + 1}
+                </span>
                 <strong>{draft.file.name}</strong>
               </div>
               <div className="ocr-file-controls">
                 <button
-                  className="ghost-button"
+                  aria-label={`Move ${draft.file.name} up`}
+                  className="icon-button"
                   disabled={index === 0}
                   onClick={() => moveFileDraft(draft.id, -1)}
+                  title="Move up"
                   type="button"
                 >
-                  Up
+                  <ArrowUp aria-hidden="true" size={16} />
                 </button>
                 <button
-                  className="ghost-button"
+                  aria-label={`Move ${draft.file.name} down`}
+                  className="icon-button"
                   disabled={index === fileDrafts.length - 1}
                   onClick={() => moveFileDraft(draft.id, 1)}
+                  title="Move down"
                   type="button"
                 >
-                  Down
+                  <ArrowDown aria-hidden="true" size={16} />
                 </button>
                 <label className="field compact">
                   Page title (optional)
@@ -852,6 +993,50 @@ function deriveProgressState(
 function inferDocumentTitle(items: OcrJobItem[], fallbackDrafts: OcrFileDraft[]): string {
   const firstReviewItem = items.find((item) => item.status === 'review')
   return firstReviewItem?.sourceFileName.replace(/\.[^.]+$/, '') ?? fallbackDrafts[0]?.file.name.replace(/\.[^.]+$/, '') ?? 'OCR import'
+}
+
+function sortFilesByMode(files: File[], mode: OcrFileSortMode): File[] {
+  return [...files].sort((left, right) => compareFilesByMode(left, right, mode))
+}
+
+function sortFileDraftsByMode(drafts: OcrFileDraft[], mode: OcrFileSortMode): OcrFileDraft[] {
+  if (mode === 'manual') {
+    return [...drafts]
+  }
+
+  return [...drafts].sort((left, right) => compareFilesByMode(left.file, right.file, mode))
+}
+
+function compareFilesByMode(left: File, right: File, mode: OcrFileSortMode): number {
+  switch (mode) {
+    case 'name_desc':
+      return fileNameCollator.compare(right.name, left.name) || right.lastModified - left.lastModified
+    case 'modified_asc':
+      return left.lastModified - right.lastModified || fileNameCollator.compare(left.name, right.name)
+    case 'modified_desc':
+      return right.lastModified - left.lastModified || fileNameCollator.compare(left.name, right.name)
+    case 'manual':
+    case 'name_asc':
+      return fileNameCollator.compare(left.name, right.name) || left.lastModified - right.lastModified
+  }
+}
+
+function renumberFileDrafts(drafts: OcrFileDraft[], fallbackStartPage: number): OcrFileDraft[] {
+  const sourcePageNumbers = drafts
+    .map((draft) => draft.sourcePageNumber)
+    .filter((pageNumber): pageNumber is number => typeof pageNumber === 'number' && Number.isFinite(pageNumber))
+  const firstPage = sourcePageNumbers.length
+    ? Math.max(1, Math.round(Math.min(...sourcePageNumbers)))
+    : Math.max(1, Math.round(fallbackStartPage))
+
+  return renumberFileDraftsFromStart(drafts, firstPage)
+}
+
+function renumberFileDraftsFromStart(drafts: OcrFileDraft[], firstPage: number): OcrFileDraft[] {
+  return drafts.map((draft, index) => ({
+    ...draft,
+    sourcePageNumber: firstPage + index,
+  }))
 }
 
 function pageKey(item: OcrJobItem, page: OcrJobItemPage): string {

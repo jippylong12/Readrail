@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { OcrReview } from '../components/OcrReview'
@@ -412,6 +412,130 @@ describe('OcrReview', () => {
     expect(screen.getByRole('button', { name: 'Process 25 page(s)' })).toBeTruthy()
   })
 
+  it('sorts staged OCR files by numeric filename by default', async () => {
+    const user = userEvent.setup()
+    const { container } = render(
+      <OcrReview
+        documents={[]}
+        hasKey
+        loadApiKey={vi.fn().mockResolvedValue('browser-key')}
+        onAppendPages={vi.fn()}
+        onCreateDocument={vi.fn()}
+        preservePageBreaks
+        stripImageMetadataBeforeOcr={false}
+      />,
+    )
+
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]')
+    await user.upload(input!, [
+      new File(['image'], 'IMG_00002.png', { type: 'image/png', lastModified: 2 }),
+      new File(['image'], 'IMG_00001.png', { type: 'image/png', lastModified: 1 }),
+    ])
+
+    expect(screen.getByLabelText('Source page for IMG_00001.png')).toHaveProperty('value', '1')
+    expect(screen.getByLabelText('Source page for IMG_00002.png')).toHaveProperty('value', '2')
+  })
+
+  it('resorts staged OCR files and renumbers from the lowest source page', async () => {
+    const user = userEvent.setup()
+    runGeminiOcrFromFilesMock
+      .mockResolvedValueOnce({
+        titleGuess: 'Sorted pages',
+        pages: [
+          {
+            pageNumber: 1,
+            sourcePageNumber: null,
+            text: 'Newest image text.',
+            confidence: null,
+            notes: null,
+            sourceFileName: null,
+            uncertainSpans: [],
+          },
+        ],
+        warnings: [],
+      })
+      .mockResolvedValueOnce({
+        titleGuess: null,
+        pages: [
+          {
+            pageNumber: 1,
+            sourcePageNumber: null,
+            text: 'Oldest image text.',
+            confidence: null,
+            notes: null,
+            sourceFileName: null,
+            uncertainSpans: [],
+          },
+        ],
+        warnings: [],
+      })
+    const { container } = render(
+      <OcrReview
+        documents={[]}
+        hasKey
+        loadApiKey={vi.fn().mockResolvedValue('browser-key')}
+        onAppendPages={vi.fn()}
+        onCreateDocument={vi.fn()}
+        preservePageBreaks
+        stripImageMetadataBeforeOcr={false}
+      />,
+    )
+
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]')
+    await user.upload(input!, [
+      new File(['image'], 'IMG_00001.png', { type: 'image/png', lastModified: 1 }),
+      new File(['image'], 'IMG_00002.png', { type: 'image/png', lastModified: 2 }),
+    ])
+    await user.clear(screen.getByLabelText('Source page for IMG_00001.png'))
+    await user.type(screen.getByLabelText('Source page for IMG_00001.png'), '162')
+    await user.clear(screen.getByLabelText('Source page for IMG_00002.png'))
+    await user.type(screen.getByLabelText('Source page for IMG_00002.png'), '161')
+
+    await user.click(screen.getByRole('button', { name: 'Sort OCR files' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Modified newest first' }))
+
+    expect(screen.getByLabelText('Source page for IMG_00002.png')).toHaveProperty('value', '161')
+    expect(screen.getByLabelText('Source page for IMG_00001.png')).toHaveProperty('value', '162')
+
+    await user.click(screen.getByRole('button', { name: 'Process 2 page(s)' }))
+    await waitFor(() => expect(screen.getByDisplayValue('Sorted pages')).toBeTruthy())
+
+    expect(runGeminiOcrFromFilesMock.mock.calls.map((call) => call[1][0]?.name)).toEqual([
+      'IMG_00002.png',
+      'IMG_00001.png',
+    ])
+  })
+
+  it('auto-fills staged OCR source pages from a chosen starting page', async () => {
+    const user = userEvent.setup()
+    const { container } = render(
+      <OcrReview
+        documents={[]}
+        hasKey
+        loadApiKey={vi.fn().mockResolvedValue('browser-key')}
+        onAppendPages={vi.fn()}
+        onCreateDocument={vi.fn()}
+        preservePageBreaks
+        stripImageMetadataBeforeOcr={false}
+      />,
+    )
+
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]')
+    await user.upload(input!, [
+      new File(['image'], 'IMG_00001.png', { type: 'image/png' }),
+      new File(['image'], 'IMG_00002.png', { type: 'image/png' }),
+      new File(['image'], 'IMG_00003.png', { type: 'image/png' }),
+    ])
+
+    await user.clear(screen.getByLabelText('Starting source page'))
+    await user.type(screen.getByLabelText('Starting source page'), '163')
+    fireEvent.blur(screen.getByLabelText('Starting source page'))
+
+    expect(screen.getByLabelText('Source page for IMG_00001.png')).toHaveProperty('value', '163')
+    expect(screen.getByLabelText('Source page for IMG_00002.png')).toHaveProperty('value', '164')
+    expect(screen.getByLabelText('Source page for IMG_00003.png')).toHaveProperty('value', '165')
+  })
+
   it('processes files in the user-defined order with staged source metadata', async () => {
     const user = userEvent.setup()
     const onCreateDocument = vi.fn()
@@ -466,7 +590,7 @@ describe('OcrReview', () => {
     const firstSourcePage = screen.getByLabelText('Source page for page-a.png')
     await user.clear(firstSourcePage)
     await user.type(firstSourcePage, '10')
-    await user.click(screen.getAllByRole('button', { name: 'Down' })[0])
+    await user.click(screen.getByRole('button', { name: 'Move page-a.png down' }))
     await user.click(screen.getByRole('button', { name: 'Process 2 page(s)' }))
 
     await waitFor(() => expect(screen.getByDisplayValue('Ordered pages')).toBeTruthy())
@@ -481,7 +605,7 @@ describe('OcrReview', () => {
       }),
       expect.objectContaining({
         sourceFileName: 'page-a.png',
-        sourcePageNumber: 10,
+        sourcePageNumber: 3,
         text: 'First file text.',
       }),
     ])
@@ -884,7 +1008,7 @@ describe('OcrReview', () => {
     const input = container.querySelector<HTMLInputElement>('input[type="file"]')
     await user.upload(input!, [
       new File(['good'], 'good-page.png', { type: 'image/png' }),
-      new File(['bad'], 'bad-page.png', { type: 'image/png' }),
+      new File(['bad'], 'z-bad-page.png', { type: 'image/png' }),
     ])
     await user.click(screen.getByRole('button', { name: 'Process 2 page(s)' }))
 
@@ -968,7 +1092,7 @@ describe('OcrReview', () => {
     const input = container.querySelector<HTMLInputElement>('input[type="file"]')
     await user.upload(input!, [
       new File(['good'], 'good-page.png', { type: 'image/png' }),
-      new File(['bad'], 'bad-page.png', { type: 'image/png' }),
+      new File(['bad'], 'z-bad-page.png', { type: 'image/png' }),
     ])
     await user.click(screen.getByRole('button', { name: 'Process 2 page(s)' }))
 
@@ -983,14 +1107,14 @@ describe('OcrReview', () => {
     expect(screen.getByDisplayValue('Already successful.')).toBeTruthy()
     expect(runGeminiOcrFromFilesMock.mock.calls.map((call) => call[1][0]?.name)).toEqual([
       'good-page.png',
-      'bad-page.png',
-      'bad-page.png',
+      'z-bad-page.png',
+      'z-bad-page.png',
     ])
 
     await user.click(screen.getByRole('button', { name: 'Create document from pages' }))
     expect(onCreateDocument).toHaveBeenCalledWith('Retry import', [
       expect.objectContaining({ sourceFileName: 'good-page.png', text: 'Already successful.' }),
-      expect.objectContaining({ sourceFileName: 'bad-page.png', text: 'Recovered page.' }),
+      expect.objectContaining({ sourceFileName: 'z-bad-page.png', text: 'Recovered page.' }),
     ])
   })
 
@@ -1044,7 +1168,7 @@ describe('OcrReview', () => {
     const input = container.querySelector<HTMLInputElement>('input[type="file"]')
     await user.upload(input!, [
       new File(['good'], 'good-page.png', { type: 'image/png' }),
-      new File(['bad'], 'bad-page.png', { type: 'image/png' }),
+      new File(['bad'], 'z-bad-page.png', { type: 'image/png' }),
     ])
     await user.click(screen.getByRole('button', { name: 'Process 2 page(s)' }))
 
@@ -1052,7 +1176,7 @@ describe('OcrReview', () => {
     await user.click(screen.getByRole('button', { name: 'Next' }))
     expect(screen.getByText('Unreadable original.')).toBeTruthy()
     await user.upload(
-      screen.getByLabelText('Replacement file for bad-page.png'),
+      screen.getByLabelText('Replacement file for z-bad-page.png'),
       new File(['replacement'], 'replacement-page.png', { type: 'image/png' }),
     )
 
@@ -1061,7 +1185,7 @@ describe('OcrReview', () => {
     expect(screen.getByDisplayValue('Kept page text.')).toBeTruthy()
     expect(runGeminiOcrFromFilesMock.mock.calls.map((call) => call[1][0]?.name)).toEqual([
       'good-page.png',
-      'bad-page.png',
+      'z-bad-page.png',
       'replacement-page.png',
     ])
 
@@ -1177,20 +1301,18 @@ describe('OcrReview', () => {
     expect(screen.getByText('Destination')).toBeTruthy()
     expect(screen.getByText('Existing book')).toBeTruthy()
     expect(screen.getByText('New pages will be added to Part One.')).toBeTruthy()
-    expect(screen.getByLabelText('Add to chapter')).toHaveProperty('value', 'chapter-1')
-    await user.selectOptions(screen.getByLabelText('Add to chapter'), 'chapter-2')
-    expect(screen.getByText('New pages will be added to Part Two.')).toBeTruthy()
+    expect(screen.queryByLabelText('Add to chapter')).toBeNull()
 
     const input = container.querySelector<HTMLInputElement>('input[type="file"]')
     await user.upload(input!, [
       new File(['image'], 'chapter-page.png', { type: 'image/png' }),
       new File(['image'], 'chapter-page-2.png', { type: 'image/png' }),
     ])
-    expect(screen.getByLabelText('Source page for chapter-page.png')).toHaveProperty('value', '157')
-    expect(screen.getByLabelText('Source page for chapter-page-2.png')).toHaveProperty('value', '158')
+    expect(screen.getByLabelText('Source page for chapter-page-2.png')).toHaveProperty('value', '157')
+    expect(screen.getByLabelText('Source page for chapter-page.png')).toHaveProperty('value', '158')
     await user.click(screen.getByRole('button', { name: 'Process 2 page(s)' }))
 
-    await waitFor(() => expect(screen.getByText('Adding to Existing book / Part Two')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('Adding to Existing book / Part One')).toBeTruthy())
     await user.click(screen.getByRole('button', { name: 'Add reviewed pages' }))
 
     expect(onAppendPages).toHaveBeenCalledWith(
@@ -1199,7 +1321,7 @@ describe('OcrReview', () => {
         expect.objectContaining({ sourcePageNumber: 157, text: 'Chapter target page' }),
         expect.objectContaining({ sourcePageNumber: 158, text: 'Next chapter target page' }),
       ],
-      'chapter-2',
+      'chapter-1',
     )
   })
 })

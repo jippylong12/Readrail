@@ -271,20 +271,14 @@ describe('app section shortcuts', () => {
   it('deep-links document detail to selected chapters and paginated pages', async () => {
     const user = userEvent.setup()
     seedMultiChapterDocument()
-    window.history.replaceState(null, '', '/library/documents/document-1/chapters/chapter-2/pages/2')
+    window.history.replaceState(null, '', '/library/documents/document-1/chapters/chapter-2')
     render(<App />)
 
     expect(screen.getByRole('heading', { name: activeDocument.title })).toBeTruthy()
     const chapterNav = screen.getByRole('navigation', { name: 'Document chapters' })
     expect(within(chapterNav).getByRole('button', { name: /Chapter Two/i }).getAttribute('aria-current')).toBe('page')
-    expect(screen.getByText((_, element) => element?.textContent === 'Page 2 of 2 - showing 9-10 of 10')).toBeTruthy()
-    expect(screen.getByText('Chapter Two page 9')).toBeTruthy()
-    expect(screen.queryByText('Chapter Two page 1')).toBeNull()
-    expect(window.location.pathname).toBe('/library/documents/document-1/chapters/chapter-2/pages/2')
-
-    await user.click(screen.getByRole('button', { name: 'Previous page' }))
     expect(window.location.pathname).toBe('/library/documents/document-1/chapters/chapter-2')
-    expect(screen.getByText((_, element) => element?.textContent === 'Page 1 of 2 - showing 1-8 of 10')).toBeTruthy()
+    expect(screen.getByText((_, element) => element?.textContent === 'Page 1 of 1 - showing 1-10 of 10')).toBeTruthy()
     expect(screen.getByText('Chapter Two page 1')).toBeTruthy()
 
     await user.click(within(chapterNav).getByRole('button', { name: /Chapter One/i }))

@@ -712,12 +712,13 @@ describe('structured document store behavior', () => {
     expect(useAppStore.getState().sessions[0]).toEqual(session)
   })
 
-  it('updates page labels and source page numbers without replacing the page', () => {
+  it('updates page labels, source page numbers, and text without replacing the page', () => {
     const document = buildStructuredDocumentFixture()
 
     useAppStore.getState().updatePageMetadata('page-intro-1', {
       title: 'Opening page',
       sourcePageNumber: 101,
+      text: 'Edited introduction page.',
     })
 
     const state = useAppStore.getState()
@@ -727,7 +728,12 @@ describe('structured document store behavior', () => {
       documentId: document.id,
       title: 'Opening page',
       sourcePageNumber: 101,
-      text: 'First introduction page.',
+      text: 'Edited introduction page.',
+      wordCount: 3,
+    })
+    expect(state.documents.find((candidate) => candidate.id === document.id)).toMatchObject({
+      content: ['Edited introduction page.', 'Second introduction page.', 'Appendix page text.'].join('\n\n\f\n\n'),
+      wordCount: 9,
     })
   })
 
