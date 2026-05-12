@@ -75,4 +75,21 @@ describe('StatsChart aggregate surface', () => {
     expect(screen.getByText('No sessions yet')).toBeTruthy()
     expect(screen.getByText(/populate comprehension-adjusted trends/)).toBeTruthy()
   })
+
+  it('summarizes sessions for structured documents', () => {
+    const structuredDocument: DocumentRecord = {
+      ...sampleDocument,
+      title: 'Structured OCR reading',
+      sourceType: 'photo_ocr',
+      content: 'Page one.\n\n\f\n\nPage two.',
+      wordCount: 4,
+      estimatedPages: 2,
+    }
+
+    render(<StatsChart baselineResult={null} documents={[structuredDocument]} sessions={[readingSession]} />)
+
+    expect(screen.getByText('1 active documents')).toBeTruthy()
+    expect(screen.getByText('Words read')).toBeTruthy()
+    expect(screen.getByText('300')).toBeTruthy()
+  })
 })

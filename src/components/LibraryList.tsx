@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react'
-import type { DocumentRecord } from '../types/domain'
+import type { DocumentChapterRecord, DocumentPageRecord, DocumentRecord } from '../types/domain'
 
 type LibraryListProps = {
   documents: DocumentRecord[]
+  documentChapters: DocumentChapterRecord[]
+  documentPages: DocumentPageRecord[]
   activeDocumentId: string | null
   onOpenDocument: (id: string) => void
   onOpenReader: (id: string) => void
@@ -13,6 +15,8 @@ type LibraryListProps = {
 
 export function LibraryList({
   documents,
+  documentChapters,
+  documentPages,
   activeDocumentId,
   onOpenDocument,
   onOpenReader,
@@ -34,8 +38,9 @@ export function LibraryList({
         }
 
         return `${document.title} ${document.content}`.toLowerCase().includes(normalizedQuery)
+          || getStructuredSearchText(document.id, documentChapters, documentPages).includes(normalizedQuery)
       })
-  }, [documents, query])
+  }, [documentChapters, documentPages, documents, query])
 
   return (
     <section className="panel library-panel" data-tour="library-list">
@@ -140,4 +145,19 @@ export function LibraryList({
       )}
     </section>
   )
+}
+
+function getStructuredSearchText(
+  documentId: string,
+  chapters: DocumentChapterRecord[],
+  pages: DocumentPageRecord[],
+): string {
+  const chapterText = chapters
+    .filter((chapter) => chapter.documentId === documentId)
+    .map((chapter) => chapter.title)
+  const pageText = pages
+    .filter((page) => page.documentId === documentId)
+    .flatMap((page) => [page.title ?? '', page.text])
+
+  return [...chapterText, ...pageText].join(' ').toLowerCase()
 }

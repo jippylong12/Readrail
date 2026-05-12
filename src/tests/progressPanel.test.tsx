@@ -89,4 +89,18 @@ describe('ProgressPanel', () => {
 
     expect(onOpenReader).toHaveBeenCalledWith('doc-1')
   })
+
+  it('renders quiz attempts for structured documents by document title', () => {
+    const structuredDocument: DocumentRecord = {
+      ...documentRecord,
+      title: 'Structured OCR guide',
+      sourceType: 'photo_ocr',
+      content: 'First page.\n\n\f\n\nSecond page.',
+    }
+
+    render(<ProgressPanel coaching={coaching} documents={[structuredDocument]} onOpenReader={vi.fn()} quizAttempts={[attempt]} />)
+
+    expect(screen.getAllByText('Structured OCR guide')).toHaveLength(2)
+    expect(screen.getAllByText('100-300')).toHaveLength(2)
+  })
 })

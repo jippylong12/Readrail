@@ -189,7 +189,8 @@ function App() {
   )
 
   function exportFile(kind: 'json' | 'csv'): void {
-    const contents = kind === 'json' ? exportProgressJson(documents, sessions) : exportProgressCsv(sessions)
+    const exportInput = { documents, sessions, documentChapters, documentPages }
+    const contents = kind === 'json' ? exportProgressJson(exportInput) : exportProgressCsv(exportInput)
     const type = kind === 'json' ? 'application/json' : 'text/csv'
     const blob = new Blob([contents], { type })
     const url = URL.createObjectURL(blob)
@@ -427,6 +428,8 @@ function App() {
           {route === 'library-saved' && (
             <LibraryList
               activeDocumentId={displayedDocument?.id ?? null}
+              documentChapters={documentChapters}
+              documentPages={documentPages}
               documents={documents}
               onArchive={archiveDocument}
               onOpenJourney={reopenOnboarding}

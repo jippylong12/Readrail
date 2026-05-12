@@ -9,7 +9,15 @@ import {
   getOrderedChapterPages,
   getOrderedDocumentPages,
 } from '../app/structuredDocuments'
-import type { DocumentChapterRecord, DocumentPageRecord, DocumentRecord, OcrJob, OcrJobItem } from '../types/domain'
+import type {
+  DocumentChapterRecord,
+  DocumentPageRecord,
+  DocumentRecord,
+  OcrJob,
+  OcrJobItem,
+  QuizAttempt,
+  ReadingSession,
+} from '../types/domain'
 
 type LegacyDocumentRecord = Omit<DocumentRecord, 'structureVersion'>
 
@@ -502,6 +510,62 @@ describe('structured document store behavior', () => {
     expect(state.documentChapters.filter((candidate) => candidate.documentId === document.id)).toHaveLength(1)
     expect(state.documentPages.filter((page) => page.documentId === document.id)).toHaveLength(1)
     expect(state.documents[0].content).toBe('Only page text.')
+  })
+
+  it('archives structured documents without orphaning local structured data or history', () => {
+    const document = buildStructuredDocumentFixture()
+    const session: ReadingSession = {
+      id: 'session-structured',
+      documentId: document.id,
+      mode: 'rail',
+      targetWpm: 240,
+      actualWpm: 220,
+      adjustedWpm: 210,
+      wordsRead: 6,
+      durationSeconds: 2,
+      startPosition: 0,
+      endPosition: 6,
+      pauseCount: 0,
+      regressionCount: 0,
+      comprehensionScore: 90,
+      selfRating: null,
+      notes: '',
+      startedAt: '2026-05-11T12:00:00.000Z',
+      endedAt: '2026-05-11T12:00:02.000Z',
+    }
+    const quizAttempt: QuizAttempt = {
+      id: 'quiz-structured',
+      documentId: document.id,
+      readingSessionId: session.id,
+      kind: 'generated',
+      startWordIndex: 0,
+      endWordIndex: 6,
+      wordCount: 6,
+      durationSeconds: 2,
+      targetWpm: 240,
+      rawWpm: 220,
+      comprehensionPercent: 90,
+      adjustedWpm: 210,
+      recommendedWpm: 215,
+      explanation: 'Steady.',
+      questionResults: [],
+      questions: [],
+      createdAt: '2026-05-11T12:00:03.000Z',
+    }
+    useAppStore.setState({
+      sessions: [session],
+      quizAttempts: [quizAttempt],
+    })
+
+    useAppStore.getState().archiveDocument(document.id)
+
+    const state = useAppStore.getState()
+    expect(state.documents[0].archivedAt).toBeTruthy()
+    expect(state.activeDocumentId).toBeNull()
+    expect(state.documentChapters.filter((chapter) => chapter.documentId === document.id)).toHaveLength(2)
+    expect(state.documentPages.filter((page) => page.documentId === document.id)).toHaveLength(3)
+    expect(state.sessions).toEqual([session])
+    expect(state.quizAttempts).toEqual([quizAttempt])
   })
 
   it('updates page labels and source page numbers without replacing the page', () => {
