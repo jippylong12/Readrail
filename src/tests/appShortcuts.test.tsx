@@ -30,6 +30,9 @@ function resetStore(): void {
     documents: [activeDocument],
     documentChapters: [structure.chapter],
     documentPages: [structure.page],
+    ocrJobs: [],
+    ocrJobItems: [],
+    ocrRuntimeJobs: {},
     sessions: [],
     activeDocumentId: activeDocument.id,
     onboarding: {
@@ -91,6 +94,9 @@ function seedMultiChapterDocument(): void {
       ...Array.from({ length: 3 }, (_, index) => buildPage(chapterOne.id, index + 1, index, `Chapter One page ${index + 1}`)),
       ...Array.from({ length: 10 }, (_, index) => buildPage(chapterTwo.id, index + 4, index, `Chapter Two page ${index + 1}`)),
     ],
+    ocrJobs: [],
+    ocrJobItems: [],
+    ocrRuntimeJobs: {},
     sessions: [],
     activeDocumentId: activeDocument.id,
     onboarding: {

@@ -9,6 +9,7 @@ import type {
   DocumentRecord,
   OcrJob,
   OcrJobItem,
+  OcrJobItemPage,
   OcrReviewStatus,
   OcrUncertainSpan,
   OnboardingState,
@@ -19,6 +20,9 @@ import type {
   TourProgressState,
   QuizAttempt,
 } from '../types/domain'
+import { runGeminiOcrFromFiles } from '../lib/ai/geminiOcr'
+import type { OcrPipelineProgress, OcrPipelineStage, OcrResultPage } from '../lib/ai/geminiOcr'
+import { stripImageMetadata } from '../lib/files/imageMetadata'
 import { calculateAdjustedWpm, calculateActualWpm } from '../lib/reading/pacing'
 import { cleanReadingText } from '../lib/text/cleanup'
 import { countWords, estimatePages } from '../lib/text/wordCount'
@@ -58,6 +62,37 @@ type CreateOcrDocumentInput = {
   pages: OcrPageInput[]
 }
 
+export type OcrFileInput = {
+  file: File
+  title: string
+  sourcePageNumber: number | null
+}
+
+export type OcrStageState = OcrPipelineProgress['status'] | 'pending'
+
+export type OcrRuntimeJobState = {
+  jobId: string
+  filesByItemId: Record<string, File>
+  progressMessage: string
+  progressState: Record<OcrPipelineStage, OcrStageState>
+  titleGuess: string | null
+  documentTitle: string
+  error: string | null
+}
+
+type StartOcrJobInput = {
+  files: OcrFileInput[]
+  documentId: string | null
+  targetChapterId: string | null
+  loadApiKey: () => Promise<string | null>
+  stripImageMetadataBeforeOcr: boolean
+}
+
+type RetryOcrJobItemInput = {
+  loadApiKey: () => Promise<string | null>
+  stripImageMetadataBeforeOcr: boolean
+}
+
 type CompleteSessionInput = {
   documentId: string
   mode: ReaderMode
@@ -79,6 +114,7 @@ type AppState = {
   documentPages: DocumentPageRecord[]
   ocrJobs: OcrJob[]
   ocrJobItems: OcrJobItem[]
+  ocrRuntimeJobs: Record<string, OcrRuntimeJobState>
   sessions: ReadingSession[]
   activeDocumentId: string | null
   settings: AppSettings
@@ -95,6 +131,14 @@ type AppState = {
     targetChapterId?: string | null,
   ) => DocumentRecord | null
   saveOcrJob: (job: OcrJob, items: OcrJobItem[]) => void
+  startOcrJob: (input: StartOcrJobInput) => string | null
+  retryOcrJobItem: (jobId: string, itemId: string, input: RetryOcrJobItemInput) => void
+  replaceOcrJobItemFile: (jobId: string, itemId: string, file: File, input: RetryOcrJobItemInput) => void
+  skipOcrJobItem: (jobId: string, itemId: string) => void
+  updateOcrJobPage: (jobId: string, itemId: string, pageNumber: number, updates: Partial<OcrJobItemPage>) => void
+  markOcrJobSaved: (jobId: string) => void
+  setOcrJobDocumentTitle: (jobId: string, title: string) => void
+  recoverInterruptedOcrJobs: () => void
   createChapter: (documentId: string, title?: string) => DocumentChapterRecord | null
   renameChapter: (chapterId: string, title: string) => void
   moveChapter: (documentId: string, chapterId: string, direction: -1 | 1) => void
@@ -143,6 +187,22 @@ const defaultSettings: AppSettings = {
     modelId: 'gemini-3.1-flash-lite',
     preservePageBreaks: true,
   },
+}
+
+const OCR_PROMPT_VERSION = 'structured-import-v1'
+const OCR_MODEL_ID = 'gemini-3.1-flash-lite'
+const OCR_INTERRUPTED_MESSAGE = 'OCR was interrupted while the app was closed. Replace the file to retry or skip this item.'
+
+export const OCR_PROGRESS_STEPS: Array<{ stage: OcrPipelineStage; label: string }> = [
+  { stage: 'ocr', label: 'OCR' },
+  { stage: 'cleaner', label: 'Cleaner' },
+  { stage: 'formatter', label: 'Formatter' },
+]
+
+export const initialOcrProgressState: Record<OcrPipelineStage, OcrStageState> = {
+  ocr: 'pending',
+  cleaner: 'pending',
+  formatter: 'pending',
 }
 
 export const defaultOnboardingState: OnboardingState = {
@@ -223,6 +283,397 @@ function rebuildDocumentFromStructure(
   }
 }
 
+function createOcrJobRecords(
+  fileInputs: OcrFileInput[],
+  documentId: string | null,
+  targetChapterId: string | null,
+): { job: OcrJob; items: OcrJobItem[]; filesByItemId: Record<string, File> } {
+  const now = new Date().toISOString()
+  const jobId = crypto.randomUUID()
+  const filesByItemId: Record<string, File> = {}
+  const items = fileInputs.map((input, index) => {
+    const itemId = crypto.randomUUID()
+    filesByItemId[itemId] = input.file
+    return {
+      id: itemId,
+      jobId,
+      orderIndex: index,
+      sourceFileName: input.file.name,
+      sourceFileType: input.file.type,
+      sourceFileSize: input.file.size,
+      sourceFileLastModified: input.file.lastModified,
+      sourcePageNumber: input.sourcePageNumber,
+      title: input.title.trim() || null,
+      status: 'queued' as const,
+      ocrText: null,
+      pages: [],
+      warnings: [],
+      failureReason: null,
+      createdAt: now,
+      updatedAt: now,
+    }
+  })
+
+  return {
+    job: {
+      id: jobId,
+      documentId,
+      targetChapterId,
+      status: 'queued',
+      modelId: OCR_MODEL_ID,
+      inputFileCount: fileInputs.length,
+      promptVersion: OCR_PROMPT_VERSION,
+      warnings: [],
+      errorMessage: null,
+      createdAt: now,
+      updatedAt: now,
+      completedAt: null,
+    },
+    items,
+    filesByItemId,
+  }
+}
+
+function getOcrJobSnapshot(jobId: string): { job: OcrJob; items: OcrJobItem[] } | null {
+  const state = useAppStore.getState()
+  const job = state.ocrJobs.find((candidate) => candidate.id === jobId)
+  if (!job) {
+    return null
+  }
+
+  return {
+    job,
+    items: state.ocrJobItems
+      .filter((item) => item.jobId === jobId)
+      .sort((left, right) => left.orderIndex - right.orderIndex),
+  }
+}
+
+function setOcrRuntimeState(jobId: string, updates: Partial<OcrRuntimeJobState>): void {
+  useAppStore.setState((state) => {
+    const currentRuntime =
+      state.ocrRuntimeJobs[jobId] ??
+      ({
+        jobId,
+        filesByItemId: {},
+        progressMessage: '',
+        progressState: { ...initialOcrProgressState },
+        titleGuess: null,
+        documentTitle: '',
+        error: null,
+      } satisfies OcrRuntimeJobState)
+
+    return {
+      ocrRuntimeJobs: {
+        ...state.ocrRuntimeJobs,
+        [jobId]: {
+          ...currentRuntime,
+          ...updates,
+          progressState: updates.progressState ?? currentRuntime.progressState,
+          filesByItemId: updates.filesByItemId ?? currentRuntime.filesByItemId,
+        },
+      },
+    }
+  })
+}
+
+async function runOcrJob(jobId: string, input: RetryOcrJobItemInput): Promise<void> {
+  try {
+    const apiKey = await input.loadApiKey()
+    if (!apiKey) {
+      throw new Error('Add a Gemini API key in Settings before running OCR.')
+    }
+
+    let snapshot = getOcrJobSnapshot(jobId)
+    if (!snapshot) {
+      return
+    }
+
+    for (const item of snapshot.items) {
+      if (item.status !== 'queued') {
+        continue
+      }
+      await processOcrJobItem(jobId, item.id, apiKey, input.stripImageMetadataBeforeOcr)
+      snapshot = getOcrJobSnapshot(jobId)
+      if (!snapshot) {
+        return
+      }
+    }
+
+    finalizeOcrJob(jobId)
+  } catch (error) {
+    const message = formatOcrErrorMessage(error)
+    const snapshot = getOcrJobSnapshot(jobId)
+    if (!snapshot) {
+      return
+    }
+    const now = new Date().toISOString()
+    useAppStore.getState().saveOcrJob(
+      {
+        ...snapshot.job,
+        status: 'failed',
+        errorMessage: message,
+        updatedAt: now,
+        completedAt: now,
+      },
+      snapshot.items,
+    )
+    setOcrRuntimeState(jobId, { error: message, progressMessage: message })
+  }
+}
+
+async function processOcrJobItem(
+  jobId: string,
+  itemId: string,
+  apiKey: string,
+  shouldStripImageMetadata: boolean,
+): Promise<void> {
+  const startedAt = new Date().toISOString()
+  const snapshot = getOcrJobSnapshot(jobId)
+  const runtime = useAppStore.getState().ocrRuntimeJobs[jobId]
+  const activeItem = snapshot?.items.find((item) => item.id === itemId)
+  const activeFile = runtime?.filesByItemId[itemId]
+  if (!snapshot || !activeItem || !activeFile) {
+    markOcrItemFailed(jobId, itemId, 'Replace the source file before retrying this OCR item.')
+    return
+  }
+
+  useAppStore.getState().saveOcrJob(
+    { ...snapshot.job, status: 'running', errorMessage: null, updatedAt: startedAt, completedAt: null },
+    snapshot.items.map((item) =>
+      item.id === itemId
+        ? {
+            ...item,
+            status: 'running',
+            failureReason: null,
+            warnings: [],
+            pages: [],
+            ocrText: null,
+            updatedAt: startedAt,
+          }
+        : item,
+    ),
+  )
+
+  const itemProgressPrefix = `Processing item ${activeItem.orderIndex + 1} of ${snapshot.items.length}`
+  setOcrRuntimeState(jobId, {
+    error: null,
+    progressMessage: `${itemProgressPrefix}.`,
+    progressState: { ...initialOcrProgressState },
+  })
+
+  try {
+    const preparedFiles = await prepareFilesForOcr([activeFile], shouldStripImageMetadata)
+    const result = await runGeminiOcrFromFiles(apiKey, preparedFiles.files, {
+      onProgress: (progress) =>
+        setOcrRuntimeState(jobId, {
+          progressMessage: `${itemProgressPrefix}: ${progress.message}`,
+          progressState: {
+            ...(useAppStore.getState().ocrRuntimeJobs[jobId]?.progressState ?? initialOcrProgressState),
+            [progress.stage]: progress.status,
+          },
+        }),
+    })
+    const selectedFile = preparedFiles.files[0] ?? activeFile
+    const finishedAt = new Date().toISOString()
+    const pages = result.pages.map((page, pageIndex) =>
+      buildOcrJobItemPage(page, activeItem, selectedFile, pageIndex, result.pages.length),
+    )
+    const itemWarnings = [...preparedFiles.warnings, ...result.warnings]
+    const nextSnapshot = getOcrJobSnapshot(jobId)
+    if (!nextSnapshot) {
+      return
+    }
+
+    const nextRuntime = useAppStore.getState().ocrRuntimeJobs[jobId]
+    useAppStore.getState().saveOcrJob(
+      {
+        ...nextSnapshot.job,
+        warnings: uniqueStrings([...nextSnapshot.job.warnings, ...itemWarnings]),
+        updatedAt: finishedAt,
+      },
+      nextSnapshot.items.map((item) =>
+        item.id === itemId
+          ? {
+              ...item,
+              status: 'review',
+              pages,
+              ocrText: pages.map((page) => page.text).join('\n\n\f\n\n'),
+              warnings: itemWarnings,
+              failureReason: null,
+              updatedAt: finishedAt,
+            }
+          : item,
+      ),
+    )
+    const inferredTitle = result.titleGuess || inferOcrDocumentTitle(getOcrJobSnapshot(jobId)?.items ?? [])
+    setOcrRuntimeState(jobId, {
+      titleGuess: nextRuntime?.titleGuess ?? result.titleGuess,
+      documentTitle: nextRuntime?.documentTitle || inferredTitle,
+    })
+  } catch (error) {
+    markOcrItemFailed(jobId, itemId, formatOcrErrorMessage(error))
+  }
+}
+
+function markOcrItemFailed(jobId: string, itemId: string, failureReason: string): void {
+  const snapshot = getOcrJobSnapshot(jobId)
+  const failedItem = snapshot?.items.find((item) => item.id === itemId)
+  if (!snapshot || !failedItem) {
+    return
+  }
+  const failedAt = new Date().toISOString()
+  useAppStore.getState().saveOcrJob(
+    {
+      ...snapshot.job,
+      warnings: uniqueStrings([...snapshot.job.warnings, `${failedItem.sourceFileName}: ${failureReason}`]),
+      updatedAt: failedAt,
+    },
+    snapshot.items.map((item) =>
+      item.id === itemId
+        ? {
+            ...item,
+            status: 'failed',
+            failureReason,
+            pages: [],
+            ocrText: null,
+            updatedAt: failedAt,
+          }
+        : item,
+    ),
+  )
+}
+
+function finalizeOcrJob(jobId: string): void {
+  const snapshot = getOcrJobSnapshot(jobId)
+  if (!snapshot) {
+    return
+  }
+
+  const now = new Date().toISOString()
+  const hasRunningItems = snapshot.items.some((item) => item.status === 'queued' || item.status === 'running')
+  const hasReviewItems = snapshot.items.some((item) => item.status === 'review')
+  const hasFailedItems = snapshot.items.some((item) => item.status === 'failed')
+  const status: OcrJob['status'] = hasRunningItems ? 'running' : hasReviewItems || hasFailedItems ? 'review' : 'failed'
+  useAppStore.getState().saveOcrJob(
+    {
+      ...snapshot.job,
+      status,
+      errorMessage: hasReviewItems || hasFailedItems ? null : 'No OCR pages returned.',
+      updatedAt: now,
+      completedAt: hasRunningItems ? null : now,
+    },
+    snapshot.items,
+  )
+  setOcrRuntimeState(jobId, {
+    progressMessage: status === 'review' ? 'Ready for review.' : 'OCR finished without reviewable pages.',
+  })
+}
+
+async function retryOcrJobItemInBackground(jobId: string, itemId: string, input: RetryOcrJobItemInput): Promise<void> {
+  try {
+    const apiKey = await input.loadApiKey()
+    if (!apiKey) {
+      throw new Error('Add a Gemini API key in Settings before running OCR.')
+    }
+
+    const snapshot = getOcrJobSnapshot(jobId)
+    if (!snapshot) {
+      return
+    }
+    const now = new Date().toISOString()
+    useAppStore.getState().saveOcrJob(
+      { ...snapshot.job, status: 'running', errorMessage: null, completedAt: null, updatedAt: now },
+      snapshot.items.map((item) =>
+        item.id === itemId
+          ? { ...item, status: 'queued', failureReason: null, warnings: [], pages: [], ocrText: null, updatedAt: now }
+          : item,
+      ),
+    )
+    await processOcrJobItem(jobId, itemId, apiKey, input.stripImageMetadataBeforeOcr)
+    finalizeOcrJob(jobId)
+  } catch (error) {
+    setOcrRuntimeState(jobId, { error: formatOcrErrorMessage(error), progressMessage: formatOcrErrorMessage(error) })
+    finalizeOcrJob(jobId)
+  }
+}
+
+function buildOcrJobItemPage(
+  page: OcrResultPage,
+  item: OcrJobItem,
+  sourceFile: File,
+  pageIndex: number,
+  itemPageCount: number,
+): OcrJobItemPage {
+  return {
+    pageNumber: pageIndex + 1,
+    title: itemPageCount === 1 ? item.title : item.title ? `${item.title} ${pageIndex + 1}` : null,
+    text: page.text,
+    reviewStatus: inferOcrReviewStatus(page.uncertainSpans.length, page.confidence, page.notes),
+    sourcePageNumber:
+      page.sourcePageNumber ??
+      (itemPageCount === 1 && item.sourcePageNumber !== null ? item.sourcePageNumber : null) ??
+      page.pageNumber,
+    ocrConfidence: page.confidence,
+    ocrNotes: page.notes,
+    uncertainSpans: page.uncertainSpans,
+    sourceFileName: page.sourceFileName ?? item.sourceFileName,
+    sourceKind: inferOcrSourceKind(sourceFile),
+  }
+}
+
+async function prepareFilesForOcr(
+  files: File[],
+  shouldStripImageMetadata: boolean,
+): Promise<{ files: File[]; warnings: string[] }> {
+  if (!shouldStripImageMetadata) {
+    return { files, warnings: [] }
+  }
+
+  const results = await Promise.all(files.map(stripImageMetadata))
+  return {
+    files: results.map((result) => result.file),
+    warnings: results.flatMap((result) => (result.warning ? [result.warning] : [])),
+  }
+}
+
+function inferOcrDocumentTitle(items: OcrJobItem[]): string {
+  const firstReviewItem = items.find((item) => item.status === 'review')
+  return firstReviewItem?.sourceFileName.replace(/\.[^.]+$/, '') ?? items[0]?.sourceFileName.replace(/\.[^.]+$/, '') ?? 'OCR import'
+}
+
+function inferOcrReviewStatus(
+  uncertainSpanCount: number,
+  confidence: number | null,
+  notes: string | null,
+): OcrReviewStatus {
+  if (uncertainSpanCount > 0 || notes || (confidence !== null && confidence < 0.8)) {
+    return 'needs_attention'
+  }
+
+  return 'reviewed'
+}
+
+function inferOcrSourceKind(file: File): OcrPageInput['sourceKind'] {
+  if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) {
+    return 'pdf'
+  }
+
+  if (file.type.startsWith('image/')) {
+    return 'image'
+  }
+
+  return null
+}
+
+function formatOcrErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'OCR failed'
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return Array.from(new Set(values.filter(Boolean)))
+}
+
 export const useAppStore = create<AppState>()(
   persist(
     (set) => ({
@@ -231,6 +682,7 @@ export const useAppStore = create<AppState>()(
       documentPages: [],
       ocrJobs: [],
       ocrJobItems: [],
+      ocrRuntimeJobs: {},
       sessions: [],
       activeDocumentId: null,
       settings: defaultSettings,
@@ -394,6 +846,161 @@ export const useAppStore = create<AppState>()(
           ],
         }))
         void saveOcrJobToDatabase(job, items)
+      },
+      startOcrJob: (input) => {
+        if (!input.files.length) {
+          return null
+        }
+
+        const records = createOcrJobRecords(input.files, input.documentId, input.targetChapterId)
+        set((state) => ({
+          ocrRuntimeJobs: {
+            ...state.ocrRuntimeJobs,
+            [records.job.id]: {
+              jobId: records.job.id,
+              filesByItemId: records.filesByItemId,
+              progressMessage: input.stripImageMetadataBeforeOcr
+                ? 'Preparing images and removing metadata.'
+                : 'Preparing OCR.',
+              progressState: { ...initialOcrProgressState },
+              titleGuess: null,
+              documentTitle: '',
+              error: null,
+            },
+          },
+        }))
+        useAppStore.getState().saveOcrJob(records.job, records.items)
+        void runOcrJob(records.job.id, input)
+        return records.job.id
+      },
+      retryOcrJobItem: (jobId, itemId, input) => {
+        void retryOcrJobItemInBackground(jobId, itemId, input)
+      },
+      replaceOcrJobItemFile: (jobId, itemId, file, input) => {
+        const snapshot = getOcrJobSnapshot(jobId)
+        if (!snapshot) {
+          return
+        }
+        const replacedAt = new Date().toISOString()
+        setOcrRuntimeState(jobId, {
+          filesByItemId: {
+            ...(useAppStore.getState().ocrRuntimeJobs[jobId]?.filesByItemId ?? {}),
+            [itemId]: file,
+          },
+        })
+        useAppStore.getState().saveOcrJob(
+          { ...snapshot.job, status: 'review', errorMessage: null, completedAt: null, updatedAt: replacedAt },
+          snapshot.items.map((item) =>
+            item.id === itemId
+              ? {
+                  ...item,
+                  sourceFileName: file.name,
+                  sourceFileType: file.type,
+                  sourceFileSize: file.size,
+                  sourceFileLastModified: file.lastModified,
+                  status: 'queued',
+                  ocrText: null,
+                  pages: [],
+                  warnings: [],
+                  failureReason: null,
+                  updatedAt: replacedAt,
+                }
+              : item,
+          ),
+        )
+        void retryOcrJobItemInBackground(jobId, itemId, input)
+      },
+      skipOcrJobItem: (jobId, itemId) => {
+        const snapshot = getOcrJobSnapshot(jobId)
+        if (!snapshot) {
+          return
+        }
+        const skippedAt = new Date().toISOString()
+        useAppStore.getState().saveOcrJob(
+          snapshot.job,
+          snapshot.items.map((item) =>
+            item.id === itemId
+              ? {
+                  ...item,
+                  status: 'skipped',
+                  pages: [],
+                  ocrText: null,
+                  updatedAt: skippedAt,
+                }
+              : item,
+          ),
+        )
+        finalizeOcrJob(jobId)
+      },
+      updateOcrJobPage: (jobId, itemId, pageNumber, updates) => {
+        const snapshot = getOcrJobSnapshot(jobId)
+        if (!snapshot) {
+          return
+        }
+        const updatedAt = new Date().toISOString()
+        useAppStore.getState().saveOcrJob(
+          { ...snapshot.job, updatedAt },
+          snapshot.items.map((item) =>
+            item.id === itemId
+              ? {
+                  ...item,
+                  pages: item.pages.map((page) => (page.pageNumber === pageNumber ? { ...page, ...updates } : page)),
+                  updatedAt,
+                }
+              : item,
+          ),
+        )
+      },
+      markOcrJobSaved: (jobId) => {
+        const snapshot = getOcrJobSnapshot(jobId)
+        if (!snapshot) {
+          return
+        }
+        const savedAt = new Date().toISOString()
+        useAppStore.getState().saveOcrJob(
+          {
+            ...snapshot.job,
+            status: 'saved',
+            errorMessage: null,
+            updatedAt: savedAt,
+            completedAt: savedAt,
+          },
+          snapshot.items,
+        )
+      },
+      setOcrJobDocumentTitle: (jobId, title) => {
+        setOcrRuntimeState(jobId, { documentTitle: title })
+      },
+      recoverInterruptedOcrJobs: () => {
+        const now = new Date().toISOString()
+        const state = useAppStore.getState()
+        for (const job of state.ocrJobs) {
+          if (job.status !== 'queued' && job.status !== 'running') {
+            continue
+          }
+          const items = state.ocrJobItems.filter((item) => item.jobId === job.id)
+          const recoveredItems = items.map((item) =>
+            item.status === 'queued' || item.status === 'running'
+              ? {
+                  ...item,
+                  status: 'failed' as const,
+                  failureReason: OCR_INTERRUPTED_MESSAGE,
+                  updatedAt: now,
+                }
+              : item,
+          )
+          useAppStore.getState().saveOcrJob(
+            {
+              ...job,
+              status: 'review',
+              errorMessage: null,
+              warnings: uniqueStrings([...job.warnings, OCR_INTERRUPTED_MESSAGE]),
+              updatedAt: now,
+              completedAt: now,
+            },
+            recoveredItems,
+          )
+        }
       },
       createChapter: (documentId, title) => {
         const now = new Date().toISOString()
@@ -962,6 +1569,7 @@ export const useAppStore = create<AppState>()(
           documentPages: [],
           ocrJobs: [],
           ocrJobItems: [],
+          ocrRuntimeJobs: {},
           sessions: [],
           activeDocumentId: null,
           onboarding: defaultOnboardingState,

@@ -3,7 +3,7 @@ import { DocumentOrganizer } from './DocumentOrganizer'
 import { OcrReview } from './OcrReview'
 import { getOrderedChapterPages, getOrderedDocumentChapters } from '../app/structuredDocuments'
 import type { OcrPageInput } from '../app/store'
-import type { DocumentChapterRecord, DocumentPageRecord, DocumentRecord, OcrJob, OcrJobItem } from '../types/domain'
+import type { DocumentChapterRecord, DocumentPageRecord, DocumentRecord } from '../types/domain'
 
 type DocumentDetailProps = {
   document: DocumentRecord | null
@@ -35,7 +35,6 @@ type DocumentDetailProps = {
   ) => void
   onAppendPages: (documentId: string, pages: OcrPageInput[], chapterId?: string | null) => void
   onCreateDocument: (title: string, pages: OcrPageInput[]) => void
-  onSaveOcrJob?: (job: OcrJob, items: OcrJobItem[]) => void
 }
 
 export function DocumentDetail({
@@ -60,7 +59,6 @@ export function DocumentDetail({
   onUpdatePageMetadata,
   onAppendPages,
   onCreateDocument,
-  onSaveOcrJob,
 }: DocumentDetailProps) {
   const documentChapters = document ? chapters.filter((chapter) => chapter.documentId === document.id) : []
   const documentPages = document ? pages.filter((page) => page.documentId === document.id) : []
@@ -161,7 +159,6 @@ export function DocumentDetail({
         loadApiKey={loadApiKey}
         onAppendPages={onAppendPages}
         onCreateDocument={onCreateDocument}
-        onSaveOcrJob={onSaveOcrJob}
         preservePageBreaks={preservePageBreaks}
         stripImageMetadataBeforeOcr={stripImageMetadataBeforeOcr}
       />

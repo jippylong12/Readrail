@@ -3,10 +3,11 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { OcrReview } from '../components/OcrReview'
+import { useAppStore } from '../app/store'
 import { runGeminiOcrFromFiles } from '../lib/ai/geminiOcr'
 import { stripImageMetadata } from '../lib/files/imageMetadata'
 import type { OcrResult } from '../lib/ai/geminiOcr'
-import type { DocumentChapterRecord, DocumentRecord } from '../types/domain'
+import type { DocumentChapterRecord, DocumentRecord, OcrJob, OcrJobItem } from '../types/domain'
 
 vi.mock('../lib/ai/geminiOcr', () => ({
   runGeminiOcrFromFiles: vi.fn(),
@@ -56,6 +57,11 @@ afterEach(() => {
   runGeminiOcrFromFilesMock.mockReset()
   stripImageMetadataMock.mockReset()
   stripImageMetadataMock.mockImplementation(async (file) => ({ file, stripped: false, warning: null }))
+  useAppStore.setState({
+    ocrJobs: [],
+    ocrJobItems: [],
+    ocrRuntimeJobs: {},
+  })
   vi.restoreAllMocks()
   cleanup()
 })
@@ -494,6 +500,241 @@ describe('OcrReview', () => {
     ])
   })
 
+  it('keeps active OCR progress and review state after the route unmounts and returns', async () => {
+    const user = userEvent.setup()
+    let resolveSecondOcr!: (value: OcrResult) => void
+    const secondOcrPromise = new Promise<OcrResult>((resolve) => {
+      resolveSecondOcr = resolve
+    })
+    runGeminiOcrFromFilesMock
+      .mockResolvedValueOnce({
+        titleGuess: 'Route safe import',
+        pages: [
+          {
+            pageNumber: 1,
+            sourcePageNumber: null,
+            text: 'First route-safe page.',
+            confidence: null,
+            notes: null,
+            sourceFileName: null,
+            uncertainSpans: [],
+          },
+        ],
+        warnings: [],
+      })
+      .mockImplementationOnce(async (_apiKey, _files, options) => {
+        options?.onProgress?.({ stage: 'ocr', status: 'running', message: 'Reading scans with Gemini OCR.' })
+        return secondOcrPromise
+      })
+
+    const firstRender = render(
+      <OcrReview
+        documents={[]}
+        hasKey
+        loadApiKey={vi.fn().mockResolvedValue('browser-key')}
+        onAppendPages={vi.fn()}
+        onCreateDocument={vi.fn()}
+        preservePageBreaks
+        stripImageMetadataBeforeOcr={false}
+      />,
+    )
+    const input = firstRender.container.querySelector<HTMLInputElement>('input[type="file"]')
+    await user.upload(input!, [
+      new File(['first'], 'route-first.png', { type: 'image/png' }),
+      new File(['second'], 'route-second.png', { type: 'image/png' }),
+    ])
+    await user.click(screen.getByRole('button', { name: 'Process 2 page(s)' }))
+
+    await waitFor(() => expect(screen.getByDisplayValue('First route-safe page.')).toBeTruthy())
+    expect(screen.getByText('Processing item 2 of 2: Reading scans with Gemini OCR.')).toBeTruthy()
+
+    cleanup()
+    render(
+      <OcrReview
+        documents={[]}
+        hasKey
+        loadApiKey={vi.fn().mockResolvedValue('browser-key')}
+        onAppendPages={vi.fn()}
+        onCreateDocument={vi.fn()}
+        preservePageBreaks
+        stripImageMetadataBeforeOcr={false}
+      />,
+    )
+
+    expect(screen.getByDisplayValue('First route-safe page.')).toBeTruthy()
+    expect(screen.getByText('Pending 1')).toBeTruthy()
+    expect(screen.getByText('Processing item 2 of 2: Reading scans with Gemini OCR.')).toBeTruthy()
+
+    resolveSecondOcr({
+      titleGuess: null,
+      pages: [
+        {
+          pageNumber: 1,
+          sourcePageNumber: null,
+          text: 'Second route-safe page.',
+          confidence: null,
+          notes: null,
+          sourceFileName: null,
+          uncertainSpans: [],
+        },
+      ],
+      warnings: [],
+    })
+
+    await waitFor(() => expect(screen.getByText('Approved 2')).toBeTruthy())
+    await user.click(screen.getByRole('button', { name: 'Next' }))
+    expect(screen.getByDisplayValue('Second route-safe page.')).toBeTruthy()
+  })
+
+  it('surfaces failed OCR items after leaving and returning to the route', async () => {
+    const user = userEvent.setup()
+    runGeminiOcrFromFilesMock
+      .mockResolvedValueOnce({
+        titleGuess: 'Recover failed import',
+        pages: [
+          {
+            pageNumber: 1,
+            sourcePageNumber: null,
+            text: 'Recovered route page.',
+            confidence: null,
+            notes: null,
+            sourceFileName: null,
+            uncertainSpans: [],
+          },
+        ],
+        warnings: [],
+      })
+      .mockRejectedValueOnce(new Error('Route-safe OCR failure.'))
+
+    const firstRender = render(
+      <OcrReview
+        documents={[]}
+        hasKey
+        loadApiKey={vi.fn().mockResolvedValue('browser-key')}
+        onAppendPages={vi.fn()}
+        onCreateDocument={vi.fn()}
+        preservePageBreaks
+        stripImageMetadataBeforeOcr={false}
+      />,
+    )
+    const input = firstRender.container.querySelector<HTMLInputElement>('input[type="file"]')
+    await user.upload(input!, [
+      new File(['good'], 'recover-good.png', { type: 'image/png' }),
+      new File(['bad'], 'recover-bad.png', { type: 'image/png' }),
+    ])
+    await user.click(screen.getByRole('button', { name: 'Process 2 page(s)' }))
+
+    await waitFor(() => expect(screen.getByText('Failed 1')).toBeTruthy())
+    cleanup()
+    render(
+      <OcrReview
+        documents={[]}
+        hasKey
+        loadApiKey={vi.fn().mockResolvedValue('browser-key')}
+        onAppendPages={vi.fn()}
+        onCreateDocument={vi.fn()}
+        preservePageBreaks
+        stripImageMetadataBeforeOcr={false}
+      />,
+    )
+
+    expect(screen.getByDisplayValue('Recovered route page.')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Next' }))
+    expect(screen.getByText('Route-safe OCR failure.')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Replace file' })).toBeTruthy()
+  })
+
+  it('recovers interrupted persisted OCR jobs as failed review items on startup', async () => {
+    const now = '2026-05-11T12:00:00.000Z'
+    const job: OcrJob = {
+      id: 'interrupted-job',
+      documentId: null,
+      targetChapterId: null,
+      status: 'running',
+      modelId: 'gemini-3.1-flash-lite',
+      inputFileCount: 2,
+      promptVersion: 'structured-import-v1',
+      warnings: [],
+      errorMessage: null,
+      createdAt: now,
+      updatedAt: now,
+      completedAt: null,
+    }
+    const items: OcrJobItem[] = [
+      {
+        id: 'interrupted-ready',
+        jobId: job.id,
+        orderIndex: 0,
+        sourceFileName: 'ready.png',
+        sourceFileType: 'image/png',
+        sourceFileSize: 5,
+        sourceFileLastModified: 1,
+        sourcePageNumber: 1,
+        title: null,
+        status: 'review',
+        ocrText: 'Already ready.',
+        pages: [
+          {
+            pageNumber: 1,
+            sourcePageNumber: 1,
+            title: null,
+            text: 'Already ready.',
+            reviewStatus: 'reviewed',
+            ocrConfidence: null,
+            ocrNotes: null,
+            uncertainSpans: [],
+            sourceFileName: 'ready.png',
+            sourceKind: 'image',
+          },
+        ],
+        warnings: [],
+        failureReason: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        id: 'interrupted-running',
+        jobId: job.id,
+        orderIndex: 1,
+        sourceFileName: 'running.png',
+        sourceFileType: 'image/png',
+        sourceFileSize: 5,
+        sourceFileLastModified: 1,
+        sourcePageNumber: 2,
+        title: null,
+        status: 'running',
+        ocrText: null,
+        pages: [],
+        warnings: [],
+        failureReason: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]
+    useAppStore.setState({ ocrJobs: [job], ocrJobItems: items, ocrRuntimeJobs: {} })
+
+    useAppStore.getState().recoverInterruptedOcrJobs()
+    render(
+      <OcrReview
+        documents={[]}
+        hasKey
+        loadApiKey={vi.fn().mockResolvedValue('browser-key')}
+        onAppendPages={vi.fn()}
+        onCreateDocument={vi.fn()}
+        preservePageBreaks
+        stripImageMetadataBeforeOcr={false}
+      />,
+    )
+
+    expect(screen.getByText('Failed 1')).toBeTruthy()
+    expect(screen.getByDisplayValue('Already ready.')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }))
+    expect(screen.getAllByText(/OCR was interrupted while the app was closed/).length).toBeGreaterThan(0)
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Replace file' })).toBeTruthy()
+  })
+
   it('strips supported image metadata before OCR when enabled', async () => {
     const user = userEvent.setup()
     const strippedFile = new File(['stripped'], 'scan.jpg', { type: 'image/jpeg' })
@@ -541,7 +782,6 @@ describe('OcrReview', () => {
   it('keeps successful OCR items when another file fails and allows skipping the failed item', async () => {
     const user = userEvent.setup()
     const onCreateDocument = vi.fn()
-    const onSaveOcrJob = vi.fn()
     runGeminiOcrFromFilesMock
       .mockResolvedValueOnce({
         titleGuess: 'Partial import',
@@ -566,7 +806,6 @@ describe('OcrReview', () => {
         loadApiKey={vi.fn().mockResolvedValue('browser-key')}
         onAppendPages={vi.fn()}
         onCreateDocument={onCreateDocument}
-        onSaveOcrJob={onSaveOcrJob}
         preservePageBreaks
         stripImageMetadataBeforeOcr={false}
       />,
@@ -598,9 +837,15 @@ describe('OcrReview', () => {
         text: 'Successful page text.',
       }),
     ])
-    const lastSavedJob = onSaveOcrJob.mock.calls.at(-1)
-    expect(lastSavedJob?.[0]).toMatchObject({ status: 'saved', inputFileCount: 2 })
-    expect(lastSavedJob?.[1].map((item: { status: string }) => item.status)).toEqual(['review', 'skipped'])
+    const savedJob = useAppStore.getState().ocrJobs[0]
+    expect(savedJob).toMatchObject({ status: 'saved', inputFileCount: 2 })
+    expect(
+      useAppStore
+        .getState()
+        .ocrJobItems.filter((item) => item.jobId === savedJob.id)
+        .sort((left, right) => left.orderIndex - right.orderIndex)
+        .map((item) => item.status),
+    ).toEqual(['review', 'skipped'])
   })
 
   it('retries only the failed OCR item without losing successful pages', async () => {
