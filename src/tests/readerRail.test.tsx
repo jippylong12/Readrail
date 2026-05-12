@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { useState } from 'react'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ReaderRail } from '../components/ReaderRail'
@@ -316,6 +316,102 @@ describe('ReaderRail scope setup', () => {
     expect(screen.getByText('First page words.')).toBeTruthy()
     expect(screen.getByText('Second page selected.')).toBeTruthy()
     expect(screen.getByText('Third page selected.')).toBeTruthy()
+  })
+
+  it('clamps the opposite page boundary when a selected page crosses the range', async () => {
+    const user = userEvent.setup()
+    const chapter = buildChapter(documentRecord, 'chapter-1', 'Chapter One')
+    const pages = [
+      buildPage(documentRecord, chapter.id, 'First page words.', 1, 41),
+      buildPage(documentRecord, chapter.id, 'Second page selected.', 2, 42),
+      buildPage(documentRecord, chapter.id, 'Third page selected.', 3, 43),
+      buildPage(documentRecord, chapter.id, 'Fourth page selected.', 4, 44),
+      buildPage(documentRecord, chapter.id, 'Fifth page selected.', 5, 45),
+    ]
+
+    function ScopedReader() {
+      const [scopeSelection, setScopeSelection] = useState<ReaderScopeSelection>({
+        scopeType: 'pages',
+        chapterId: chapter.id,
+        startPageNumber: 1,
+        endPageNumber: 2,
+      })
+      return (
+        <ReaderRail
+          baselineResult={null}
+          chapters={[chapter]}
+          defaultChunkSize={4}
+          defaultMode="rail"
+          defaultPageLayout={1}
+          defaultWpm={240}
+          document={documentRecord}
+          fontSize={20}
+          lineHeight={1.65}
+          pages={pages}
+          scopeSelection={scopeSelection}
+          segmentStartWordIndex={0}
+          onBackToLibrary={vi.fn()}
+          onSegmentReset={vi.fn()}
+          onSegmentStart={vi.fn()}
+          onScopeChange={setScopeSelection}
+          onStartTest={vi.fn()}
+        />
+      )
+    }
+
+    render(<ScopedReader />)
+
+    await user.selectOptions(screen.getByLabelText('Start page'), '3')
+
+    expect(screen.getByLabelText('Start page')).toHaveProperty('value', '3')
+    expect(screen.getByLabelText('End page')).toHaveProperty('value', '3')
+    expect(screen.getAllByText('Chapter One, page 43')).toHaveLength(2)
+    expect(screen.queryByText('Second page selected.')).toBeNull()
+    expect(screen.getByText('Third page selected.')).toBeTruthy()
+
+    await user.selectOptions(screen.getByLabelText('End page'), '2')
+
+    expect(screen.getByLabelText('Start page')).toHaveProperty('value', '2')
+    expect(screen.getByLabelText('End page')).toHaveProperty('value', '2')
+    expect(screen.getAllByText('Chapter One, page 42')).toHaveLength(2)
+    expect(screen.getByText('Second page selected.')).toBeTruthy()
+    expect(screen.queryByText('Third page selected.')).toBeNull()
+  })
+
+  it('shows the selected scope reading-time estimate at the active WPM', () => {
+    const chapter = buildChapter(documentRecord, 'chapter-1', 'Chapter One')
+    const pages = [
+      buildPage(documentRecord, chapter.id, Array.from({ length: 500 }, (_, index) => `word${index}`).join(' '), 1),
+    ]
+
+    render(
+      <ReaderRail
+        baselineResult={null}
+        chapters={[chapter]}
+        defaultChunkSize={4}
+        defaultMode="rail"
+        defaultPageLayout={1}
+        defaultWpm={250}
+        document={{ ...documentRecord, wordCount: 500 }}
+        fontSize={20}
+        lineHeight={1.65}
+        pages={pages}
+        scopeSelection={{ scopeType: 'pages', chapterId: chapter.id, startPageNumber: 1, endPageNumber: 1 }}
+        segmentStartWordIndex={0}
+        onBackToLibrary={vi.fn()}
+        onSegmentReset={vi.fn()}
+        onSegmentStart={vi.fn()}
+        onScopeChange={vi.fn()}
+        onStartTest={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('About 2 min at 250 WPM')).toBeTruthy()
+
+    const wpmInput = screen.getByRole('slider', { name: /WPM/ })
+    fireEvent.change(wpmInput, { target: { value: '125' } })
+
+    expect(screen.getByText('About 4 min at 125 WPM')).toBeTruthy()
   })
 
   it('reads only the selected scoped page text and reports document-level offsets', async () => {

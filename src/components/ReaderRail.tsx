@@ -11,7 +11,7 @@ import type {
 import { clampWpm, formatDuration } from '../lib/reading/pacing'
 import { cleanReadingText } from '../lib/text/cleanup'
 import { buildVirtualReaderPaneLayout, type ReaderPaneMetrics, type VirtualReaderPane } from '../lib/text/pages'
-import { countWords, estimatePages } from '../lib/text/wordCount'
+import { countWords, estimatePages, estimateReadingMinutes } from '../lib/text/wordCount'
 import { ReaderControls } from './ReaderControls'
 import {
   buildReaderScope,
@@ -439,6 +439,7 @@ export function ReaderRail({
           pages={pages}
           scope={activeScope}
           selection={scopeSelection}
+          targetWpm={targetWpm}
         />
       )}
 
@@ -511,6 +512,7 @@ type ReaderScopeSetupProps = {
   pages: DocumentPageRecord[]
   scope: BuiltReaderScope
   selection: ReaderScopeSelection
+  targetWpm: number
 }
 
 function ReaderScopeSetup({
@@ -521,6 +523,7 @@ function ReaderScopeSetup({
   pages,
   scope,
   selection,
+  targetWpm,
 }: ReaderScopeSetupProps) {
   const orderedChapters = useMemo(() => getOrderedDocumentChapters(document.id, chapters), [chapters, document.id])
   const selectedChapterId = scope.selectedChapterId ?? orderedChapters[0]?.id ?? null
@@ -575,17 +578,25 @@ function ReaderScopeSetup({
 
   function changePageRange(boundary: 'start' | 'end', pageNumber: number): void {
     onBeforeScopeChange()
-    const startPageNumber = boundary === 'start' ? pageNumber : selectedStartPageNumber
-    const endPageNumber = boundary === 'end' ? pageNumber : selectedEndPageNumber
-    if (!selectedChapterId || !startPageNumber || !endPageNumber) {
+    let startPageNumber = boundary === 'start' ? pageNumber : selectedStartPageNumber
+    let endPageNumber = boundary === 'end' ? pageNumber : selectedEndPageNumber
+    if (!selectedChapterId || startPageNumber == null || endPageNumber == null) {
       return
+    }
+
+    if (boundary === 'start' && startPageNumber > endPageNumber) {
+      endPageNumber = startPageNumber
+    }
+
+    if (boundary === 'end' && endPageNumber < startPageNumber) {
+      startPageNumber = endPageNumber
     }
 
     onScopeChange({
       scopeType: 'pages',
       chapterId: selectedChapterId,
-      startPageNumber: Math.min(startPageNumber, endPageNumber),
-      endPageNumber: Math.max(startPageNumber, endPageNumber),
+      startPageNumber,
+      endPageNumber,
     })
   }
 
@@ -596,6 +607,9 @@ function ReaderScopeSetup({
         <strong>{scope.scopeLabel}</strong>
         <span>
           {scope.pageCount.toLocaleString()} page(s) - {scope.wordCount.toLocaleString()} words
+        </span>
+        <span>
+          About {estimateReadingMinutes(scope.wordCount, targetWpm).toLocaleString()} min at {targetWpm.toLocaleString()} WPM
         </span>
       </div>
 
