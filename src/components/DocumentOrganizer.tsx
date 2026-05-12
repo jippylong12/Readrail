@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import { ArrowDown, ArrowUp, GripVertical, Trash2 } from 'lucide-react'
 import {
   getDocumentPageDisplayTitle,
@@ -22,8 +22,9 @@ type DocumentOrganizerProps = {
   onSelectPage: (pageNumber: number) => void
   onUpdatePageMetadata: (
     pageId: string,
-    updates: Partial<Pick<DocumentPageRecord, 'sourcePageNumber' | 'text' | 'title'>>,
+    updates: Partial<Pick<DocumentPageRecord, 'ocrNotes' | 'reviewStatus' | 'sourcePageNumber' | 'text' | 'title'>>,
   ) => void
+  onOpenPageDetail: (pageId: string) => void
   onPagesPerPageChange: (pagesPerPage: number) => void
   pageNumber: number
   pagesPerPage: number
@@ -44,6 +45,7 @@ export function DocumentOrganizer({
   onSelectChapter,
   onSelectPage,
   onUpdatePageMetadata,
+  onOpenPageDetail,
   onPagesPerPageChange,
   pageNumber,
   pagesPerPage,
@@ -54,12 +56,9 @@ export function DocumentOrganizer({
   const [chapterTitleDraft, setChapterTitleDraft] = useState('')
   const [pageLabelDrafts, setPageLabelDrafts] = useState<Record<string, string>>({})
   const [sourcePageDrafts, setSourcePageDrafts] = useState<Record<string, string>>({})
-  const [pageTextDrafts, setPageTextDrafts] = useState<Record<string, string>>({})
   const [selectedPageIds, setSelectedPageIds] = useState<Set<string>>(() => new Set())
-  const [expandedPageId, setExpandedPageId] = useState<string | null>(null)
   const [draggedPageId, setDraggedPageId] = useState<string | null>(null)
   const [pageDragOverId, setPageDragOverId] = useState<string | null>(null)
-  const pageTextSaveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const orderedChapters = getOrderedDocumentChapters(document.id, chapters)
   const selectedChapter = orderedChapters.find((chapter) => chapter.id === selectedChapterId) ?? orderedChapters[0] ?? null
   const selectedChapterIndex = selectedChapter
@@ -76,15 +75,6 @@ export function DocumentOrganizer({
   const selectedVisiblePageCount = visibleSelectablePageIds.filter((pageId) => validSelectedPageIds.has(pageId)).length
   const selectedPageCount = validSelectedPageIds.size
   const selectedPageDeleteDisabled = selectedPageCount === 0 || selectedPageCount >= pages.length
-
-  useEffect(
-    () => () => {
-      for (const timer of Object.values(pageTextSaveTimers.current)) {
-        clearTimeout(timer)
-      }
-    },
-    [],
-  )
 
   function submitChapter(): void {
     onCreateChapter(document.id, newChapterTitle)
@@ -103,33 +93,6 @@ export function DocumentOrganizer({
 
   function sourcePageValue(page: DocumentPageRecord): string {
     return sourcePageDrafts[page.id] ?? page.sourcePageNumber?.toString() ?? ''
-  }
-
-  function pageTextValue(page: DocumentPageRecord): string {
-    return pageTextDrafts[page.id] ?? page.text
-  }
-
-  function savePageText(page: DocumentPageRecord, text: string): void {
-    const timer = pageTextSaveTimers.current[page.id]
-    if (timer) {
-      clearTimeout(timer)
-      delete pageTextSaveTimers.current[page.id]
-    }
-
-    if (text !== page.text) {
-      onUpdatePageMetadata(page.id, { text })
-    }
-  }
-
-  function schedulePageTextSave(page: DocumentPageRecord, text: string): void {
-    const timer = pageTextSaveTimers.current[page.id]
-    if (timer) {
-      clearTimeout(timer)
-    }
-
-    pageTextSaveTimers.current[page.id] = setTimeout(() => {
-      savePageText(page, text)
-    }, 2000)
   }
 
   function confirmPageDelete(page: DocumentPageRecord): void {
@@ -201,10 +164,6 @@ export function DocumentOrganizer({
     if (deletedCount > 0) {
       clearPageSelection()
     }
-  }
-
-  function toggleExpandedPage(pageId: string): void {
-    setExpandedPageId((currentPageId) => (currentPageId === pageId ? null : pageId))
   }
 
   function moveDraggedPageTo(pageId: string | null, targetPage: DocumentPageRecord, targetIndex: number): void {
@@ -419,14 +378,12 @@ export function DocumentOrganizer({
                     const pageIndex = visibleStartIndex + visiblePageIndex
                     const displayTitle = getDocumentPageDisplayTitle(page)
                     const isSelected = validSelectedPageIds.has(page.id)
-                    const isExpanded = expandedPageId === page.id
                     return (
                       <article
-                        aria-expanded={isExpanded}
-                        className={`organizer-page ${isSelected ? 'selected' : ''} ${isExpanded ? 'expanded' : ''} ${draggedPageId === page.id ? 'dragging' : ''} ${pageDragOverId === page.id ? 'drag-over' : ''}`}
+                        className={`organizer-page ${isSelected ? 'selected' : ''} ${draggedPageId === page.id ? 'dragging' : ''} ${pageDragOverId === page.id ? 'drag-over' : ''}`}
                         draggable
                         key={page.id}
-                        onClick={() => toggleExpandedPage(page.id)}
+                        onClick={() => onOpenPageDetail(page.id)}
                         onDragEnd={() => {
                           setDraggedPageId(null)
                           setPageDragOverId(null)
@@ -547,35 +504,6 @@ export function DocumentOrganizer({
                           </label>
                         </div>
                         </div>
-                        {isExpanded && (
-                          <div
-                            aria-label={`${displayTitle} content preview`}
-                            className="organizer-page-preview"
-                            onClick={(event) => event.stopPropagation()}
-                            role="region"
-                          >
-                            <div className="organizer-page-preview-meta">
-                              <span>Document page {page.pageNumber}</span>
-                              <span>Source page {page.sourcePageNumber ?? 'unset'}</span>
-                              <span>{page.wordCount.toLocaleString()} words</span>
-                              <span>{page.reviewStatus}</span>
-                              {page.sourceFileName && <span>{page.sourceFileName}</span>}
-                            </div>
-                            <label className="field">
-                              Page content
-                              <textarea
-                                className="organizer-page-textarea"
-                                onBlur={() => savePageText(page, pageTextValue(page))}
-                                onChange={(event) => {
-                                  const text = event.target.value
-                                  setPageTextDrafts((drafts) => ({ ...drafts, [page.id]: text }))
-                                  schedulePageTextSave(page, text)
-                                }}
-                                value={pageTextValue(page)}
-                              />
-                            </label>
-                          </div>
-                        )}
                       </article>
                     )
                   })}

@@ -7,6 +7,7 @@ import { ImportPanel } from './components/ImportPanel'
 import { LibraryList } from './components/LibraryList'
 import { OnboardingJourney } from './components/OnboardingJourney'
 import { OcrReview } from './components/OcrReview'
+import { PageDetail } from './components/PageDetail'
 import { ReaderRail } from './components/ReaderRail'
 import { ReadingQuizPanel } from './components/ReadingQuizPanel'
 import { ProgressPanel, type ManualRetestInput } from './components/ProgressPanel'
@@ -592,6 +593,9 @@ function App() {
           onDocumentViewChange={(documentId, chapterId, pageNumber, options) => {
             navigate({ route: 'library-document', documentId, chapterId, pageNumber }, options)
           }}
+          onOpenPageDetail={(documentId, pageId) => {
+            navigate({ route: 'library-page', documentId, pageId })
+          }}
           onCreateChapter={(documentId, title) => {
             createChapter(documentId, title)
           }}
@@ -616,6 +620,30 @@ function App() {
           routeChapterId={navigation.chapterId ?? null}
           routePageNumber={navigation.pageNumber ?? null}
           stripImageMetadataBeforeOcr={settings.privacy.stripImageMetadataBeforeOcr}
+        />
+      )}
+
+      {route === 'library-page' && (
+        <PageDetail
+          chapters={documentChapters}
+          document={routedDocument}
+          key={navigation.pageId ?? 'missing-page'}
+          onBackToDocument={(documentId, chapterId) => {
+            navigate(chapterId ? { route: 'library-document', documentId, chapterId } : { route: 'library-document', documentId })
+          }}
+          onDeletePage={(pageId) => {
+            deletePage(pageId)
+          }}
+          onOpenPage={(documentId, pageId) => {
+            navigate({ route: 'library-page', documentId, pageId })
+          }}
+          onOpenReader={(documentId, chapterId) => {
+            setActiveDocument(documentId)
+            navigate(chapterId ? { route: 'reader', documentId, chapterId } : { route: 'reader', documentId })
+          }}
+          onUpdatePageMetadata={updatePageMetadata}
+          pageId={navigation.pageId ?? null}
+          pages={documentPages}
         />
       )}
 

@@ -426,6 +426,37 @@ h3 {
   font-weight: 700;
 }
 
+.page-detail-subtitle {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.page-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.page-content-field {
+  margin-top: 12px;
+}
+
+.page-content-field textarea {
+  min-height: 460px;
+  line-height: 1.55;
+  resize: vertical;
+}
+
+.page-detail-nav {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .ocr-destination-panel {
   display: flex;
   flex-wrap: wrap;

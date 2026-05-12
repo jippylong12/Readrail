@@ -5,6 +5,7 @@ export type AppRoute =
   | 'library-ocr'
   | 'library-saved'
   | 'library-document'
+  | 'library-page'
   | 'reader'
   | 'test'
   | 'progress'
@@ -19,6 +20,7 @@ export type RouteState = {
   documentId: string | null
   ocrJobId?: string | null
   chapterId?: string | null
+  pageId?: string | null
   pageNumber?: number | null
   startPageNumber?: number | null
   endPageNumber?: number | null
@@ -57,6 +59,13 @@ export function routeFromPath(pathname: string): RouteState {
       return { route: 'library-ocr', documentId: null }
     }
     if (segments[1] === 'documents' && segments[2]) {
+      if (segments[3] === 'pages' && segments[4]) {
+        return {
+          route: 'library-page',
+          documentId: segments[2],
+          pageId: segments[4],
+        }
+      }
       const pageNumber = segments[5] === 'pages' && segments[6] ? Number(segments[6]) : null
       return {
         route: 'library-document',
@@ -126,6 +135,13 @@ export function pathForRoute(routeState: RouteState): string {
           : chapterPath
       }
       return `/library/documents/${encodeURIComponent(routeState.documentId)}`
+    case 'library-page':
+      if (!routeState.documentId || !routeState.pageId) {
+        return routeState.documentId
+          ? `/library/documents/${encodeURIComponent(routeState.documentId)}`
+          : '/library/saved'
+      }
+      return `/library/documents/${encodeURIComponent(routeState.documentId)}/pages/${encodeURIComponent(routeState.pageId)}`
     case 'reader':
       if (!routeState.documentId) {
         return '/reader'
@@ -168,7 +184,7 @@ function costPath(routeState: RouteState): string {
 }
 
 export function primaryRouteFor(route: AppRoute): PrimaryRoute {
-  if (route === 'library-import' || route === 'library-ocr' || route === 'library-document') {
+  if (route === 'library-import' || route === 'library-ocr' || route === 'library-document' || route === 'library-page') {
     return 'library-saved'
   }
 

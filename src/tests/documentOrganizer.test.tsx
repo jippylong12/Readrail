@@ -56,25 +56,24 @@ afterEach(() => {
 })
 
 describe('DocumentOrganizer', () => {
-  it('opens an inline page content preview when a page row is clicked', async () => {
+  it('opens page details when a page row is clicked', async () => {
     const user = userEvent.setup()
-    renderOrganizer()
+    const onOpenPageDetail = vi.fn()
+    renderOrganizer({ onOpenPageDetail })
 
     await user.click(screen.getByText('Page 21'))
 
-    expect(screen.getByRole('region', { name: 'Page 21 content preview' })).toBeTruthy()
-    expect(screen.getByLabelText('Page content')).toHaveProperty('value', 'First introduction page.')
-    expect(screen.getByText('Document page 1')).toBeTruthy()
+    expect(onOpenPageDetail).toHaveBeenCalledWith('page-intro-1')
   })
 
-  it('does not open the page preview when selecting a page checkbox', async () => {
+  it('does not open page details when selecting a page checkbox', async () => {
     const user = userEvent.setup()
-    renderOrganizer()
+    const onOpenPageDetail = vi.fn()
+    renderOrganizer({ onOpenPageDetail })
 
     await user.click(screen.getByLabelText('Select Page 22'))
 
-    expect(screen.queryByRole('region', { name: 'Page 22 content preview' })).toBeNull()
-    expect(screen.queryByText('Second introduction page.')).toBeNull()
+    expect(onOpenPageDetail).not.toHaveBeenCalled()
     expect(screen.getByText('1 selected')).toBeTruthy()
   })
 
@@ -93,27 +92,6 @@ describe('DocumentOrganizer', () => {
     fireEvent.drop(secondRow!, { dataTransfer })
 
     expect(onMovePage).toHaveBeenCalledWith('page-intro-1', 'chapter-intro', 1)
-  })
-
-  it('edits page metadata and content from the organizer', async () => {
-    const user = userEvent.setup()
-    const onUpdatePageMetadata = vi.fn()
-    renderOrganizer({ onUpdatePageMetadata })
-
-    await user.click(screen.getByText('Page 21'))
-    await user.clear(screen.getByLabelText('Label for page 1'))
-    await user.type(screen.getByLabelText('Label for page 1'), 'Opening page')
-    fireEvent.blur(screen.getByLabelText('Label for page 1'))
-    await user.clear(screen.getByLabelText('Source page for page 1'))
-    await user.type(screen.getByLabelText('Source page for page 1'), '163')
-    fireEvent.blur(screen.getByLabelText('Source page for page 1'))
-    await user.clear(screen.getByLabelText('Page content'))
-    await user.type(screen.getByLabelText('Page content'), 'Edited page text.')
-    fireEvent.blur(screen.getByLabelText('Page content'))
-
-    expect(onUpdatePageMetadata).toHaveBeenCalledWith('page-intro-1', { title: 'Opening page' })
-    expect(onUpdatePageMetadata).toHaveBeenCalledWith('page-intro-1', { sourcePageNumber: 163 })
-    expect(onUpdatePageMetadata).toHaveBeenCalledWith('page-intro-1', { text: 'Edited page text.' })
   })
 
   it('allows selecting the number of pages shown in the document table', async () => {
@@ -138,6 +116,7 @@ function renderOrganizer(overrides: Partial<ComponentProps<typeof DocumentOrgani
       onDeletePages={vi.fn(() => 0)}
       onMoveChapter={vi.fn()}
       onMovePage={vi.fn()}
+      onOpenPageDetail={vi.fn()}
       onPagesPerPageChange={vi.fn()}
       onRenameChapter={vi.fn()}
       onSelectChapter={vi.fn()}

@@ -35,10 +35,11 @@ type DocumentDetailProps = {
   onDeletePages: (pageIds: string[]) => number
   onUpdatePageMetadata: (
     pageId: string,
-    updates: Partial<Pick<DocumentPageRecord, 'sourcePageNumber' | 'text' | 'title'>>,
+    updates: Partial<Pick<DocumentPageRecord, 'ocrNotes' | 'reviewStatus' | 'sourcePageNumber' | 'text' | 'title'>>,
   ) => void
   onAppendPages: (documentId: string, pages: OcrPageInput[], chapterId?: string | null) => void
   onCreateDocument: (title: string, pages: OcrPageInput[]) => void
+  onOpenPageDetail: (documentId: string, pageId: string) => void
 }
 
 export function DocumentDetail({
@@ -67,6 +68,7 @@ export function DocumentDetail({
   onUpdatePageMetadata,
   onAppendPages,
   onCreateDocument,
+  onOpenPageDetail,
 }: DocumentDetailProps) {
   const documentChapters = document ? chapters.filter((chapter) => chapter.documentId === document.id) : []
   const documentPages = document ? pages.filter((page) => page.documentId === document.id) : []
@@ -154,6 +156,7 @@ export function DocumentDetail({
           onMovePage={onMovePage}
           onSelectChapter={(chapterId) => onDocumentViewChange(document.id, chapterId, 1)}
           onSelectPage={(pageNumber) => onDocumentViewChange(document.id, selectedChapter?.id ?? null, pageNumber)}
+          onOpenPageDetail={(pageId) => onOpenPageDetail(document.id, pageId)}
           onRenameChapter={onRenameChapter}
           onUpdatePageMetadata={onUpdatePageMetadata}
           pages={documentPages}

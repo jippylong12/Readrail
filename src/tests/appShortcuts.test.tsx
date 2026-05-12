@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -288,6 +288,43 @@ describe('app section shortcuts', () => {
     expect(screen.getByLabelText('Label for page 1')).toBeTruthy()
   })
 
+  it('opens a dedicated page detail route and edits page metadata and content', async () => {
+    const user = userEvent.setup()
+    seedMultiChapterDocument()
+    window.history.replaceState(null, '', '/library/documents/document-1/pages/page-chapter-1-1')
+    render(<App />)
+
+    expect(screen.getByRole('heading', { name: 'Chapter One page 1' })).toBeTruthy()
+    expect(window.location.pathname).toBe('/library/documents/document-1/pages/page-chapter-1-1')
+
+    await user.clear(screen.getByLabelText('Page label'))
+    await user.type(screen.getByLabelText('Page label'), 'Opening page')
+    fireEvent.blur(screen.getByLabelText('Page label'))
+    await user.clear(screen.getByLabelText('Source page'))
+    await user.type(screen.getByLabelText('Source page'), '163')
+    fireEvent.blur(screen.getByLabelText('Source page'))
+    await user.selectOptions(screen.getByLabelText('Review status'), 'needs_attention')
+    await user.type(screen.getByLabelText('OCR notes'), 'Check the margin note')
+    fireEvent.blur(screen.getByLabelText('OCR notes'))
+    await user.clear(screen.getByLabelText('Page content'))
+    await user.type(screen.getByLabelText('Page content'), 'Edited page detail text.')
+    fireEvent.blur(screen.getByLabelText('Page content'))
+
+    const page = useAppStore.getState().documentPages.find((candidate) => candidate.id === 'page-chapter-1-1')!
+    expect(page).toMatchObject({
+      title: 'Opening page',
+      sourcePageNumber: 163,
+      reviewStatus: 'needs_attention',
+      ocrNotes: 'Check the margin note',
+      text: 'Edited page detail text.',
+      wordCount: 4,
+    })
+    expect(useAppStore.getState().documents[0].content).toContain('Edited page detail text.')
+
+    await user.click(screen.getByRole('button', { name: 'Back to document' }))
+    expect(window.location.pathname).toBe('/library/documents/document-1/chapters/chapter-1')
+  })
+
   it('confirms before deleting a structured page from the document organizer', async () => {
     const user = userEvent.setup()
     seedMultiChapterDocument()
@@ -470,6 +507,16 @@ describe('route helpers', () => {
       chapterId: 'chapter-2',
       pageNumber: 1,
     })).toBe('/library/documents/document-1/chapters/chapter-2')
+    expect(routeFromPath('/library/documents/document-1/pages/page-1')).toEqual({
+      route: 'library-page',
+      documentId: 'document-1',
+      pageId: 'page-1',
+    })
+    expect(pathForRoute({
+      route: 'library-page',
+      documentId: 'document-1',
+      pageId: 'page-1',
+    })).toBe('/library/documents/document-1/pages/page-1')
     expect(routeFromPath('/reader/document-1/chapters/chapter-2/pages/4/7')).toEqual({
       route: 'reader',
       documentId: 'document-1',

@@ -197,7 +197,7 @@ type AppState = {
   deletePages: (pageIds: string[]) => number
   updatePageMetadata: (
     pageId: string,
-    updates: Partial<Pick<DocumentPageRecord, 'sourcePageNumber' | 'text' | 'title'>>,
+    updates: Partial<Pick<DocumentPageRecord, 'ocrNotes' | 'reviewStatus' | 'sourcePageNumber' | 'text' | 'title'>>,
   ) => void
   updateDocument: (id: string, updates: Partial<Pick<DocumentRecord, 'title' | 'content'>>) => void
   archiveDocument: (id: string) => void
@@ -1703,6 +1703,9 @@ export const useAppStore = create<AppState>()(
                         ? cleanReadingText(updates.text, { preservePageBreaks: true })
                         : candidate.text,
                     title: updates.title !== undefined ? updates.title?.trim() || null : candidate.title,
+                    reviewStatus:
+                      updates.reviewStatus !== undefined ? updates.reviewStatus : candidate.reviewStatus,
+                    ocrNotes: updates.ocrNotes !== undefined ? updates.ocrNotes?.trim() || null : candidate.ocrNotes,
                     wordCount:
                       updates.text !== undefined
                         ? countWords(cleanReadingText(updates.text, { preservePageBreaks: true }))
