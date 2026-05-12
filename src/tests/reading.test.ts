@@ -234,6 +234,24 @@ describe('reading math', () => {
     expect(buildCoachingRecommendation(240, 240, 55).explanation).toContain('understanding can recover')
   })
 
+  it('keeps coaching copy evidence-based when raw WPM is high but comprehension drops', () => {
+    const lowComprehension = buildCoachingRecommendation(300, 800, 55)
+    const developingComprehension = buildCoachingRecommendation(300, 800, 78)
+
+    expect(lowComprehension).toMatchObject({
+      action: 'reduce',
+      recommendedWpm: 280,
+    })
+    expect(developingComprehension).toMatchObject({
+      action: 'hold',
+      recommendedWpm: 300,
+    })
+    expect(`${lowComprehension.explanation} ${lowComprehension.evidence.join(' ')}`).toMatch(/comprehension/i)
+    expect(`${developingComprehension.explanation} ${developingComprehension.evidence.join(' ')}`).toMatch(/comprehension/i)
+    expectNoUnrealisticCoachingClaims(lowComprehension)
+    expectNoUnrealisticCoachingClaims(developingComprehension)
+  })
+
   it('summarizes coaching trends, attempt kinds, reading volume, and streaks', () => {
     const attempts = [
       buildAttempt({
@@ -344,4 +362,11 @@ function buildSession(overrides: Partial<ReadingSession> = {}): ReadingSession {
     endedAt: '2026-05-10T09:01:30.000Z',
     ...overrides,
   }
+}
+
+function expectNoUnrealisticCoachingClaims(recommendation: ReturnType<typeof buildCoachingRecommendation>): void {
+  const text = `${recommendation.explanation} ${recommendation.evidence.join(' ')}`.toLowerCase()
+
+  expect(text).not.toMatch(/speed-reading mastery|double your speed|triple your speed|guaranteed|raw speed/)
+  expect(text).not.toMatch(/fast(er)? reader/)
 }

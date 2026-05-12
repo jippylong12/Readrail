@@ -174,6 +174,27 @@ describe('ProgressPanel', () => {
     expect(screen.getAllByText('100-300')).toHaveLength(2)
   })
 
+  it('renders archived document attempts with their original reading title', () => {
+    const archivedDocument: DocumentRecord = {
+      ...documentRecord,
+      archivedAt: '2026-05-11T13:00:00.000Z',
+    }
+
+    render(
+      <ProgressPanel
+        coaching={coaching}
+        documents={[archivedDocument]}
+        onOpenReader={vi.fn()}
+        onSaveRetest={vi.fn()}
+        quizAttempts={[attempt]}
+        sessions={[session]}
+      />,
+    )
+
+    expect(screen.getAllByText('Meaningful reading')).toHaveLength(2)
+    expect(screen.getByRole('heading', { name: 'Comprehension attempts' })).toBeTruthy()
+  })
+
   it('shows scoped session labels when available', () => {
     const scopedSession: ReadingSession = {
       ...session,

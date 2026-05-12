@@ -92,4 +92,22 @@ describe('StatsChart aggregate surface', () => {
     expect(screen.getByText('Words read')).toBeTruthy()
     expect(screen.getAllByText('300')).toHaveLength(2)
   })
+
+  it('keeps archived structured document sessions in stats while excluding them from active document count', () => {
+    const archivedStructuredDocument: DocumentRecord = {
+      ...sampleDocument,
+      title: 'Archived OCR reading',
+      sourceType: 'photo_ocr',
+      content: 'Page one.\n\n\f\n\nPage two.',
+      wordCount: 4,
+      estimatedPages: 2,
+      archivedAt: '2026-05-11T13:00:00.000Z',
+    }
+
+    render(<StatsChart baselineResult={null} documents={[archivedStructuredDocument]} sessions={[readingSession]} />)
+
+    expect(screen.getByText('0 active documents')).toBeTruthy()
+    expect(screen.getByText('Words read')).toBeTruthy()
+    expect(screen.getAllByText('300')).toHaveLength(2)
+  })
 })

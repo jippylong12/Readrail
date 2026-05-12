@@ -181,6 +181,7 @@ describe('structured document store behavior', () => {
       ocrJobs: [],
       ocrJobItems: [],
       sessions: [],
+      quizAttempts: [],
       activeDocumentId: null,
     })
   })
@@ -662,6 +663,11 @@ describe('structured document store behavior', () => {
     expect(state.documentPages.filter((page) => page.documentId === document.id)).toHaveLength(3)
     expect(state.sessions).toEqual([session])
     expect(state.quizAttempts).toEqual([quizAttempt])
+
+    useAppStore.getState().resetAllData()
+
+    expect(useAppStore.getState().sessions).toEqual([])
+    expect(useAppStore.getState().quizAttempts).toEqual([])
   })
 
   it('persists scoped Reader session metadata', () => {

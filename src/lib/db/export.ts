@@ -1,9 +1,10 @@
-import type { DocumentChapterRecord, DocumentPageRecord, DocumentRecord, ReadingSession } from '../../types/domain'
+import type { DocumentChapterRecord, DocumentPageRecord, DocumentRecord, QuizAttempt, ReadingSession } from '../../types/domain'
 import { getOrderedDocumentPages } from '../../app/structuredDocuments'
 
 export type ProgressExportInput = {
   documents: DocumentRecord[]
   sessions: ReadingSession[]
+  quizAttempts: QuizAttempt[]
   documentChapters: DocumentChapterRecord[]
   documentPages: DocumentPageRecord[]
 }
@@ -14,6 +15,7 @@ export function exportProgressJson(input: ProgressExportInput): string {
       exportedAt: new Date().toISOString(),
       documents: input.documents,
       sessions: input.sessions,
+      quizAttempts: input.quizAttempts,
       documentChapters: input.documentChapters,
       documentPages: input.documentPages,
     },
@@ -45,6 +47,27 @@ export function exportProgressCsv(input: ProgressExportInput): string {
     'page_numbers',
     'source_page_numbers',
     'page_titles',
+    'record_type',
+    'attempt_id',
+    'attempt_kind',
+    'attempt_scope_type',
+    'attempt_scope_label',
+    'attempt_chapter_id',
+    'attempt_chapter_title',
+    'attempt_page_ids',
+    'attempt_page_numbers',
+    'attempt_source_page_numbers',
+    'attempt_start_word_index',
+    'attempt_end_word_index',
+    'attempt_word_count',
+    'attempt_duration_seconds',
+    'attempt_target_wpm',
+    'attempt_raw_wpm',
+    'attempt_adjusted_wpm',
+    'attempt_comprehension_percent',
+    'attempt_recommended_wpm',
+    'attempt_explanation',
+    'attempt_created_at',
   ]
 
   const rows = input.sessions.map((session) => {
@@ -72,12 +95,83 @@ export function exportProgressCsv(input: ProgressExportInput): string {
       context?.pageNumbers.join(';') ?? '',
       context?.sourcePageNumbers.join(';') ?? '',
       context?.pageTitles.join(';') ?? '',
+      'session',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
     ]
       .map(csvEscape)
       .join(',')
   })
 
-  return [header.join(','), ...rows].join('\n')
+  const attemptRows = input.quizAttempts.map((attempt) => {
+    const document = documentById.get(attempt.documentId)
+
+    return [
+      '',
+      attempt.documentId,
+      document?.title ?? '',
+      attempt.scopeType ?? 'document',
+      attempt.scopeLabel ?? '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      attempt.chapterId ?? '',
+      attempt.chapterTitle ?? '',
+      attempt.pageNumbers.join(';'),
+      attempt.sourcePageNumbers.map((pageNumber) => pageNumber?.toString() ?? '').join(';'),
+      '',
+      'attempt',
+      attempt.id,
+      attempt.kind,
+      attempt.scopeType ?? 'document',
+      attempt.scopeLabel ?? '',
+      attempt.chapterId ?? '',
+      attempt.chapterTitle ?? '',
+      attempt.pageIds.join(';'),
+      attempt.pageNumbers.join(';'),
+      attempt.sourcePageNumbers.map((pageNumber) => pageNumber?.toString() ?? '').join(';'),
+      attempt.startWordIndex,
+      attempt.endWordIndex,
+      attempt.wordCount,
+      attempt.durationSeconds,
+      attempt.targetWpm,
+      attempt.rawWpm,
+      attempt.adjustedWpm,
+      attempt.comprehensionPercent,
+      attempt.recommendedWpm,
+      attempt.explanation,
+      attempt.createdAt,
+    ]
+      .map(csvEscape)
+      .join(',')
+  })
+
+  return [header.join(','), ...rows, ...attemptRows].join('\n')
 }
 
 function getSessionStructuredContext(

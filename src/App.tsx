@@ -209,7 +209,7 @@ function App() {
   )
 
   function exportFile(kind: 'json' | 'csv'): void {
-    const exportInput = { documents, sessions, documentChapters, documentPages }
+    const exportInput = { documents, sessions, quizAttempts, documentChapters, documentPages }
     const contents = kind === 'json' ? exportProgressJson(exportInput) : exportProgressCsv(exportInput)
     const type = kind === 'json' ? 'application/json' : 'text/csv'
     const blob = new Blob([contents], { type })
