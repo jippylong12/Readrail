@@ -299,6 +299,41 @@ describe('ReaderRail virtual panes', () => {
     expect(screen.queryByText(/viewportfitword1000/)).toBeNull()
   })
 
+  it('keeps visual spaces between adjacent chunk buttons', () => {
+    const spacedDocument: DocumentRecord = {
+      ...documentRecord,
+      content: 'The best way to appreciate careful spacing between chunks.',
+      wordCount: 9,
+    }
+    const chapter = buildChapter(spacedDocument)
+    const { container } = render(
+      <ReaderRail
+        baselineResult={null}
+        chapters={[chapter]}
+        defaultChunkSize={3}
+        defaultMode="rail"
+        defaultPageLayout={1}
+        defaultWpm={240}
+        document={spacedDocument}
+        fontSize={20}
+        lineHeight={1.65}
+        pages={[buildPage(spacedDocument, chapter.id)]}
+        scopeSelection={{ scopeType: 'document' }}
+        segmentStartWordIndex={0}
+        onBackToLibrary={vi.fn()}
+        onSegmentReset={vi.fn()}
+        onSegmentStart={vi.fn()}
+        onResumeUpdate={vi.fn()}
+        onScopeChange={vi.fn()}
+        onStartTest={vi.fn()}
+      />,
+    )
+
+    const pane = container.querySelector('.page-pane')
+    expect(pane?.textContent).toContain('to appreciate')
+    expect(pane?.innerHTML).toContain('</button> </span><span')
+  })
+
   it('advances the content window after the active word leaves the current stream', async () => {
     const user = userEvent.setup()
     const { container } = renderLongReader({

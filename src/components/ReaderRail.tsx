@@ -1133,8 +1133,9 @@ function ReaderPane({ activeIndex, chunks, isCursorSelectionDisabled, isActivePa
               onClick={() => onSelectChunk(chunk)}
               type="button"
             >
-              {chunk.text}{' '}
+              {chunk.text}
             </button>
+            {' '}
           </span>
         )
       })}

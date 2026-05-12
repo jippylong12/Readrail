@@ -1,6 +1,6 @@
 [package]
 name = "readrail"
-version = "1.2.0"
+version = "1.2.1"
 description = "A local-first desktop speed reading trainer"
 authors = ["Marcus Salinas"]
 license = ""
