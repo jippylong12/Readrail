@@ -1,6 +1,14 @@
-import { useMemo, useState } from 'react'
+import { type FormEvent, useMemo, useState } from 'react'
 import { CheckCircle2, CircleDot, XCircle } from 'lucide-react'
 import type { CoachingState, DocumentRecord, QuizAttempt, QuizQuestionReview, ReadingSession } from '../types/domain'
+
+export type ManualRetestInput = {
+  documentId: string
+  wordCount: number
+  durationSeconds: number
+  targetWpm: number
+  comprehensionPercent: number
+}
 
 type ProgressPanelProps = {
   coaching: CoachingState
@@ -8,10 +16,19 @@ type ProgressPanelProps = {
   quizAttempts: QuizAttempt[]
   sessions: ReadingSession[]
   onOpenReader: (documentId: string) => void
+  onSaveRetest: (input: ManualRetestInput) => void
 }
 
-export function ProgressPanel({ coaching, documents, quizAttempts, sessions, onOpenReader }: ProgressPanelProps) {
+export function ProgressPanel({
+  coaching,
+  documents,
+  quizAttempts,
+  sessions,
+  onOpenReader,
+  onSaveRetest,
+}: ProgressPanelProps) {
   const [selectedAttemptId, setSelectedAttemptId] = useState<string | null>(quizAttempts[0]?.id ?? null)
+  const [isRetestOpen, setIsRetestOpen] = useState(false)
   const selectedAttempt = quizAttempts.find((attempt) => attempt.id === selectedAttemptId) ?? quizAttempts[0] ?? null
   const latestAttempt = quizAttempts[0] ?? null
   const documentById = useMemo(
@@ -31,6 +48,14 @@ export function ProgressPanel({ coaching, documents, quizAttempts, sessions, onO
             <span className="eyebrow">Progress</span>
             <h1>Coaching progress</h1>
           </div>
+          <button
+            className="secondary-button"
+            disabled={documents.length === 0}
+            onClick={() => setIsRetestOpen((open) => !open)}
+            type="button"
+          >
+            {isRetestOpen ? 'Hide retest' : 'Manual retest'}
+          </button>
         </div>
 
         <div className="summary-grid" data-tour="progress-summary">
@@ -50,6 +75,17 @@ export function ProgressPanel({ coaching, documents, quizAttempts, sessions, onO
             <strong>No comprehension checks yet</strong>
             <span>Start reading, then use Test from the reader when a segment is ready.</span>
           </div>
+        )}
+
+        {isRetestOpen && (
+          <ManualRetestForm
+            defaultTargetWpm={coaching.recommendedWpm}
+            documents={documents}
+            onSave={(input) => {
+              onSaveRetest(input)
+              setIsRetestOpen(false)
+            }}
+          />
         )}
       </section>
 
@@ -72,6 +108,7 @@ export function ProgressPanel({ coaching, documents, quizAttempts, sessions, onO
               <thead>
                 <tr>
                   <th>Date</th>
+                  <th>Type</th>
                   <th>Reading</th>
                   <th>Words</th>
                   <th>Score</th>
@@ -88,7 +125,8 @@ export function ProgressPanel({ coaching, documents, quizAttempts, sessions, onO
                   return (
                     <tr className={attempt.id === selectedAttempt?.id ? 'active' : ''} key={attempt.id}>
                       <td>{formatDate(attempt.createdAt)}</td>
-                      <td>{formatReadingLabel(document?.title ?? 'Unknown reading', session)}</td>
+                      <td>{formatAttemptKind(attempt.kind)}</td>
+                      <td>{formatAttemptReadingLabel(document?.title ?? 'Unknown reading', attempt, session)}</td>
                       <td>{`${attempt.startWordIndex}-${attempt.endWordIndex}`}</td>
                       <td>{`${attempt.comprehensionPercent}%`}</td>
                       <td>{`${attempt.rawWpm} WPM`}</td>
@@ -120,6 +158,138 @@ export function ProgressPanel({ coaching, documents, quizAttempts, sessions, onO
   )
 }
 
+function ManualRetestForm({
+  defaultTargetWpm,
+  documents,
+  onSave,
+}: {
+  defaultTargetWpm: number
+  documents: DocumentRecord[]
+  onSave: (input: ManualRetestInput) => void
+}) {
+  const [documentId, setDocumentId] = useState(documents[0]?.id ?? '')
+  const [wordCount, setWordCount] = useState('')
+  const [durationSeconds, setDurationSeconds] = useState('')
+  const [targetWpm, setTargetWpm] = useState(defaultTargetWpm.toString())
+  const [comprehensionPercent, setComprehensionPercent] = useState('')
+  const [error, setError] = useState<string | null>(null)
+
+  function submitRetest(event: FormEvent<HTMLFormElement>): void {
+    event.preventDefault()
+    const parsedWordCount = Number(wordCount)
+    const parsedDurationSeconds = Number(durationSeconds)
+    const parsedTargetWpm = Number(targetWpm)
+    const parsedComprehension = Number(comprehensionPercent)
+
+    if (!documentId) {
+      setError('Choose a reading for this retest.')
+      return
+    }
+    if (wordCount.trim() === '' || !Number.isFinite(parsedWordCount) || parsedWordCount <= 0) {
+      setError('Enter a tested word count greater than 0.')
+      return
+    }
+    if (durationSeconds.trim() === '' || !Number.isFinite(parsedDurationSeconds) || parsedDurationSeconds <= 0) {
+      setError('Enter a retest duration greater than 0 seconds.')
+      return
+    }
+    if (targetWpm.trim() === '' || !Number.isFinite(parsedTargetWpm) || parsedTargetWpm <= 0) {
+      setError('Enter a target WPM greater than 0.')
+      return
+    }
+    if (comprehensionPercent.trim() === '' || !Number.isFinite(parsedComprehension)) {
+      setError('Enter a comprehension score from 0 to 100.')
+      return
+    }
+    if (parsedComprehension < 0 || parsedComprehension > 100) {
+      setError('Comprehension score must be between 0 and 100.')
+      return
+    }
+
+    setError(null)
+    onSave({
+      documentId,
+      wordCount: Math.round(parsedWordCount),
+      durationSeconds: Math.round(parsedDurationSeconds),
+      targetWpm: Math.round(parsedTargetWpm),
+      comprehensionPercent: Math.round(parsedComprehension),
+    })
+  }
+
+  return (
+    <form className="manual-retest-form" noValidate onSubmit={submitRetest}>
+      <div>
+        <span className="eyebrow">Retest</span>
+        <h2>Manual speed and comprehension retest</h2>
+      </div>
+      <div className="retest-fields">
+        <label className="field">
+          Reading
+          <select onChange={(event) => setDocumentId(event.target.value)} value={documentId}>
+            {documents.map((document) => (
+              <option key={document.id} value={document.id}>
+                {document.title}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          Words tested
+          <input
+            inputMode="numeric"
+            min={1}
+            onChange={(event) => setWordCount(event.target.value)}
+            placeholder="600"
+            type="number"
+            value={wordCount}
+          />
+        </label>
+        <label className="field">
+          Duration seconds
+          <input
+            inputMode="numeric"
+            min={1}
+            onChange={(event) => setDurationSeconds(event.target.value)}
+            placeholder="180"
+            type="number"
+            value={durationSeconds}
+          />
+        </label>
+        <label className="field">
+          Target WPM
+          <input
+            inputMode="numeric"
+            min={1}
+            onChange={(event) => setTargetWpm(event.target.value)}
+            placeholder="250"
+            type="number"
+            value={targetWpm}
+          />
+        </label>
+        <label className="field">
+          Comprehension percent
+          <input
+            inputMode="numeric"
+            max={100}
+            min={0}
+            onChange={(event) => setComprehensionPercent(event.target.value)}
+            placeholder="85"
+            type="number"
+            value={comprehensionPercent}
+          />
+        </label>
+      </div>
+      {error && <p className="form-message error">{error}</p>}
+      <div className="summary-actions">
+        <span className="form-message">This saves a retest point without creating a new reading session.</span>
+        <button className="primary-button" type="submit">
+          Save retest
+        </button>
+      </div>
+    </form>
+  )
+}
+
 function QuizReview({
   attempt,
   documentTitle,
@@ -135,8 +305,8 @@ function QuizReview({
     <section className="panel progress-panel" data-tour="progress-review">
       <div className="panel-header compact">
         <div>
-          <span className="eyebrow">Quiz review</span>
-          <h2>{formatReadingLabel(documentTitle, session)}</h2>
+          <span className="eyebrow">{formatAttemptKind(attempt.kind)} review</span>
+          <h2>{formatAttemptReadingLabel(documentTitle, attempt, session)}</h2>
         </div>
         <button className="secondary-button" onClick={onOpenReader} type="button">
           Open reader
@@ -160,8 +330,12 @@ function QuizReview({
         </div>
       ) : (
         <div className="empty-state">
-          <strong>Question details unavailable</strong>
-          <span>This older attempt has a score, but not full answer review data.</span>
+          <strong>{attempt.kind === 'generated' ? 'Question details unavailable' : 'Manual score recorded'}</strong>
+          <span>
+            {attempt.kind === 'generated'
+              ? 'This older attempt has a score, but not full answer review data.'
+              : 'This attempt stores timing, pace, comprehension, and recommendation data without generated questions.'}
+          </span>
         </div>
       )}
     </section>
@@ -233,4 +407,30 @@ function formatReadingLabel(documentTitle: string, session: ReadingSession | nul
   }
 
   return `${documentTitle} - ${session.scopeLabel}`
+}
+
+function formatAttemptReadingLabel(
+  documentTitle: string,
+  attempt: QuizAttempt,
+  session: ReadingSession | null,
+): string {
+  if (session) {
+    return formatReadingLabel(documentTitle, session)
+  }
+
+  if (!attempt.scopeLabel || attempt.scopeType === 'document') {
+    return documentTitle
+  }
+
+  return `${documentTitle} - ${attempt.scopeLabel}`
+}
+
+function formatAttemptKind(kind: QuizAttempt['kind']): string {
+  if (kind === 'manual') {
+    return 'Manual check'
+  }
+  if (kind === 'retest') {
+    return 'Retest'
+  }
+  return 'Generated quiz'
 }

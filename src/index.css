@@ -300,6 +300,26 @@ h3 {
   gap: 16px;
 }
 
+.manual-check-form,
+.manual-retest-form {
+  display: grid;
+  gap: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-muted);
+  padding: 16px;
+}
+
+.compact-summary-grid {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.retest-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
 .ocr-page-list {
   display: grid;
   gap: 14px;
@@ -1574,7 +1594,7 @@ h3 {
 .attempt-table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 820px;
+  min-width: 940px;
 }
 
 .attempt-table th,

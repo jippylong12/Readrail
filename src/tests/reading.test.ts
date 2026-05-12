@@ -6,7 +6,13 @@ import {
   scoreBaselineAnswers,
 } from '../lib/reading/baseline'
 import { comprehensionBand, recommendedNextWpm } from '../lib/reading/comprehension'
-import { buildGeneratedQuizAttempt, recommendCoachingWpm, scoreGeneratedQuizQuestions } from '../lib/reading/coaching'
+import {
+  buildGeneratedQuizAttempt,
+  buildManualQuizAttempt,
+  buildRetestQuizAttempt,
+  recommendCoachingWpm,
+  scoreGeneratedQuizQuestions,
+} from '../lib/reading/coaching'
 import {
   calculateActualWpm,
   calculateAdjustedWpm,
@@ -125,6 +131,48 @@ describe('reading math', () => {
     expect(attempt.rawWpm).toBe(200)
     expect(attempt.adjustedWpm).toBe(164)
     expect(attempt.recommendedWpm).toBe(255)
+  })
+
+  it('builds manual and retest coaching attempts without generated review data', () => {
+    const manualAttempt = buildManualQuizAttempt({
+      documentId: 'doc-1',
+      readingSessionId: 'session-1',
+      startWordIndex: 0,
+      endWordIndex: 300,
+      wordCount: 300,
+      durationSeconds: 90,
+      comprehensionPercent: 72,
+      currentTargetWpm: 240,
+    })
+    const retestAttempt = buildRetestQuizAttempt({
+      documentId: 'doc-1',
+      startWordIndex: 0,
+      endWordIndex: 600,
+      wordCount: 600,
+      durationSeconds: 180,
+      comprehensionPercent: 91,
+      currentTargetWpm: 1000,
+    })
+
+    expect(manualAttempt).toMatchObject({
+      kind: 'manual',
+      readingSessionId: 'session-1',
+      rawWpm: 200,
+      adjustedWpm: 144,
+      recommendedWpm: 240,
+      questionResults: [],
+      questions: [],
+    })
+    expect(retestAttempt).toMatchObject({
+      kind: 'retest',
+      readingSessionId: null,
+      targetWpm: 900,
+      rawWpm: 200,
+      adjustedWpm: 182,
+      recommendedWpm: 900,
+      questionResults: [],
+      questions: [],
+    })
   })
 
   it('scores generated quizzes and recommends conservative targets', () => {

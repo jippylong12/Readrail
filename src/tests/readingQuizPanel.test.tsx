@@ -46,6 +46,7 @@ describe('ReadingQuizPanel', () => {
         error={null}
         isLoading
         onCancel={vi.fn()}
+        onManualSubmit={vi.fn()}
         onRetry={vi.fn()}
         onSubmit={vi.fn()}
         quiz={null}
@@ -67,6 +68,7 @@ describe('ReadingQuizPanel', () => {
         error={null}
         isLoading={false}
         onCancel={vi.fn()}
+        onManualSubmit={vi.fn()}
         onRetry={vi.fn()}
         onSubmit={onSubmit}
         quiz={quiz}
@@ -79,5 +81,62 @@ describe('ReadingQuizPanel', () => {
     await user.click(screen.getByRole('button', { name: 'Save quiz result' }))
 
     expect(onSubmit).toHaveBeenCalledWith({ q1: 'q1-a', q2: 'q2-b' })
+  })
+
+  it('validates and submits manual comprehension when quiz generation fails', async () => {
+    const user = userEvent.setup()
+    const onManualSubmit = vi.fn()
+
+    render(
+      <ReadingQuizPanel
+        durationSeconds={60}
+        error="Add a Gemini API key in Settings before testing comprehension."
+        isLoading={false}
+        onCancel={vi.fn()}
+        onManualSubmit={onManualSubmit}
+        onRetry={vi.fn()}
+        onSubmit={vi.fn()}
+        quiz={null}
+        wordsRead={240}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Save manual check' }))
+    expect(screen.getByText('Enter a comprehension score from 0 to 100.')).toBeTruthy()
+
+    await user.type(screen.getByLabelText('Comprehension percent'), '101')
+    await user.click(screen.getByRole('button', { name: 'Save manual check' }))
+    expect(screen.getByText('Comprehension score must be between 0 and 100.')).toBeTruthy()
+
+    await user.clear(screen.getByLabelText('Comprehension percent'))
+    await user.type(screen.getByLabelText('Comprehension percent'), '87')
+    await user.click(screen.getByRole('button', { name: 'Save manual check' }))
+
+    expect(onManualSubmit).toHaveBeenCalledWith(87)
+  })
+
+  it('lets users choose manual scoring instead of the generated quiz', async () => {
+    const user = userEvent.setup()
+    const onManualSubmit = vi.fn()
+
+    render(
+      <ReadingQuizPanel
+        durationSeconds={60}
+        error={null}
+        isLoading={false}
+        onCancel={vi.fn()}
+        onManualSubmit={onManualSubmit}
+        onRetry={vi.fn()}
+        onSubmit={vi.fn()}
+        quiz={quiz}
+        wordsRead={240}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Enter manual score' }))
+    await user.type(screen.getByLabelText('Comprehension percent'), '82')
+    await user.click(screen.getByRole('button', { name: 'Save manual check' }))
+
+    expect(onManualSubmit).toHaveBeenCalledWith(82)
   })
 })

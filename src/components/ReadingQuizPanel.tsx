@@ -1,11 +1,12 @@
 import type { GeminiQuiz } from '../lib/ai/geminiQuiz'
 import { calculateActualWpm } from '../lib/reading/pacing'
-import type { FormEvent } from 'react'
+import { type FormEvent, useState } from 'react'
 
 type ReadingQuizPanelProps = {
   error: string | null
   isLoading: boolean
   onCancel: () => void
+  onManualSubmit: (comprehensionPercent: number) => void
   onRetry: () => void
   onSubmit: (answers: Record<string, string>) => void
   quiz: GeminiQuiz | null
@@ -17,13 +18,14 @@ export function ReadingQuizPanel({
   error,
   isLoading,
   onCancel,
+  onManualSubmit,
   onRetry,
   onSubmit,
   quiz,
   wordsRead,
   durationSeconds,
 }: ReadingQuizPanelProps) {
-  const answers: Record<string, string> = {}
+  const [showManualEntry, setShowManualEntry] = useState(false)
   const actualWpm = calculateActualWpm(wordsRead, durationSeconds)
 
   if (isLoading) {
@@ -57,6 +59,11 @@ export function ReadingQuizPanel({
             Try again
           </button>
         </div>
+        <ManualComprehensionForm
+          actualWpm={actualWpm}
+          onSubmit={onManualSubmit}
+          wordsRead={wordsRead}
+        />
       </section>
     )
   }
@@ -67,6 +74,7 @@ export function ReadingQuizPanel({
 
   function submitAnswers(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault()
+    const answers: Record<string, string> = {}
     const formData = new FormData(event.currentTarget)
     quiz?.questions.forEach((question) => {
       const answer = formData.get(question.id)
@@ -108,12 +116,90 @@ export function ReadingQuizPanel({
           <button className="secondary-button" onClick={onCancel} type="button">
             Cancel
           </button>
+          <button className="secondary-button" onClick={() => setShowManualEntry((visible) => !visible)} type="button">
+            {showManualEntry ? 'Hide manual score' : 'Enter manual score'}
+          </button>
           <button className="primary-button" type="submit">
             Save quiz result
           </button>
         </div>
       </form>
+
+      {showManualEntry && (
+        <ManualComprehensionForm
+          actualWpm={actualWpm}
+          onSubmit={onManualSubmit}
+          wordsRead={wordsRead}
+        />
+      )}
     </section>
+  )
+}
+
+function ManualComprehensionForm({
+  actualWpm,
+  onSubmit,
+  wordsRead,
+}: {
+  actualWpm: number
+  onSubmit: (comprehensionPercent: number) => void
+  wordsRead: number
+}) {
+  const [comprehensionPercent, setComprehensionPercent] = useState('')
+  const [error, setError] = useState<string | null>(null)
+
+  function submitManualScore(event: FormEvent<HTMLFormElement>): void {
+    event.preventDefault()
+    const parsedScore = Number(comprehensionPercent)
+    if (comprehensionPercent.trim() === '' || !Number.isFinite(parsedScore)) {
+      setError('Enter a comprehension score from 0 to 100.')
+      return
+    }
+    if (parsedScore < 0 || parsedScore > 100) {
+      setError('Comprehension score must be between 0 and 100.')
+      return
+    }
+
+    setError(null)
+    onSubmit(Math.round(parsedScore))
+  }
+
+  return (
+    <form className="manual-check-form" noValidate onSubmit={submitManualScore}>
+      <div>
+        <span className="eyebrow">Manual check</span>
+        <h3>Save comprehension without Gemini</h3>
+      </div>
+      <div className="summary-grid compact-summary-grid">
+        <div className="metric">
+          <span>Raw pace</span>
+          <strong>{actualWpm} WPM</strong>
+        </div>
+        <div className="metric">
+          <span>Words tested</span>
+          <strong>{wordsRead}</strong>
+        </div>
+      </div>
+      <label className="field">
+        Comprehension percent
+        <input
+          inputMode="numeric"
+          max={100}
+          min={0}
+          onChange={(event) => setComprehensionPercent(event.target.value)}
+          placeholder="85"
+          type="number"
+          value={comprehensionPercent}
+        />
+      </label>
+      {error && <p className="form-message error">{error}</p>}
+      <div className="summary-actions">
+        <span className="form-message">Use your own rubric or a teacher-scored check.</span>
+        <button className="primary-button" type="submit">
+          Save manual check
+        </button>
+      </div>
+    </form>
   )
 }
 

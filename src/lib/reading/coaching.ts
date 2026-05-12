@@ -105,9 +105,10 @@ function buildQuizAttempt(input: QuizAttemptBuilderInput): QuizAttempt {
   const wordCount = Math.max(0, Math.round(input.wordCount || endWordIndex - startWordIndex))
   const durationSeconds = Math.max(1, Math.round(input.durationSeconds))
   const comprehensionPercent = Math.max(0, Math.min(100, Math.round(input.comprehensionPercent)))
+  const targetWpm = clampWpm(input.currentTargetWpm)
   const rawWpm = calculateActualWpm(wordCount, durationSeconds)
   const adjustedWpm = calculateAdjustedWpm(rawWpm, comprehensionPercent) ?? 0
-  const recommendedWpm = recommendCoachingWpm(input.currentTargetWpm, rawWpm, comprehensionPercent)
+  const recommendedWpm = recommendCoachingWpm(targetWpm, rawWpm, comprehensionPercent)
 
   return {
     id: crypto.randomUUID(),
@@ -125,12 +126,12 @@ function buildQuizAttempt(input: QuizAttemptBuilderInput): QuizAttempt {
     endWordIndex,
     wordCount,
     durationSeconds,
-    targetWpm: input.currentTargetWpm,
+    targetWpm,
     rawWpm,
     comprehensionPercent,
     adjustedWpm,
     recommendedWpm,
-    explanation: explainCoachingRecommendation(input.currentTargetWpm, rawWpm, comprehensionPercent, recommendedWpm),
+    explanation: explainCoachingRecommendation(targetWpm, rawWpm, comprehensionPercent, recommendedWpm),
     questionResults: input.questionResults,
     questions: input.questions,
     createdAt: new Date().toISOString(),
@@ -141,4 +142,12 @@ export function buildGeneratedQuizAttempt(
   input: QuizAttemptInput & { questionResults: BaselineQuestionResult[]; questions: QuizQuestionReview[] },
 ): QuizAttempt {
   return buildQuizAttempt({ ...input, kind: 'generated' })
+}
+
+export function buildManualQuizAttempt(input: QuizAttemptInput): QuizAttempt {
+  return buildQuizAttempt({ ...input, kind: 'manual', questionResults: [], questions: [] })
+}
+
+export function buildRetestQuizAttempt(input: Omit<QuizAttemptInput, 'readingSessionId'>): QuizAttempt {
+  return buildQuizAttempt({ ...input, readingSessionId: null, kind: 'retest', questionResults: [], questions: [] })
 }

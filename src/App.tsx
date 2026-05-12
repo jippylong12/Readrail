@@ -9,7 +9,7 @@ import { OnboardingJourney } from './components/OnboardingJourney'
 import { OcrReview } from './components/OcrReview'
 import { ReaderRail } from './components/ReaderRail'
 import { ReadingQuizPanel } from './components/ReadingQuizPanel'
-import { ProgressPanel } from './components/ProgressPanel'
+import { ProgressPanel, type ManualRetestInput } from './components/ProgressPanel'
 import { SettingsPanel } from './components/SettingsPanel'
 import { StatsChart } from './components/StatsChart'
 import { GuidedTour } from './components/GuidedTour'
@@ -29,7 +29,7 @@ import { exportProgressCsv, exportProgressJson } from './lib/db/export'
 import { getDatabase, isTauriRuntime } from './lib/db/migrations'
 import { saveQuizAttemptToDatabase } from './lib/db/repository'
 import { generateQuizFromReading, type GeminiQuiz } from './lib/ai/geminiQuiz'
-import { buildGeneratedQuizAttempt, scoreGeneratedQuizQuestions } from './lib/reading/coaching'
+import { buildGeneratedQuizAttempt, buildManualQuizAttempt, buildRetestQuizAttempt, scoreGeneratedQuizQuestions } from './lib/reading/coaching'
 import type { DocumentRecord, ReaderMode } from './types/domain'
 
 type PendingSession = {
@@ -395,6 +395,70 @@ function App() {
     navigate({ route: 'progress', documentId: null })
   }
 
+  function saveManualQuizResult(comprehensionPercent: number): void {
+    if (!pendingQuiz) {
+      return
+    }
+
+    const session = completeSession({
+      ...pendingQuiz.session,
+      documentId: pendingQuiz.document.id,
+      scope: pendingQuiz.session.scope,
+      startPosition: pendingQuiz.session.startWordIndex,
+      endPosition: pendingQuiz.session.endWordIndex,
+      comprehensionScore: comprehensionPercent,
+      selfRating: null,
+      notes: '',
+    })
+    addQuizAttempt(
+      buildManualQuizAttempt({
+        documentId: pendingQuiz.document.id,
+        readingSessionId: session.id,
+        startWordIndex: pendingQuiz.session.startWordIndex,
+        endWordIndex: pendingQuiz.session.endWordIndex,
+        wordCount: pendingQuiz.session.wordsRead,
+        durationSeconds: pendingQuiz.session.durationSeconds,
+        comprehensionPercent,
+        currentTargetWpm: pendingQuiz.session.targetWpm,
+        scopeType: pendingQuiz.session.scope.scopeType,
+        scopeLabel: pendingQuiz.session.scope.scopeLabel,
+        chapterId: pendingQuiz.session.scope.chapterId,
+        chapterTitle: pendingQuiz.session.scope.chapterTitle,
+        pageIds: pendingQuiz.session.scope.pageIds,
+        pageNumbers: pendingQuiz.session.scope.pageNumbers,
+        sourcePageNumbers: pendingQuiz.session.scope.sourcePageNumbers,
+      }),
+    )
+    setPendingQuiz(null)
+    navigate({ route: 'progress', documentId: null })
+  }
+
+  function saveManualRetest(input: ManualRetestInput): void {
+    const document = documents.find((candidate) => candidate.id === input.documentId)
+    if (!document) {
+      return
+    }
+
+    addQuizAttempt(
+      buildRetestQuizAttempt({
+        documentId: document.id,
+        startWordIndex: 0,
+        endWordIndex: input.wordCount,
+        wordCount: input.wordCount,
+        durationSeconds: input.durationSeconds,
+        comprehensionPercent: input.comprehensionPercent,
+        currentTargetWpm: input.targetWpm,
+        scopeType: 'document',
+        scopeLabel: null,
+        chapterId: null,
+        chapterTitle: null,
+        pageIds: [],
+        pageNumbers: [],
+        sourcePageNumbers: [],
+      }),
+    )
+  }
+
   useEffect(() => {
     if (onboarding.status === 'not_started') {
       return undefined
@@ -588,6 +652,7 @@ function App() {
               error={pendingQuiz.error}
               isLoading={pendingQuiz.isLoading}
               onCancel={cancelPendingQuiz}
+              onManualSubmit={saveManualQuizResult}
               onRetry={() => {
                 void startQuizForSession(pendingQuiz.session)
               }}
@@ -623,6 +688,7 @@ function App() {
             setActiveDocument(documentId)
             navigate({ route: 'reader', documentId })
           }}
+          onSaveRetest={saveManualRetest}
           quizAttempts={quizAttempts}
           sessions={sessions}
         />

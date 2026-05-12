@@ -101,12 +101,22 @@ afterEach(() => {
 
 describe('ProgressPanel', () => {
   it('shows coaching summary, attempt table, and reviewable selected/correct answers', () => {
-    render(<ProgressPanel coaching={coaching} documents={[documentRecord]} onOpenReader={vi.fn()} quizAttempts={[attempt]} sessions={[session]} />)
+    render(
+      <ProgressPanel
+        coaching={coaching}
+        documents={[documentRecord]}
+        onOpenReader={vi.fn()}
+        onSaveRetest={vi.fn()}
+        quizAttempts={[attempt]}
+        sessions={[session]}
+      />,
+    )
 
     expect(screen.getByRole('heading', { name: 'Coaching progress' })).toBeTruthy()
     expect(screen.getByText('255 WPM')).toBeTruthy()
     expect(screen.getAllByText('50%')).toHaveLength(2)
     expect(screen.getAllByText('Meaningful reading')).toHaveLength(2)
+    expect(screen.getByText('Generated quiz')).toBeTruthy()
     expect(screen.getAllByText('100-300')).toHaveLength(2)
     expect(screen.getByText(/What can the reader infer from the decision/)).toBeTruthy()
     expect(screen.getByText('Selected')).toBeTruthy()
@@ -117,7 +127,16 @@ describe('ProgressPanel', () => {
   it('opens the reviewed document from the review panel', async () => {
     const user = userEvent.setup()
     const onOpenReader = vi.fn()
-    render(<ProgressPanel coaching={coaching} documents={[documentRecord]} onOpenReader={onOpenReader} quizAttempts={[attempt]} sessions={[session]} />)
+    render(
+      <ProgressPanel
+        coaching={coaching}
+        documents={[documentRecord]}
+        onOpenReader={onOpenReader}
+        onSaveRetest={vi.fn()}
+        quizAttempts={[attempt]}
+        sessions={[session]}
+      />,
+    )
 
     await user.click(screen.getByRole('button', { name: 'Open reader' }))
 
@@ -132,7 +151,16 @@ describe('ProgressPanel', () => {
       content: 'First page.\n\n\f\n\nSecond page.',
     }
 
-    render(<ProgressPanel coaching={coaching} documents={[structuredDocument]} onOpenReader={vi.fn()} quizAttempts={[attempt]} sessions={[session]} />)
+    render(
+      <ProgressPanel
+        coaching={coaching}
+        documents={[structuredDocument]}
+        onOpenReader={vi.fn()}
+        onSaveRetest={vi.fn()}
+        quizAttempts={[attempt]}
+        sessions={[session]}
+      />,
+    )
 
     expect(screen.getAllByText('Structured OCR guide')).toHaveLength(2)
     expect(screen.getAllByText('100-300')).toHaveLength(2)
@@ -150,8 +178,94 @@ describe('ProgressPanel', () => {
       sourcePageNumbers: [12, 13],
     }
 
-    render(<ProgressPanel coaching={coaching} documents={[documentRecord]} onOpenReader={vi.fn()} quizAttempts={[attempt]} sessions={[scopedSession]} />)
+    render(
+      <ProgressPanel
+        coaching={coaching}
+        documents={[documentRecord]}
+        onOpenReader={vi.fn()}
+        onSaveRetest={vi.fn()}
+        quizAttempts={[attempt]}
+        sessions={[scopedSession]}
+      />,
+    )
 
     expect(screen.getAllByText('Meaningful reading - Chapter 2, pages 5-6')).toHaveLength(2)
+  })
+
+  it('clearly distinguishes manual and retest attempts without generated questions', async () => {
+    const user = userEvent.setup()
+    const manualAttempt: QuizAttempt = {
+      ...attempt,
+      id: 'manual-1',
+      kind: 'manual',
+      questions: [],
+      questionResults: [],
+    }
+    const retestAttempt: QuizAttempt = {
+      ...attempt,
+      id: 'retest-1',
+      readingSessionId: null,
+      kind: 'retest',
+      startWordIndex: 0,
+      endWordIndex: 600,
+      wordCount: 600,
+      questions: [],
+      questionResults: [],
+    }
+
+    render(
+      <ProgressPanel
+        coaching={coaching}
+        documents={[documentRecord]}
+        onOpenReader={vi.fn()}
+        onSaveRetest={vi.fn()}
+        quizAttempts={[manualAttempt, retestAttempt]}
+        sessions={[session]}
+      />,
+    )
+
+    expect(screen.getByText('Manual check')).toBeTruthy()
+    expect(screen.getByText('Retest')).toBeTruthy()
+    expect(screen.getByText('Manual score recorded')).toBeTruthy()
+
+    await user.click(screen.getAllByRole('button', { name: 'Open' })[1])
+
+    expect(screen.getByText('Retest review')).toBeTruthy()
+    expect(screen.getByText('This attempt stores timing, pace, comprehension, and recommendation data without generated questions.')).toBeTruthy()
+  })
+
+  it('validates and submits a manual retest', async () => {
+    const user = userEvent.setup()
+    const onSaveRetest = vi.fn()
+
+    render(
+      <ProgressPanel
+        coaching={coaching}
+        documents={[documentRecord]}
+        onOpenReader={vi.fn()}
+        onSaveRetest={onSaveRetest}
+        quizAttempts={[]}
+        sessions={[]}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Manual retest' }))
+    await user.click(screen.getByRole('button', { name: 'Save retest' }))
+    expect(screen.getByText('Enter a tested word count greater than 0.')).toBeTruthy()
+
+    await user.type(screen.getByLabelText('Words tested'), '600')
+    await user.type(screen.getByLabelText('Duration seconds'), '180')
+    await user.clear(screen.getByLabelText('Target WPM'))
+    await user.type(screen.getByLabelText('Target WPM'), '1000')
+    await user.type(screen.getByLabelText('Comprehension percent'), '91')
+    await user.click(screen.getByRole('button', { name: 'Save retest' }))
+
+    expect(onSaveRetest).toHaveBeenCalledWith({
+      documentId: 'doc-1',
+      wordCount: 600,
+      durationSeconds: 180,
+      targetWpm: 1000,
+      comprehensionPercent: 91,
+    })
   })
 })
