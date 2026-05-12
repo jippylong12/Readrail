@@ -21,9 +21,11 @@ import type {
   PageLayout,
   ReaderMode,
   ReadingSession,
+  ReadingScopeType,
   SourceType,
   TourProgressState,
   QuizAttempt,
+  QuizAttemptKind,
 } from '../types/domain'
 import { runGeminiOcrFromFiles } from '../lib/ai/geminiOcr'
 import type { OcrPipelineProgress, OcrPipelineStage, OcrResultPage } from '../lib/ai/geminiOcr'
@@ -36,6 +38,7 @@ import {
   saveAiUsageLineItemToDatabase,
   saveDocumentToDatabase,
   saveOcrJobToDatabase,
+  saveQuizAttemptToDatabase,
   saveSessionToDatabase,
 } from '../lib/db/repository'
 import type { AiUsageLineItemQuery } from '../lib/db/repository'
@@ -368,6 +371,81 @@ function seedSessionScopeMetadata(sessions: ReadingSession[] | undefined): Readi
     pageNumbers: session.pageNumbers ?? [],
     sourcePageNumbers: session.sourcePageNumbers ?? [],
   }))
+}
+
+export function normalizeQuizAttemptsForPersistence(
+  attempts: QuizAttempt[] | undefined,
+  sessions: ReadingSession[] | undefined,
+  fallbackWpm: number,
+): QuizAttempt[] {
+  const sessionById = new Map((sessions ?? []).map((session) => [session.id, session]))
+  return (attempts ?? []).map((attempt) => {
+    const session = attempt.readingSessionId ? sessionById.get(attempt.readingSessionId) ?? null : null
+    const startWordIndex = normalizeInteger(attempt.startWordIndex, session?.startPosition ?? 0)
+    const endWordIndex = normalizeInteger(attempt.endWordIndex, session?.endPosition ?? attempt.wordCount ?? startWordIndex)
+    const wordCount = normalizeInteger(attempt.wordCount, Math.max(0, endWordIndex - startWordIndex))
+
+    return {
+      ...attempt,
+      kind: normalizeQuizAttemptKind(attempt.kind),
+      scopeType: normalizeReadingScopeType(attempt.scopeType ?? session?.scopeType),
+      scopeLabel: normalizeNullableString(attempt.scopeLabel ?? session?.scopeLabel),
+      chapterId: normalizeNullableString(attempt.chapterId ?? session?.chapterId),
+      chapterTitle: normalizeNullableString(attempt.chapterTitle ?? session?.chapterTitle),
+      pageIds: normalizeStringArray(attempt.pageIds ?? session?.pageIds),
+      pageNumbers: normalizeNumberArray(attempt.pageNumbers ?? session?.pageNumbers),
+      sourcePageNumbers: normalizeNullableNumberArray(attempt.sourcePageNumbers ?? session?.sourcePageNumbers),
+      startWordIndex,
+      endWordIndex,
+      wordCount,
+      durationSeconds: normalizeInteger(attempt.durationSeconds, session?.durationSeconds ?? 1),
+      targetWpm: normalizeInteger(attempt.targetWpm, session?.targetWpm ?? attempt.recommendedWpm ?? fallbackWpm),
+      rawWpm: normalizeInteger(attempt.rawWpm, session?.actualWpm ?? 0),
+      adjustedWpm: normalizeInteger(attempt.adjustedWpm, session?.adjustedWpm ?? 0),
+      comprehensionPercent: normalizeInteger(attempt.comprehensionPercent, session?.comprehensionScore ?? 0),
+      recommendedWpm: normalizeInteger(attempt.recommendedWpm, fallbackWpm),
+      explanation: typeof attempt.explanation === 'string' ? attempt.explanation : '',
+      questionResults: attempt.questionResults ?? [],
+      questions: attempt.questions ?? [],
+      createdAt: typeof attempt.createdAt === 'string' ? attempt.createdAt : new Date().toISOString(),
+    }
+  })
+}
+
+function normalizeQuizAttemptKind(kind: QuizAttemptKind | string | undefined): QuizAttemptKind {
+  if (kind === 'manual' || kind === 'retest') {
+    return kind
+  }
+  return 'generated'
+}
+
+function normalizeReadingScopeType(scopeType: ReadingScopeType | string | undefined): ReadingScopeType {
+  if (scopeType === 'chapter' || scopeType === 'pages') {
+    return scopeType
+  }
+  return 'document'
+}
+
+function normalizeNullableString(value: unknown): string | null {
+  return typeof value === 'string' ? value : null
+}
+
+function normalizeStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+}
+
+function normalizeNumberArray(value: unknown): number[] {
+  return Array.isArray(value) ? value.filter((item): item is number => typeof item === 'number' && Number.isFinite(item)) : []
+}
+
+function normalizeNullableNumberArray(value: unknown): Array<number | null> {
+  return Array.isArray(value)
+    ? value.map((item) => (typeof item === 'number' && Number.isFinite(item) ? item : null))
+    : []
+}
+
+function normalizeInteger(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : Math.round(fallback)
 }
 
 function buildOcrPages(
@@ -1823,7 +1901,7 @@ export const useAppStore = create<AppState>()(
         }))
       },
       resetAllTours: () => set({ tourProgress: defaultTourProgressState }),
-      addQuizAttempt: (attempt) =>
+      addQuizAttempt: (attempt) => {
         set((state) => ({
           quizAttempts: [attempt, ...state.quizAttempts],
           coaching: {
@@ -1842,7 +1920,9 @@ export const useAppStore = create<AppState>()(
               },
             },
           },
-        })),
+        }))
+        void saveQuizAttemptToDatabase(attempt)
+      },
       resetCoachingSegment: (documentId, wordIndex) =>
         set((state) => ({
           coaching: {
@@ -1891,7 +1971,7 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: 'readrail-local-state',
-      version: 8,
+      version: 9,
       migrate: (persistedState: unknown, fromVersion: number) => {
         const state = persistedState as Record<string, unknown>
         const settings = state.settings as AppSettings | undefined
@@ -1947,6 +2027,16 @@ export const useAppStore = create<AppState>()(
         // v7 -> v8: seed durable AI usage ledger collection.
         if (fromVersion < 8) {
           state.aiUsageLineItems = state.aiUsageLineItems || []
+        }
+        // v8 -> v9: seed durable coaching attempt scope metadata.
+        if (fromVersion < 9) {
+          const reader = settings?.reader
+          const fallbackWpm = reader?.defaultWpm ?? defaultSettings.reader.defaultWpm
+          state.quizAttempts = normalizeQuizAttemptsForPersistence(
+            state.quizAttempts as QuizAttempt[] | undefined,
+            state.sessions as ReadingSession[] | undefined,
+            fallbackWpm,
+          )
         }
         return state
       },

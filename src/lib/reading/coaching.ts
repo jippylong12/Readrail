@@ -1,5 +1,5 @@
 import type { GeminiQuizQuestion } from '../ai/geminiQuiz'
-import type { BaselineQuestionResult, QuizAttempt, QuizQuestionReview } from '../../types/domain'
+import type { BaselineQuestionResult, QuizAttempt, QuizQuestionReview, ReadingScopeType } from '../../types/domain'
 import { calculateActualWpm, calculateAdjustedWpm, clampWpm } from './pacing'
 
 type QuizAttemptInput = {
@@ -11,6 +11,13 @@ type QuizAttemptInput = {
   durationSeconds: number
   comprehensionPercent: number
   currentTargetWpm: number
+  scopeType?: ReadingScopeType
+  scopeLabel?: string | null
+  chapterId?: string | null
+  chapterTitle?: string | null
+  pageIds?: string[]
+  pageNumbers?: number[]
+  sourcePageNumbers?: Array<number | null>
 }
 
 type QuizAttemptBuilderInput = QuizAttemptInput & {
@@ -107,6 +114,13 @@ function buildQuizAttempt(input: QuizAttemptBuilderInput): QuizAttempt {
     documentId: input.documentId,
     readingSessionId: input.readingSessionId,
     kind: input.kind,
+    scopeType: input.scopeType ?? 'document',
+    scopeLabel: input.scopeLabel ?? null,
+    chapterId: input.chapterId ?? null,
+    chapterTitle: input.chapterTitle ?? null,
+    pageIds: input.pageIds ?? [],
+    pageNumbers: input.pageNumbers ?? [],
+    sourcePageNumbers: input.sourcePageNumbers ?? [],
     startWordIndex,
     endWordIndex,
     wordCount,

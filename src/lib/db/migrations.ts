@@ -26,6 +26,7 @@ export async function getDatabase(): Promise<SqlDatabase | null> {
       await runStructuredDocumentSqliteMigration(database)
       await runOcrJobSqliteMigration(database)
       await runReadingSessionScopeSqliteMigration(database)
+      await runQuizAttemptSqliteMigration(database)
 
       return database
     })
@@ -35,6 +36,33 @@ export async function getDatabase(): Promise<SqlDatabase | null> {
     })
 
   return databasePromise
+}
+
+export async function runQuizAttemptSqliteMigration(database: SqlDatabase): Promise<void> {
+  const attemptColumns = await database.select<TableColumn[]>('PRAGMA table_info(quiz_attempts)')
+  if (!attemptColumns.some((column) => column.name === 'scope_type')) {
+    await database.execute("ALTER TABLE quiz_attempts ADD COLUMN scope_type TEXT NOT NULL DEFAULT 'document'")
+  }
+  if (!attemptColumns.some((column) => column.name === 'scope_label')) {
+    await database.execute('ALTER TABLE quiz_attempts ADD COLUMN scope_label TEXT')
+  }
+  if (!attemptColumns.some((column) => column.name === 'chapter_id')) {
+    await database.execute('ALTER TABLE quiz_attempts ADD COLUMN chapter_id TEXT')
+  }
+  if (!attemptColumns.some((column) => column.name === 'chapter_title')) {
+    await database.execute('ALTER TABLE quiz_attempts ADD COLUMN chapter_title TEXT')
+  }
+  if (!attemptColumns.some((column) => column.name === 'page_ids_json')) {
+    await database.execute("ALTER TABLE quiz_attempts ADD COLUMN page_ids_json TEXT NOT NULL DEFAULT '[]'")
+  }
+  if (!attemptColumns.some((column) => column.name === 'page_numbers_json')) {
+    await database.execute("ALTER TABLE quiz_attempts ADD COLUMN page_numbers_json TEXT NOT NULL DEFAULT '[]'")
+  }
+  if (!attemptColumns.some((column) => column.name === 'source_page_numbers_json')) {
+    await database.execute("ALTER TABLE quiz_attempts ADD COLUMN source_page_numbers_json TEXT NOT NULL DEFAULT '[]'")
+  }
+
+  await database.execute("UPDATE quiz_attempts SET scope_type = 'document' WHERE scope_type IS NULL OR scope_type = ''")
 }
 
 async function runReadingSessionScopeSqliteMigration(database: SqlDatabase): Promise<void> {

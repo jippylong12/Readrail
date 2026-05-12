@@ -27,6 +27,7 @@ import { selectActiveDocument, useAppStore, type OcrPageInput } from './app/stor
 import { TOUR_DEFINITIONS, type TourId } from './app/tours'
 import { exportProgressCsv, exportProgressJson } from './lib/db/export'
 import { getDatabase, isTauriRuntime } from './lib/db/migrations'
+import { saveQuizAttemptToDatabase } from './lib/db/repository'
 import { generateQuizFromReading, type GeminiQuiz } from './lib/ai/geminiQuiz'
 import { buildGeneratedQuizAttempt, scoreGeneratedQuizQuestions } from './lib/reading/coaching'
 import type { DocumentRecord, ReaderMode } from './types/domain'
@@ -114,7 +115,14 @@ function App() {
   }, [settings.reader.theme])
 
   useEffect(() => {
-    void getDatabase()
+    void getDatabase().then((database) => {
+      if (!database) {
+        return
+      }
+      for (const attempt of useAppStore.getState().quizAttempts) {
+        void saveQuizAttemptToDatabase(attempt)
+      }
+    })
   }, [])
 
   useEffect(() => {
@@ -372,6 +380,13 @@ function App() {
         durationSeconds: pendingQuiz.session.durationSeconds,
         comprehensionPercent: scoring.comprehensionPercent,
         currentTargetWpm: pendingQuiz.session.targetWpm,
+        scopeType: pendingQuiz.session.scope.scopeType,
+        scopeLabel: pendingQuiz.session.scope.scopeLabel,
+        chapterId: pendingQuiz.session.scope.chapterId,
+        chapterTitle: pendingQuiz.session.scope.chapterTitle,
+        pageIds: pendingQuiz.session.scope.pageIds,
+        pageNumbers: pendingQuiz.session.scope.pageNumbers,
+        sourcePageNumbers: pendingQuiz.session.scope.sourcePageNumbers,
         questionResults: scoring.questionResults,
         questions: scoring.questions,
       }),

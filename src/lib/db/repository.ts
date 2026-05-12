@@ -4,11 +4,16 @@ import type {
   AiUsageStage,
   AiUsageStatus,
   AiUsageTokenBreakdown,
+  BaselineQuestionResult,
   DocumentChapterRecord,
   DocumentPageRecord,
   DocumentRecord,
   OcrJob,
   OcrJobItem,
+  QuizAttempt,
+  QuizAttemptKind,
+  QuizQuestionReview,
+  ReadingScopeType,
   ReadingSession,
 } from '../../types/domain'
 import { getDatabase } from './migrations'
@@ -26,6 +31,12 @@ export type AiUsageLineItemQuery = {
   provider?: string
   model?: string
   status?: AiUsageStatus
+}
+
+export type QuizAttemptQuery = {
+  documentId?: string | null
+  readingSessionId?: string | null
+  kind?: QuizAttemptKind
 }
 
 export async function saveDocumentToDatabase(
@@ -318,6 +329,91 @@ export async function saveAiUsageLineItemToDatabase(lineItem: AiUsageLineItem): 
   )
 }
 
+export async function saveQuizAttemptToDatabase(attempt: QuizAttempt): Promise<void> {
+  const database = await getDatabase()
+  if (!database) {
+    return
+  }
+
+  await database.execute(
+    `INSERT INTO quiz_attempts (
+      id, document_id, reading_session_id, kind, scope_type, scope_label, chapter_id, chapter_title,
+      page_ids_json, page_numbers_json, source_page_numbers_json, start_word_index, end_word_index,
+      word_count, duration_seconds, target_wpm, raw_wpm, adjusted_wpm, comprehension_percent,
+      recommended_wpm, explanation, question_results_json, questions_json, created_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
+    ON CONFLICT(id) DO UPDATE SET
+      document_id = excluded.document_id,
+      reading_session_id = excluded.reading_session_id,
+      kind = excluded.kind,
+      scope_type = excluded.scope_type,
+      scope_label = excluded.scope_label,
+      chapter_id = excluded.chapter_id,
+      chapter_title = excluded.chapter_title,
+      page_ids_json = excluded.page_ids_json,
+      page_numbers_json = excluded.page_numbers_json,
+      source_page_numbers_json = excluded.source_page_numbers_json,
+      start_word_index = excluded.start_word_index,
+      end_word_index = excluded.end_word_index,
+      word_count = excluded.word_count,
+      duration_seconds = excluded.duration_seconds,
+      target_wpm = excluded.target_wpm,
+      raw_wpm = excluded.raw_wpm,
+      adjusted_wpm = excluded.adjusted_wpm,
+      comprehension_percent = excluded.comprehension_percent,
+      recommended_wpm = excluded.recommended_wpm,
+      explanation = excluded.explanation,
+      question_results_json = excluded.question_results_json,
+      questions_json = excluded.questions_json,
+      created_at = excluded.created_at`,
+    [
+      attempt.id,
+      attempt.documentId,
+      attempt.readingSessionId,
+      attempt.kind,
+      attempt.scopeType,
+      attempt.scopeLabel,
+      attempt.chapterId,
+      attempt.chapterTitle,
+      JSON.stringify(attempt.pageIds),
+      JSON.stringify(attempt.pageNumbers),
+      JSON.stringify(attempt.sourcePageNumbers),
+      attempt.startWordIndex,
+      attempt.endWordIndex,
+      attempt.wordCount,
+      attempt.durationSeconds,
+      attempt.targetWpm,
+      attempt.rawWpm,
+      attempt.adjustedWpm,
+      attempt.comprehensionPercent,
+      attempt.recommendedWpm,
+      attempt.explanation,
+      JSON.stringify(attempt.questionResults ?? []),
+      JSON.stringify(attempt.questions ?? []),
+      attempt.createdAt,
+    ],
+  )
+}
+
+export async function queryQuizAttemptsFromDatabase(query: QuizAttemptQuery = {}): Promise<QuizAttempt[]> {
+  const database = await getDatabase()
+  if (!database) {
+    return []
+  }
+
+  const where: string[] = []
+  const parameters: Array<string | null> = []
+  addNullableFilter(where, parameters, 'document_id', query.documentId)
+  addNullableFilter(where, parameters, 'reading_session_id', query.readingSessionId)
+  addValueFilter(where, parameters, 'kind', query.kind)
+
+  const rows = await database.select<QuizAttemptRow[]>(
+    `SELECT * FROM quiz_attempts${where.length ? ` WHERE ${where.join(' AND ')}` : ''} ORDER BY created_at DESC`,
+    parameters,
+  )
+  return rows.map(quizAttemptFromRow)
+}
+
 export async function queryAiUsageLineItemsFromDatabase(
   query: AiUsageLineItemQuery = {},
 ): Promise<AiUsageLineItem[]> {
@@ -361,6 +457,33 @@ type AiUsageLineItemRow = {
   pricing_snapshot_json: string | null
 }
 
+type QuizAttemptRow = {
+  id: string
+  document_id: string
+  reading_session_id: string | null
+  kind: QuizAttemptKind
+  scope_type: ReadingScopeType | null
+  scope_label: string | null
+  chapter_id: string | null
+  chapter_title: string | null
+  page_ids_json: string | null
+  page_numbers_json: string | null
+  source_page_numbers_json: string | null
+  start_word_index: number
+  end_word_index: number
+  word_count: number
+  duration_seconds: number
+  target_wpm: number
+  raw_wpm: number
+  adjusted_wpm: number
+  comprehension_percent: number
+  recommended_wpm: number
+  explanation: string
+  question_results_json: string | null
+  questions_json: string | null
+  created_at: string
+}
+
 function aiUsageLineItemFromRow(row: AiUsageLineItemRow): AiUsageLineItem {
   return {
     id: row.id,
@@ -381,6 +504,63 @@ function aiUsageLineItemFromRow(row: AiUsageLineItemRow): AiUsageLineItem {
       parseNullableJson<Partial<AiPricingSnapshot> | null>(row.pricing_snapshot_json, null),
     ),
   }
+}
+
+function quizAttemptFromRow(row: QuizAttemptRow): QuizAttempt {
+  return {
+    id: row.id,
+    documentId: row.document_id,
+    readingSessionId: row.reading_session_id,
+    kind: normalizeQuizAttemptKind(row.kind),
+    scopeType: normalizeReadingScopeType(row.scope_type),
+    scopeLabel: row.scope_label,
+    chapterId: row.chapter_id,
+    chapterTitle: row.chapter_title,
+    pageIds: normalizeStringArray(parseNullableJson<unknown>(row.page_ids_json, [])),
+    pageNumbers: normalizeNumberArray(parseNullableJson<unknown>(row.page_numbers_json, [])),
+    sourcePageNumbers: normalizeNullableNumberArray(parseNullableJson<unknown>(row.source_page_numbers_json, [])),
+    startWordIndex: normalizeNumber(row.start_word_index, 0),
+    endWordIndex: normalizeNumber(row.end_word_index, 0),
+    wordCount: normalizeNumber(row.word_count, 0),
+    durationSeconds: normalizeNumber(row.duration_seconds, 0),
+    targetWpm: normalizeNumber(row.target_wpm, 0),
+    rawWpm: normalizeNumber(row.raw_wpm, 0),
+    adjustedWpm: normalizeNumber(row.adjusted_wpm, 0),
+    comprehensionPercent: normalizeNumber(row.comprehension_percent, 0),
+    recommendedWpm: normalizeNumber(row.recommended_wpm, 0),
+    explanation: row.explanation,
+    questionResults: parseNullableJson<BaselineQuestionResult[]>(row.question_results_json, []),
+    questions: parseNullableJson<QuizQuestionReview[]>(row.questions_json, []),
+    createdAt: row.created_at,
+  }
+}
+
+function normalizeQuizAttemptKind(kind: string): QuizAttemptKind {
+  if (kind === 'manual' || kind === 'retest') {
+    return kind
+  }
+  return 'generated'
+}
+
+function normalizeReadingScopeType(scopeType: string | null | undefined): ReadingScopeType {
+  if (scopeType === 'chapter' || scopeType === 'pages') {
+    return scopeType
+  }
+  return 'document'
+}
+
+function normalizeStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+}
+
+function normalizeNumberArray(value: unknown): number[] {
+  return Array.isArray(value) ? value.filter((item): item is number => typeof item === 'number' && Number.isFinite(item)) : []
+}
+
+function normalizeNullableNumberArray(value: unknown): Array<number | null> {
+  return Array.isArray(value)
+    ? value.map((item) => (typeof item === 'number' && Number.isFinite(item) ? item : null))
+    : []
 }
 
 function addNullableFilter(
@@ -478,4 +658,8 @@ function normalizePricingSnapshot(value: Partial<AiPricingSnapshot> | null): AiP
 
 function normalizeNullableNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function normalizeNumber(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback
 }

@@ -318,11 +318,20 @@ export type AiUsageLineItem = {
   pricingSnapshot: AiPricingSnapshot | null
 }
 
+export type QuizAttemptKind = 'generated' | 'manual' | 'retest'
+
 export type QuizAttempt = {
   id: string
   documentId: string
   readingSessionId: string | null
-  kind: 'generated' | 'manual'
+  kind: QuizAttemptKind
+  scopeType: ReadingScopeType
+  scopeLabel: string | null
+  chapterId: string | null
+  chapterTitle: string | null
+  pageIds: string[]
+  pageNumbers: number[]
+  sourcePageNumbers: Array<number | null>
   startWordIndex: number
   endWordIndex: number
   wordCount: number
