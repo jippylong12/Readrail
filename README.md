@@ -1,18 +1,42 @@
 # Readrail
 
-Readrail is a local-first Tauri desktop app for practicing evidence-aware speed reading. It supports pasted text and local text files without any network calls, optional Gemini OCR with a user-owned API key, comprehension-adjusted session tracking, and exportable reading history.
+Readrail is a local-first Tauri desktop app for practicing evidence-aware speed reading. It supports pasted text and local text files without network calls, optional Gemini OCR with a user-owned API key, structured chapter/page organization, comprehension-adjusted session tracking, and exportable reading history.
 
-## Current Prototype
+## Current App
 
 - Tauri 2, React 19, TypeScript, Vite, Tailwind CSS 4
 - Local document library with paste and `.txt` / `.md` import
+- Structured documents with chapters, ordered pages, source page numbers, review status, OCR notes, and editable page text
 - Rail, chunk, and optional RSVP drill reader modes
 - Session summary with comprehension score, adjusted WPM, self-rating, and notes
 - Stats dashboard with WPM, adjusted WPM, minutes, words, and streak summaries
 - CSV and JSON progress export
 - SQLite schema initialization through `@tauri-apps/plugin-sql`
 - Gemini API key commands backed by the OS keychain
-- Optional Gemini 2.5 Flash-Lite OCR review flow
+- Optional Gemini OCR review flow using the user's API key
+
+## v1.0.1 Highlights
+
+- OCR imports default to filename A-Z ordering with numeric-aware sort, which keeps camera rolls like `IMG_00001`, `IMG_00002`, and `IMG_00003` in reading order.
+- OCR staging includes quick sort controls, drag-and-drop ordering, compact rows, and a starting source page field that auto-fills page numbers from the current order.
+- Document-level OCR imports target the currently selected chapter directly instead of requiring a destination dropdown.
+- Library documents have a compact chapter/page organizer with page count controls for 10, 25, 50, or 100 visible rows.
+- Each page has a dedicated detail route for editing page label, source page, review status, OCR notes, and full page content.
+- The app UI is denser across panels, forms, organizer tables, document rows, and OCR review surfaces.
+
+## Screenshots
+
+### Compact Document Organizer
+
+![Compact document organizer](docs/screenshots/readrail-document-organizer.png)
+
+### Dedicated Page Detail Editor
+
+![Dedicated page detail editor](docs/screenshots/readrail-page-detail.png)
+
+### OCR Staging And Page Numbering
+
+![OCR staging and page numbering](docs/screenshots/readrail-ocr-staging.png)
 
 ## Development
 
@@ -50,7 +74,8 @@ Readrail is released locally. There is no GitHub CI/CD requirement for builds.
 1. Update the versions in `package.json`, `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml`.
 2. Run `pnpm install` if dependencies changed.
 3. Run `pnpm lint`, `pnpm test`, and `pnpm build:desktop`.
-4. Tag the release locally, for example `git tag v1.0.0`.
+4. Tag the release locally, for example `git tag v1.0.1`.
+5. Install the macOS app by opening the generated `.dmg`, dragging `Readrail.app` into `Applications`, and replacing the existing app when prompted.
 
 User data is designed to survive app updates. Keep these values stable across releases:
 
@@ -72,4 +97,4 @@ Research references for product copy and future docs:
 
 - Schotter, Tran, and Rayner, "Don't Believe What You Read (Only Once): Comprehension Is Supported by Regressions During Reading", Psychological Science, 2014.
 - RSVP and speed-reading comprehension tradeoffs: https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0153786
-- Gemini model docs: https://ai.google.dev/gemini-api/docs/models/gemini-2.5-flash-lite
+- Gemini model docs: https://ai.google.dev/gemini-api/docs/models
