@@ -7,6 +7,7 @@ import type {
   DocumentRecord,
   PageLayout,
   ReaderMode,
+  ReaderResumeMemory,
   ReaderResumeSlot,
 } from '../types/domain'
 import { clampWpm, formatDuration } from '../lib/reading/pacing'
@@ -41,8 +42,8 @@ export type ReaderSegmentInput = {
   pauseCount: number
   regressionCount: number
   scope: ReaderSessionScopeMetadata
-  scopeContent: string
-  scopeContentStartWordIndex: number
+  segmentContent: string
+  segmentContentStartWordIndex: number
 }
 
 type ReaderRailProps = {
@@ -50,6 +51,7 @@ type ReaderRailProps = {
   chapters: DocumentChapterRecord[]
   document: DocumentRecord | null
   pages: DocumentPageRecord[]
+  resumeMemory?: ReaderResumeMemory
   scopeSelection: ReaderScopeSelection
   defaultMode: ReaderMode
   defaultWpm: number
@@ -72,6 +74,7 @@ export function ReaderRail({
   chapters,
   document,
   pages,
+  resumeMemory,
   scopeSelection,
   defaultMode,
   defaultWpm,
@@ -183,8 +186,11 @@ export function ReaderRail({
       endPageNumber: activeScope.scopeType === 'pages' ? activeScope.selectedEndPageNumber : null,
       wordIndex: activeScope.startWordOffset + Math.max(0, Math.min(activeScope.wordCount, Math.round(scopeWordIndex))),
       chunkSize,
+      mode,
+      pageLayout,
+      targetWpm,
     })
-  }, [activeScope, chunkSize, document, onResumeUpdate])
+  }, [activeScope, chunkSize, document, mode, onResumeUpdate, pageLayout, targetWpm])
 
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
@@ -199,7 +205,11 @@ export function ReaderRail({
     setSegmentStartWordIndex(scopeRuntimeStart.localSegmentStart)
     setSegmentStartElapsedSeconds(0)
     setSuggestion(null)
-  }, [scopeRuntimeStart])
+    setMode(defaultMode)
+    setTargetWpm(defaultWpm)
+    setChunkSize(defaultChunkSize)
+    setPageLayout(defaultPageLayout)
+  }, [defaultChunkSize, defaultMode, defaultPageLayout, defaultWpm, scopeRuntimeStart])
   /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
@@ -337,8 +347,8 @@ export function ReaderRail({
         pageNumbers: activeScope?.pageNumbers ?? [],
         sourcePageNumbers: activeScope?.sourcePageNumbers ?? [],
       },
-      scopeContentStartWordIndex: normalizedScopeStartWordIndex,
-      scopeContent: activeScope
+      segmentContentStartWordIndex: normalizedScopeStartWordIndex,
+      segmentContent: activeScope
         ? materializeSegmentContent(activeScope, normalizedScopeStartWordIndex, normalizedScopeEndWordIndex)
         : '',
     }
@@ -544,6 +554,7 @@ export function ReaderRail({
           onBeforeScopeChange={resetReaderRuntime}
           onScopeChange={onScopeChange}
           pages={pages}
+          resumeMemory={resumeMemory}
           scope={activeScope}
           selection={scopeSelection}
           targetWpm={targetWpm}
@@ -619,6 +630,7 @@ type ReaderScopeSetupProps = {
   onScopeChange: (selection: ReaderScopeSelection) => void
   onBeforeScopeChange: () => void
   pages: DocumentPageRecord[]
+  resumeMemory?: ReaderResumeMemory
   scope: ReaderContentModel
   selection: ReaderScopeSelection
   targetWpm: number
@@ -630,6 +642,7 @@ function ReaderScopeSetup({
   onScopeChange,
   onBeforeScopeChange,
   pages,
+  resumeMemory,
   scope,
   selection,
   targetWpm,
@@ -648,6 +661,12 @@ function ReaderScopeSetup({
     onBeforeScopeChange()
     if (scopeType === 'document') {
       onScopeChange({ scopeType: 'document' })
+      return
+    }
+
+    const savedSelection = readerResumeSlotToScopeSelection(resumeMemory?.[scopeType])
+    if (savedSelection) {
+      onScopeChange(savedSelection)
       return
     }
 
@@ -787,6 +806,31 @@ function ReaderScopeSetup({
       </div>
     </section>
   )
+}
+
+function readerResumeSlotToScopeSelection(slot: ReaderResumeSlot | undefined): ReaderScopeSelection | null {
+  if (!slot) {
+    return null
+  }
+
+  if (slot.scopeType === 'document') {
+    return { scopeType: 'document' }
+  }
+
+  if (!slot.chapterId) {
+    return null
+  }
+
+  if (slot.scopeType === 'chapter') {
+    return { scopeType: 'chapter', chapterId: slot.chapterId }
+  }
+
+  return {
+    scopeType: 'pages',
+    chapterId: slot.chapterId,
+    startPageNumber: slot.startPageNumber,
+    endPageNumber: slot.endPageNumber ?? slot.startPageNumber,
+  }
 }
 
 function getLocalSegmentStart(documentWordIndex: number, scope: ReaderContentModel | null): number {

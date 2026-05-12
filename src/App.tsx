@@ -45,8 +45,8 @@ type PendingSession = {
   pauseCount: number
   regressionCount: number
   scope: ReaderSessionScopeMetadata
-  scopeContent: string
-  scopeContentStartWordIndex: number
+  segmentContent: string
+  segmentContentStartWordIndex: number
 }
 
 type PendingQuiz = {
@@ -327,16 +327,16 @@ function App() {
 
       const endWordIndex = Math.max(0, Math.min(session.endWordIndex || currentDocument.wordCount, currentDocument.wordCount))
       const startWordIndex = Math.max(0, Math.min(session.startWordIndex, endWordIndex))
-      const scopeContentStartWordIndex = Math.max(0, Math.round(session.scopeContentStartWordIndex))
-      const scopeContentWordCount = session.scopeContent.split(/\s+/).filter(Boolean).length
-      const scopeContentEndWordIndex = scopeContentStartWordIndex + scopeContentWordCount
-      const requestedScopeEndWordIndex = session.scopeEndWordIndex || scopeContentEndWordIndex
+      const segmentContentStartWordIndex = Math.max(0, Math.round(session.segmentContentStartWordIndex))
+      const segmentContentWordCount = session.segmentContent.split(/\s+/).filter(Boolean).length
+      const segmentContentEndWordIndex = segmentContentStartWordIndex + segmentContentWordCount
+      const requestedScopeEndWordIndex = session.scopeEndWordIndex || segmentContentEndWordIndex
       const scopeEndWordIndex = Math.max(
-        scopeContentStartWordIndex,
-        Math.min(requestedScopeEndWordIndex, scopeContentEndWordIndex),
+        segmentContentStartWordIndex,
+        Math.min(requestedScopeEndWordIndex, segmentContentEndWordIndex),
       )
       const scopeStartWordIndex = Math.max(
-        scopeContentStartWordIndex,
+        segmentContentStartWordIndex,
         Math.min(session.scopeStartWordIndex, scopeEndWordIndex),
       )
       const wordsRead = Math.max(1, scopeEndWordIndex - scopeStartWordIndex)
@@ -346,7 +346,7 @@ function App() {
         endWordIndex,
         scopeStartWordIndex,
         scopeEndWordIndex,
-        scopeContentStartWordIndex,
+        segmentContentStartWordIndex,
         wordsRead,
       }
       const quizDocument = currentDocument
@@ -366,9 +366,9 @@ function App() {
         }
 
         const quizText = excerptWords(
-          normalizedSession.scopeContent,
-          scopeStartWordIndex - scopeContentStartWordIndex,
-          scopeEndWordIndex - scopeContentStartWordIndex,
+          normalizedSession.segmentContent,
+          scopeStartWordIndex - segmentContentStartWordIndex,
+          scopeEndWordIndex - segmentContentStartWordIndex,
         )
         const quizTitle =
           normalizedSession.scope.scopeType === 'document'
@@ -708,14 +708,15 @@ function App() {
             baselineResult={baselineResult}
             chapters={documentChapters}
             defaultChunkSize={readerResume?.chunkSize ?? settings.reader.chunkSize}
-            defaultMode={settings.reader.defaultMode}
-            defaultPageLayout={settings.reader.defaultPageLayout ?? 1}
-            defaultWpm={coaching.recommendedWpm || settings.reader.defaultWpm}
+            defaultMode={readerResume?.mode ?? settings.reader.defaultMode}
+            defaultPageLayout={readerResume?.pageLayout ?? settings.reader.defaultPageLayout ?? 1}
+            defaultWpm={readerResume?.targetWpm ?? (coaching.recommendedWpm || settings.reader.defaultWpm)}
             document={displayedDocument}
             fontSize={settings.reader.fontSize}
             key={displayedDocument ? pathForRoute(navigation) : 'empty-reader'}
             lineHeight={settings.reader.lineHeight}
             pages={documentPages}
+            resumeMemory={displayedDocument ? coaching.readerResumeByDocument[displayedDocument.id] : undefined}
             scopeSelection={readerScopeSelection}
             segmentStartWordIndex={
               displayedDocument ? readerResume?.wordIndex ?? coaching.lastResetWordIndexByDocument[displayedDocument.id] ?? 0 : 0
@@ -846,7 +847,7 @@ function currentBrowserPath(): string {
 }
 
 function readerScopeSelectionFromRoute(routeState: RouteState): ReaderScopeSelection {
-  if (routeState.route !== 'reader' || !routeState.chapterId) {
+  if (routeState.route !== 'reader' || routeState.readerScopeType === 'document' || !routeState.chapterId) {
     return { scopeType: 'document' }
   }
 
@@ -867,17 +868,18 @@ function readerScopeSelectionFromRoute(routeState: RouteState): ReaderScopeSelec
 
 function routeForReaderScope(documentId: string, selection: ReaderScopeSelection): RouteState {
   if (selection.scopeType === 'document' || !selection.chapterId) {
-    return { route: 'reader', documentId }
+    return { route: 'reader', documentId, readerScopeType: 'document' }
   }
 
   if (selection.scopeType === 'chapter') {
-    return { route: 'reader', documentId, chapterId: selection.chapterId }
+    return { route: 'reader', documentId, chapterId: selection.chapterId, readerScopeType: 'chapter' }
   }
 
   return {
     route: 'reader',
     documentId,
     chapterId: selection.chapterId,
+    readerScopeType: 'pages',
     startPageNumber: selection.startPageNumber ?? null,
     endPageNumber: selection.endPageNumber ?? selection.startPageNumber ?? null,
   }
@@ -887,6 +889,9 @@ type ResolvedReaderResume = {
   selection: ReaderScopeSelection
   wordIndex: number
   chunkSize: number
+  mode?: ReaderMode
+  pageLayout?: ReaderResumeSlot['pageLayout']
+  targetWpm?: number
 }
 
 function resolveReaderResume({
@@ -909,7 +914,7 @@ function resolveReaderResume({
   }
 
   const routeSelection = normalizeReaderScopeSelection(document, chapters, pages, readerScopeSelectionFromRoute(routeState))
-  const isExplicitScopeRoute = Boolean(routeState.chapterId)
+  const isExplicitScopeRoute = Boolean(routeState.readerScopeType || routeState.chapterId)
   if (isExplicitScopeRoute) {
     const matchingSlot = getReaderResumeSlotForSelection(memory, routeSelection)
     const scope = buildReaderScope(document, chapters, pages, routeSelection)
@@ -917,6 +922,9 @@ function resolveReaderResume({
       selection: routeSelection,
       wordIndex: matchingSlot ? clampResumeWordIndex(matchingSlot.wordIndex, scope) : scope.startWordOffset,
       chunkSize: matchingSlot?.chunkSize ?? fallbackChunkSize,
+      mode: matchingSlot?.mode,
+      pageLayout: matchingSlot?.pageLayout,
+      targetWpm: matchingSlot?.targetWpm,
     }
   }
 
@@ -931,6 +939,9 @@ function resolveReaderResume({
     selection,
     wordIndex: clampResumeWordIndex(slot.wordIndex, scope),
     chunkSize: slot.chunkSize || fallbackChunkSize,
+    mode: slot.mode,
+    pageLayout: slot.pageLayout,
+    targetWpm: slot.targetWpm,
   }
 }
 

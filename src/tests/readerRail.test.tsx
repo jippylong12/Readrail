@@ -217,6 +217,8 @@ describe('ReaderRail focus mode', () => {
         startWordIndex: 0,
         endWordIndex: 4,
         wordsRead: 4,
+        segmentContent: 'Focus mode should keep',
+        segmentContentStartWordIndex: 0,
       }),
     )
     expect(readerPanel?.classList.contains('reader-panel-focus')).toBe(false)
@@ -577,6 +579,8 @@ describe('ReaderRail scope setup', () => {
         scopeStartWordIndex: 0,
         scopeEndWordIndex: 3,
         wordsRead: 3,
+        segmentContent: 'Second page scoped.',
+        segmentContentStartWordIndex: 0,
         scope: expect.objectContaining({
           scopeType: 'pages',
           scopeLabel: 'Chapter One, page 2',

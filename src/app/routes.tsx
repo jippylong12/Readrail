@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import type { ReadingScopeType } from '../types/domain'
 
 export type AppRoute =
   | 'library-import'
@@ -20,6 +21,7 @@ export type RouteState = {
   documentId: string | null
   ocrJobId?: string | null
   chapterId?: string | null
+  readerScopeType?: ReadingScopeType | null
   pageId?: string | null
   pageNumber?: number | null
   startPageNumber?: number | null
@@ -84,6 +86,7 @@ export function routeFromPath(pathname: string): RouteState {
       route: 'reader',
       documentId: segments[1] ?? null,
       chapterId: segments[2] === 'chapters' ? segments[3] ?? null : null,
+      ...(searchParams.get('scope') === 'document' ? { readerScopeType: 'document' as const } : {}),
       startPageNumber:
         startPageNumber !== null && Number.isFinite(startPageNumber) ? Math.max(1, Math.round(startPageNumber)) : null,
       endPageNumber:
@@ -154,7 +157,9 @@ export function pathForRoute(routeState: RouteState): string {
         }
         return chapterPath
       }
-      return `/reader/${encodeURIComponent(routeState.documentId)}`
+      return routeState.readerScopeType === 'document'
+        ? `/reader/${encodeURIComponent(routeState.documentId)}?scope=document`
+        : `/reader/${encodeURIComponent(routeState.documentId)}`
     case 'test':
       return '/test'
     case 'progress':

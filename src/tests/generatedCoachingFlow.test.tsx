@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../App'
@@ -80,6 +80,88 @@ describe('generated coaching flow', () => {
     expect(screen.getByLabelText('Start page')).toHaveProperty('value', '2')
     expect(screen.getByLabelText('End page')).toHaveProperty('value', '2')
     expect(screen.getByLabelText('Chunk')).toHaveProperty('value', '2')
+  })
+
+  it('lets explicit document scope override the latest saved page scope', async () => {
+    useAppStore.setState((state) => ({
+      coaching: {
+        ...state.coaching,
+        readerResumeByDocument: {
+          [documentRecord.id]: {
+            pages: {
+              scopeType: 'pages',
+              chapterId: chapter.id,
+              startPageNumber: 2,
+              endPageNumber: 2,
+              wordIndex: 4,
+              chunkSize: 2,
+              updatedAt: '2026-05-12T12:05:00.000Z',
+            },
+          },
+        },
+      },
+    }))
+
+    render(<App />)
+
+    await waitFor(() => expect(screen.getByLabelText('Start page')).toHaveProperty('value', '2'))
+
+    await userEvent.click(screen.getByRole('button', { name: 'Document' }))
+
+    await waitFor(() => expect(screen.queryByLabelText('Start page')).toBeNull())
+    expect(screen.getAllByText('Full document').length).toBeGreaterThan(0)
+  })
+
+  it('restores saved page range and reader controls after play, scope switches, and reopening from the library', async () => {
+    const user = userEvent.setup()
+    window.history.replaceState(null, '', '/reader/document-1/chapters/chapter-1/pages/2/2')
+
+    render(<App />)
+
+    await waitFor(() => expect(screen.getByLabelText('Start page')).toHaveProperty('value', '2'))
+    await user.click(screen.getByRole('button', { name: 'Chunk' }))
+    await user.click(screen.getByRole('button', { name: '2 panes' }))
+    fireEvent.change(screen.getByRole('slider', { name: /WPM/ }), { target: { value: '300' } })
+    fireEvent.change(screen.getByLabelText('Chunk'), { target: { value: '2' } })
+
+    await user.click(screen.getByRole('button', { name: 'Play' }))
+
+    await waitFor(() => {
+      expect(useAppStore.getState().coaching.readerResumeByDocument[documentRecord.id]?.pages).toMatchObject({
+        scopeType: 'pages',
+        chapterId: chapter.id,
+        startPageNumber: 2,
+        endPageNumber: 2,
+        wordIndex: 4,
+        chunkSize: 2,
+        mode: 'chunk',
+        pageLayout: 2,
+        targetWpm: 300,
+      })
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Document' }))
+    await waitFor(() => expect(screen.queryByLabelText('Start page')).toBeNull())
+    await user.click(screen.getByRole('button', { name: 'Chapter' }))
+    await waitFor(() => expect(screen.queryByLabelText('Start page')).toBeNull())
+    await user.click(screen.getByRole('button', { name: 'Pages' }))
+
+    await waitFor(() => expect(screen.getByLabelText('Start page')).toHaveProperty('value', '2'))
+    expect(screen.getByLabelText('End page')).toHaveProperty('value', '2')
+    expect(screen.getByLabelText('Chunk')).toHaveProperty('value', '2')
+    expect(screen.getByRole('slider', { name: /WPM/ })).toHaveProperty('value', '300')
+    expect(screen.getByRole('button', { name: 'Chunk' }).classList.contains('active')).toBe(true)
+    expect(screen.getByRole('button', { name: '2 panes' }).classList.contains('active')).toBe(true)
+
+    await user.click(screen.getByRole('button', { name: 'Back to library' }))
+    await user.click(screen.getByRole('button', { name: 'Read' }))
+
+    await waitFor(() => expect(screen.getByLabelText('Start page')).toHaveProperty('value', '2'))
+    expect(screen.getByLabelText('End page')).toHaveProperty('value', '2')
+    expect(screen.getByLabelText('Chunk')).toHaveProperty('value', '2')
+    expect(screen.getByRole('slider', { name: /WPM/ })).toHaveProperty('value', '300')
+    expect(screen.getByRole('button', { name: 'Chunk' }).classList.contains('active')).toBe(true)
+    expect(screen.getByRole('button', { name: '2 panes' }).classList.contains('active')).toBe(true)
   })
 
   it('prefers explicit reader URLs over saved resume scope', async () => {
@@ -198,6 +280,76 @@ describe('generated coaching flow', () => {
       documentId: 'document-1',
       stage: 'generated_quiz',
       status: 'succeeded',
+    })
+  })
+
+  it('excludes a large unread suffix from generated quiz text and pending word counts', async () => {
+    const user = userEvent.setup()
+    const readSegment = 'First segment words here.'
+    const unreadSuffix = Array.from({ length: 1_200 }, (_, index) => `unread${index}`).join(' ')
+    const largeDocument: DocumentRecord = {
+      ...documentRecord,
+      content: `${readSegment}\n\n\f\n\n${unreadSuffix}`,
+      wordCount: 1_204,
+    }
+    const largePages = [
+      buildPage('page-1', 1, readSegment, 41),
+      buildPage('page-2', 2, unreadSuffix, 42),
+    ]
+    useAppStore.setState({
+      documents: [largeDocument],
+      documentPages: largePages,
+    })
+    generateQuizFromReadingMock
+      .mockRejectedValueOnce(new Error('quiz provider unavailable'))
+      .mockResolvedValueOnce(buildQuiz())
+
+    render(<App />)
+    await saveBrowserGeminiKey(user)
+
+    await user.click(screen.getByRole('button', { name: 'Play' }))
+    await user.click(screen.getByRole('button', { name: 'Pause' }))
+    await user.click(screen.getByRole('button', { name: 'Test' }))
+
+    expect(await screen.findByText('quiz provider unavailable')).toBeTruthy()
+    const firstGeneratedContent = generateQuizFromReadingMock.mock.calls[0][2]
+    expect(generateQuizFromReadingMock.mock.calls[0].slice(0, 4)).toEqual([
+      'browser-test-key',
+      'Scoped coaching document',
+      'First segment words here.',
+      4,
+    ])
+    expect(firstGeneratedContent).not.toContain('unread0')
+    expect(firstGeneratedContent).not.toContain('unread1199')
+
+    await user.click(screen.getByRole('button', { name: 'Try again' }))
+
+    await waitFor(() => expect(generateQuizFromReadingMock).toHaveBeenCalledTimes(2))
+    const retryGeneratedContent = generateQuizFromReadingMock.mock.calls[1][2]
+    expect(generateQuizFromReadingMock.mock.calls[1].slice(0, 4)).toEqual([
+      'browser-test-key',
+      'Scoped coaching document',
+      'First segment words here.',
+      4,
+    ])
+    expect(retryGeneratedContent).not.toContain('unread0')
+    expect(retryGeneratedContent).not.toContain('unread1199')
+
+    await user.click(await screen.findByLabelText('Practice improves comprehension.'))
+    await user.click(screen.getByLabelText('Questions are skipped.'))
+    await user.click(screen.getByRole('button', { name: 'Save quiz result' }))
+
+    await waitFor(() => expect(window.location.pathname).toBe('/progress'))
+    const state = useAppStore.getState()
+    expect(state.sessions[0]).toMatchObject({
+      startPosition: 0,
+      endPosition: 4,
+      wordsRead: 4,
+    })
+    expect(state.quizAttempts[0]).toMatchObject({
+      startWordIndex: 0,
+      endWordIndex: 4,
+      wordCount: 4,
     })
   })
 

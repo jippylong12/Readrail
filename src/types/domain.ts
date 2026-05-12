@@ -199,6 +199,9 @@ export type ReaderResumeSlot = {
   endPageNumber: number | null
   wordIndex: number
   chunkSize: number
+  mode?: ReaderMode
+  pageLayout?: PageLayout
+  targetWpm?: number
   updatedAt: string
 }
 

@@ -370,13 +370,47 @@ function buildDefaultCoachingState(recommendedWpm = defaultSettings.reader.defau
 }
 
 function normalizeCoachingState(coaching: Partial<CoachingState> | undefined, fallbackWpm: number): CoachingState {
+  const readerResumeByDocument = Object.fromEntries(
+    Object.entries(coaching?.readerResumeByDocument ?? {}).map(([documentId, memory]) => [
+      documentId,
+      Object.fromEntries(
+        (['document', 'chapter', 'pages'] as ReadingScopeType[])
+          .map((scopeType) => memory?.[scopeType])
+          .filter((slot): slot is ReaderResumeSlot => Boolean(slot))
+          .map((slot) => [
+            slot.scopeType,
+            normalizeReaderResumeSlot(slot, fallbackWpm),
+          ]),
+      ),
+    ]),
+  )
+
   return {
     ...buildDefaultCoachingState(fallbackWpm),
     ...(coaching ?? {}),
     lastResetWordIndexByDocument: coaching?.lastResetWordIndexByDocument ?? {},
     activeSegmentByDocument: coaching?.activeSegmentByDocument ?? {},
-    readerResumeByDocument: coaching?.readerResumeByDocument ?? {},
+    readerResumeByDocument,
   }
+}
+
+function normalizeReaderResumeSlot(slot: ReaderResumeSlot, fallbackWpm: number): ReaderResumeSlot {
+  return {
+    scopeType: slot.scopeType,
+    chapterId: slot.chapterId ?? null,
+    startPageNumber: slot.startPageNumber ?? null,
+    endPageNumber: slot.endPageNumber ?? null,
+    wordIndex: Math.max(0, Math.round(slot.wordIndex)),
+    chunkSize: Math.max(1, Math.round(slot.chunkSize)),
+    mode: slot.mode ?? defaultSettings.reader.defaultMode,
+    pageLayout: normalizePageLayout(slot.pageLayout ?? defaultSettings.reader.defaultPageLayout),
+    targetWpm: Math.max(1, Math.round(slot.targetWpm ?? fallbackWpm)),
+    updatedAt: slot.updatedAt,
+  }
+}
+
+function normalizePageLayout(pageLayout: PageLayout | undefined): PageLayout {
+  return ([1, 2, 3, 4] as PageLayout[]).includes(pageLayout ?? 1) ? (pageLayout ?? 1) : 1
 }
 
 function seedSessionScopeMetadata(sessions: ReadingSession[] | undefined): ReadingSession[] {
@@ -1994,6 +2028,9 @@ export const useAppStore = create<AppState>()(
             endPageNumber: slot.endPageNumber ?? null,
             wordIndex: Math.max(0, Math.round(slot.wordIndex)),
             chunkSize: Math.max(1, Math.round(slot.chunkSize)),
+            mode: slot.mode ?? defaultSettings.reader.defaultMode,
+            pageLayout: normalizePageLayout(slot.pageLayout ?? defaultSettings.reader.defaultPageLayout),
+            targetWpm: Math.max(1, Math.round(slot.targetWpm ?? state.coaching.recommendedWpm ?? defaultSettings.reader.defaultWpm)),
             updatedAt: slot.updatedAt ?? new Date().toISOString(),
           }
 
