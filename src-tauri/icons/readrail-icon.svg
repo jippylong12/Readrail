@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Readrail">
+  <defs>
+    <linearGradient id="background" x1="180" y1="90" x2="860" y2="940" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0f5659"/>
+      <stop offset="0.52" stop-color="#15456b"/>
+      <stop offset="1" stop-color="#282d55"/>
+    </linearGradient>
+    <linearGradient id="rail" x1="160" y1="592" x2="850" y2="455" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2dd4bf"/>
+      <stop offset="0.55" stop-color="#33c6d7"/>
+      <stop offset="1" stop-color="#f8b84e"/>
+    </linearGradient>
+    <linearGradient id="leftPage" x1="205" y1="265" x2="505" y2="760" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#fff8e9"/>
+      <stop offset="1" stop-color="#ece0bf"/>
+    </linearGradient>
+    <linearGradient id="rightPage" x1="520" y1="255" x2="825" y2="740" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#fffdf4"/>
+      <stop offset="1" stop-color="#f0e5c8"/>
+    </linearGradient>
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="28" stdDeviation="28" flood-color="#07111f" flood-opacity=".28"/>
+    </filter>
+  </defs>
+  <rect width="1024" height="1024" rx="224" fill="url(#background)"/>
+  <circle cx="206" cy="174" r="92" fill="#f8b84e" opacity=".16"/>
+  <circle cx="856" cy="814" r="120" fill="#2dd4bf" opacity=".12"/>
+  <g filter="url(#softShadow)">
+    <path fill="url(#leftPage)" d="M202 285c0-35 29-61 64-56l180 28c36 6 63 20 80 44v459c-18-23-45-38-80-43l-244-38V285z"/>
+    <path fill="url(#rightPage)" d="M526 301c17-24 44-38 80-44l180-28c35-5 64 21 64 56v394l-244 38c-35 5-62 20-80 43V301z"/>
+    <path fill="#c7b98f" d="M503 300h46v472h-46z" opacity=".9"/>
+    <path fill="#1f4059" d="M262 380l167 27v39l-167-27v-39zm0 111l167 27v39l-167-27v-39zm0 111l167 27v39l-167-27v-39zm334-195l167-27v39l-167 27v-39zm0 111l167-27v39l-167 27v-39zm0 111l167-27v39l-167 27v-39z" opacity=".68"/>
+    <path fill="none" stroke="url(#rail)" stroke-linecap="round" stroke-width="76" d="M197 595c104-44 211-61 320-49 102 11 204-5 306-50"/>
+    <circle cx="520" cy="546" r="64" fill="#f8b84e"/>
+    <circle cx="520" cy="546" r="29" fill="#fff8e9" opacity=".95"/>
+  </g>
+</svg>
