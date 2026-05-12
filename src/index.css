@@ -1463,6 +1463,85 @@ h3 {
   overflow: hidden;
 }
 
+.costs-panel {
+  display: grid;
+  gap: 18px;
+  overflow: hidden;
+}
+
+.cost-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.cost-rollup-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.cost-rollup-block {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.cost-rollup-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.cost-rollup-header select {
+  width: auto;
+  min-width: 130px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-muted);
+  color: var(--text);
+  padding: 8px 10px;
+}
+
+.cost-rollup-table {
+  min-width: 560px;
+}
+
+.cost-detail-table {
+  min-width: 1120px;
+}
+
+.confidence-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 0.78rem;
+  font-weight: 850;
+}
+
+.confidence-badge.estimated {
+  border-color: color-mix(in srgb, var(--primary) 38%, var(--line));
+  color: var(--primary);
+}
+
+.confidence-badge.exact {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--line));
+  color: var(--accent);
+}
+
+.confidence-badge.unknown {
+  border-color: color-mix(in srgb, var(--warning) 42%, var(--line));
+  color: var(--warning);
+}
+
 .progress-panel {
   display: grid;
   gap: 16px;
@@ -2008,6 +2087,7 @@ h3 {
   .app-shell,
   .reader-controls,
   .chart-grid,
+  .cost-rollup-grid,
   .settings-grid,
   .journey-list,
   .mode-grid,
@@ -2026,7 +2106,7 @@ h3 {
   }
 
   .nav-tabs {
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(6, 1fr);
   }
 
   .summary-grid {

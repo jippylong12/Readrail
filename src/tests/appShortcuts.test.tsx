@@ -33,6 +33,7 @@ function resetStore(): void {
     ocrJobs: [],
     ocrJobItems: [],
     ocrRuntimeJobs: {},
+    aiUsageLineItems: [],
     sessions: [],
     activeDocumentId: activeDocument.id,
     onboarding: {
@@ -42,7 +43,7 @@ function resetStore(): void {
     },
     tourProgress: {
       ...defaultTourProgressState,
-      completedTourIds: ['library-saved', 'reader', 'stats', 'settings'],
+      completedTourIds: ['library-saved', 'reader', 'progress', 'costs', 'stats', 'settings'],
     },
     baselineResult: null,
   })
@@ -97,6 +98,7 @@ function seedMultiChapterDocument(): void {
     ocrJobs: [],
     ocrJobItems: [],
     ocrRuntimeJobs: {},
+    aiUsageLineItems: [],
     sessions: [],
     activeDocumentId: activeDocument.id,
     onboarding: {
@@ -106,7 +108,7 @@ function seedMultiChapterDocument(): void {
     },
     tourProgress: {
       ...defaultTourProgressState,
-      completedTourIds: ['library-saved', 'reader', 'stats', 'settings'],
+      completedTourIds: ['library-saved', 'reader', 'progress', 'costs', 'stats', 'settings'],
     },
     baselineResult: null,
   })
@@ -262,6 +264,21 @@ describe('app section shortcuts', () => {
     expect(screen.getByRole('heading', { name: 'Reading documents' })).toBeTruthy()
   })
 
+  it('opens Costs from top-level navigation without registering a shortcut', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    const costsButton = screen.getByRole('button', { name: 'Costs' })
+    expect(costsButton.getAttribute('aria-keyshortcuts')).toBeNull()
+    expect(costsButton.getAttribute('title')).toBeNull()
+
+    await user.click(costsButton)
+
+    expect(screen.getByRole('heading', { name: 'AI usage costs' })).toBeTruthy()
+    expect(window.location.pathname).toBe('/costs')
+    expect(costsButton.classList.contains('active')).toBe(true)
+  })
+
   it('navigates primary sections with Control shortcuts', () => {
     render(<App />)
 
@@ -377,6 +394,14 @@ describe('route helpers', () => {
       startPageNumber: 4,
       endPageNumber: 7,
     })).toBe('/reader/document-1/chapters/chapter-2/pages/4/7')
+    expect(routeFromPath('/costs')).toEqual({
+      route: 'costs',
+      documentId: null,
+    })
+    expect(pathForRoute({
+      route: 'costs',
+      documentId: null,
+    })).toBe('/costs')
   })
 })
 

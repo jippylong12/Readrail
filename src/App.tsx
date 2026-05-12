@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { AppShell } from './components/AppShell'
+import { CostsReport } from './components/CostsReport'
 import { DocumentDetail } from './components/DocumentDetail'
 import { ImportPanel } from './components/ImportPanel'
 import { LibraryList } from './components/LibraryList'
@@ -62,6 +63,8 @@ function App() {
   const documents = useAppStore((state) => state.documents)
   const documentChapters = useAppStore((state) => state.documentChapters)
   const documentPages = useAppStore((state) => state.documentPages)
+  const ocrJobs = useAppStore((state) => state.ocrJobs)
+  const aiUsageLineItems = useAppStore((state) => state.aiUsageLineItems)
   const sessions = useAppStore((state) => state.sessions)
   const settings = useAppStore((state) => state.settings)
   const onboarding = useAppStore((state) => state.onboarding)
@@ -598,6 +601,14 @@ function App() {
           }}
           quizAttempts={quizAttempts}
           sessions={sessions}
+        />
+      )}
+
+      {route === 'costs' && (
+        <CostsReport
+          documents={documents}
+          lineItems={aiUsageLineItems}
+          ocrJobs={ocrJobs}
         />
       )}
 

@@ -78,6 +78,32 @@ export const TOUR_DEFINITIONS: Record<TourId, TourDefinition> = {
       },
     ],
   },
+  costs: {
+    id: 'costs',
+    title: 'Costs walkthrough',
+    steps: [
+      {
+        target: '[data-tour="cost-filters"]',
+        title: 'Filter AI usage',
+        body: 'Narrow cost records by date, document, OCR job, stage, model, status, and confidence before reviewing totals or exporting.',
+      },
+      {
+        target: '[data-tour="cost-summary"]',
+        title: 'Spend and token totals',
+        body: 'The summary tracks estimated spend, usage records, token totals, unknown-cost records, and failed calls for the active filter set.',
+      },
+      {
+        target: '[data-tour="cost-rollups"]',
+        title: 'Rollups',
+        body: 'Rollups group filtered usage by document, OCR job, stage, model, and time period so expensive paths are easier to spot.',
+      },
+      {
+        target: '[data-tour="cost-exports"]',
+        title: 'Cost exports',
+        body: 'CSV exports filtered line items, while JSON includes filters, totals, rollups, and the filtered usage records.',
+      },
+    ],
+  },
   stats: {
     id: 'stats',
     title: 'Stats walkthrough',

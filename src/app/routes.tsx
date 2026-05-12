@@ -8,10 +8,11 @@ export type AppRoute =
   | 'reader'
   | 'test'
   | 'progress'
+  | 'costs'
   | 'stats'
   | 'settings'
 
-export type PrimaryRoute = 'library-saved' | 'reader' | 'progress' | 'stats' | 'settings'
+export type PrimaryRoute = 'library-saved' | 'reader' | 'progress' | 'costs' | 'stats' | 'settings'
 
 export type RouteState = {
   route: AppRoute
@@ -37,6 +38,7 @@ export const ROUTES: RouteDefinition[] = [
   { id: 'library-saved', label: 'Library', icon: 'L' },
   { id: 'reader', label: 'Reader', icon: 'R' },
   { id: 'progress', label: 'Progress', icon: 'P' },
+  { id: 'costs', label: 'Costs', icon: '$' },
   { id: 'stats', label: 'Stats', icon: 'S' },
   { id: 'settings', label: 'Settings', icon: 'G' },
 ]
@@ -85,6 +87,10 @@ export function routeFromPath(pathname: string): RouteState {
     return { route: 'progress', documentId: null }
   }
 
+  if (segments[0] === 'costs') {
+    return { route: 'costs', documentId: null }
+  }
+
   if (segments[0] === 'stats') {
     return { route: 'stats', documentId: null }
   }
@@ -130,6 +136,8 @@ export function pathForRoute(routeState: RouteState): string {
       return '/test'
     case 'progress':
       return '/progress'
+    case 'costs':
+      return '/costs'
     case 'stats':
       return '/stats'
     case 'settings':
