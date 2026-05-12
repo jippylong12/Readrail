@@ -153,11 +153,23 @@ export function ReaderControls({
           <button className="primary-button" onClick={onToggleRunning} type="button">
             {isRunning ? 'Pause' : 'Play'}
           </button>
-          <button className="secondary-button" disabled={!canGoPreviousPane} onClick={onPreviousPane} type="button">
-            Previous pane
+          <button
+            aria-label="Previous pane"
+            className="secondary-button"
+            disabled={!canGoPreviousPane}
+            onClick={onPreviousPane}
+            type="button"
+          >
+            Prev
           </button>
-          <button className="secondary-button" disabled={!canGoNextPane} onClick={onNextPane} type="button">
-            Next pane
+          <button
+            aria-label="Next pane"
+            className="secondary-button"
+            disabled={!canGoNextPane}
+            onClick={onNextPane}
+            type="button"
+          >
+            Next
           </button>
           <button
             aria-pressed={isFocusMode}
@@ -223,16 +235,47 @@ function MeterNumberInput({
   onChange: (value: number) => void
   value: number
 }) {
+  const [draftValue, setDraftValue] = useState('')
+  const [isEditing, setIsEditing] = useState(false)
+  const displayedValue = isEditing ? draftValue : value.toString()
+
+  const commitDraft = () => {
+    const parsedValue = Number(displayedValue)
+    const nextValue = Number.isFinite(parsedValue) ? Math.max(min, Math.min(max, Math.round(parsedValue))) : value
+    setDraftValue(nextValue.toString())
+    onChange(nextValue)
+  }
+
   return (
     <label className="meter-number-control">
       <span>{label}</span>
       <input
         max={max}
         min={min}
-        onBlur={(event) => onChange(Number(event.currentTarget.value))}
-        onChange={(event) => onChange(Number(event.target.value))}
+        onBlur={() => {
+          commitDraft()
+          setIsEditing(false)
+        }}
+        onChange={(event) => {
+          const nextDraftValue = event.target.value
+          const parsedValue = Number(nextDraftValue)
+          setDraftValue(nextDraftValue)
+
+          if (Number.isFinite(parsedValue) && parsedValue >= min && parsedValue <= max) {
+            onChange(Math.round(parsedValue))
+          }
+        }}
+        onFocus={() => {
+          setDraftValue(value.toString())
+          setIsEditing(true)
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            event.currentTarget.blur()
+          }
+        }}
         type="number"
-        value={value}
+        value={displayedValue}
       />
       <ValueMeter max={max} min={min} value={value} />
     </label>

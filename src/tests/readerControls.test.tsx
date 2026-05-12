@@ -21,7 +21,15 @@ const baselineResult: BaselineAssessmentResult = {
   appliedWpmAt: new Date().toISOString(),
 }
 
-function renderControls(pageLayout: PageLayout = 1) {
+function renderControls({
+  onChunkSizeChange = vi.fn(),
+  onWpmChange = vi.fn(),
+  pageLayout = 1,
+}: {
+  onChunkSizeChange?: (chunkSize: number) => void
+  onWpmChange?: (wpm: number) => void
+  pageLayout?: PageLayout
+} = {}) {
   const onPageLayoutChange = vi.fn()
   render(
     <ReaderControls
@@ -34,7 +42,7 @@ function renderControls(pageLayout: PageLayout = 1) {
       pageLayout={pageLayout}
       canGoNextPane
       canGoPreviousPane={false}
-      onChunkSizeChange={vi.fn()}
+      onChunkSizeChange={onChunkSizeChange}
       onFocusModeToggle={vi.fn()}
       onModeChange={vi.fn()}
       onNextPane={vi.fn()}
@@ -42,11 +50,11 @@ function renderControls(pageLayout: PageLayout = 1) {
       onPreviousPane={vi.fn()}
       onTest={vi.fn()}
       onToggleRunning={vi.fn()}
-      onWpmChange={vi.fn()}
+      onWpmChange={onWpmChange}
       targetWpm={225}
     />,
   )
-  return { onPageLayoutChange }
+  return { onChunkSizeChange, onPageLayoutChange, onWpmChange }
 }
 
 afterEach(() => {
@@ -72,7 +80,7 @@ describe('ReaderControls', () => {
   })
 
   it('renders a 1/2/3/4 pane layout picker', () => {
-    renderControls(1)
+    renderControls({ pageLayout: 1 })
 
     expect(screen.getByRole('group', { name: 'Pane count' })).toBeTruthy()
     expect(screen.getByRole('button', { name: '1 pane' })).toBeTruthy()
@@ -82,7 +90,7 @@ describe('ReaderControls', () => {
   })
 
   it('marks the active pane count button as pressed', () => {
-    renderControls(3)
+    renderControls({ pageLayout: 3 })
 
     const button3 = screen.getByRole('button', { name: '3 panes' })
     expect(button3.getAttribute('aria-pressed')).toBe('true')
@@ -93,10 +101,43 @@ describe('ReaderControls', () => {
 
   it('calls onPageLayoutChange with the chosen count', async () => {
     const user = userEvent.setup()
-    const { onPageLayoutChange } = renderControls(1)
+    const { onPageLayoutChange } = renderControls({ pageLayout: 1 })
 
     await user.click(screen.getByRole('button', { name: '4 panes' }))
 
     expect(onPageLayoutChange).toHaveBeenCalledWith(4)
+  })
+
+  it('lets WPM values be typed before clamping on commit', async () => {
+    const user = userEvent.setup()
+    const onWpmChange = vi.fn()
+    renderControls({ onWpmChange })
+
+    const input = screen.getByRole('spinbutton', { name: 'WPM' })
+    await user.clear(input)
+    await user.type(input, '500')
+
+    expect((input as HTMLInputElement).value).toBe('500')
+    expect(onWpmChange).toHaveBeenCalledWith(500)
+
+    await user.tab()
+
+    expect(onWpmChange).toHaveBeenCalledWith(500)
+  })
+
+  it('clamps numeric control values after editing is committed', async () => {
+    const user = userEvent.setup()
+    const onWpmChange = vi.fn()
+    renderControls({ onWpmChange })
+
+    const input = screen.getByRole('spinbutton', { name: 'WPM' })
+    await user.clear(input)
+    await user.type(input, '5')
+    expect((input as HTMLInputElement).value).toBe('5')
+    expect(onWpmChange).not.toHaveBeenCalled()
+
+    await user.tab()
+
+    expect(onWpmChange).toHaveBeenCalledWith(80)
   })
 })
