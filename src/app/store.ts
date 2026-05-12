@@ -20,6 +20,7 @@ import type {
   OnboardingState,
   PageLayout,
   ReaderMode,
+  ReaderResumeSlot,
   ReadingSession,
   ReadingScopeType,
   SourceType,
@@ -217,6 +218,7 @@ type AppState = {
   addQuizAttempt: (attempt: QuizAttempt) => void
   resetCoachingSegment: (documentId: string, wordIndex: number) => void
   startCoachingSegment: (documentId: string, segment: CoachingState['activeSegmentByDocument'][string]) => void
+  updateReaderResume: (documentId: string, slot: Omit<ReaderResumeSlot, 'updatedAt'> & { updatedAt?: string }) => void
   resetAllData: () => void
   recoverDurableStateFromDatabase: () => Promise<boolean>
 }
@@ -363,6 +365,17 @@ function buildDefaultCoachingState(recommendedWpm = defaultSettings.reader.defau
     recommendedWpm,
     lastResetWordIndexByDocument: {},
     activeSegmentByDocument: {},
+    readerResumeByDocument: {},
+  }
+}
+
+function normalizeCoachingState(coaching: Partial<CoachingState> | undefined, fallbackWpm: number): CoachingState {
+  return {
+    ...buildDefaultCoachingState(fallbackWpm),
+    ...(coaching ?? {}),
+    lastResetWordIndexByDocument: coaching?.lastResetWordIndexByDocument ?? {},
+    activeSegmentByDocument: coaching?.activeSegmentByDocument ?? {},
+    readerResumeByDocument: coaching?.readerResumeByDocument ?? {},
   }
 }
 
@@ -1972,6 +1985,35 @@ export const useAppStore = create<AppState>()(
             },
           },
         })),
+      updateReaderResume: (documentId, slot) =>
+        set((state) => {
+          const normalizedSlot: ReaderResumeSlot = {
+            scopeType: slot.scopeType,
+            chapterId: slot.chapterId ?? null,
+            startPageNumber: slot.startPageNumber ?? null,
+            endPageNumber: slot.endPageNumber ?? null,
+            wordIndex: Math.max(0, Math.round(slot.wordIndex)),
+            chunkSize: Math.max(1, Math.round(slot.chunkSize)),
+            updatedAt: slot.updatedAt ?? new Date().toISOString(),
+          }
+
+          return {
+            coaching: {
+              ...state.coaching,
+              lastResetWordIndexByDocument: {
+                ...state.coaching.lastResetWordIndexByDocument,
+                [documentId]: normalizedSlot.wordIndex,
+              },
+              readerResumeByDocument: {
+                ...state.coaching.readerResumeByDocument,
+                [documentId]: {
+                  ...(state.coaching.readerResumeByDocument[documentId] ?? {}),
+                  [normalizedSlot.scopeType]: normalizedSlot,
+                },
+              },
+            },
+          }
+        }),
       resetAllData: () => {
         set({
           documents: [],
@@ -2039,7 +2081,7 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: 'readrail-local-state',
-      version: 9,
+      version: 10,
       migrate: (persistedState: unknown, fromVersion: number) => {
         const state = persistedState as Record<string, unknown>
         const settings = state.settings as AppSettings | undefined
@@ -2062,7 +2104,7 @@ export const useAppStore = create<AppState>()(
         if (fromVersion < 4) {
           const reader = settings?.reader
           const fallbackWpm = reader?.defaultWpm ?? defaultSettings.reader.defaultWpm
-          state.coaching = state.coaching || buildDefaultCoachingState(fallbackWpm)
+          state.coaching = normalizeCoachingState(state.coaching as Partial<CoachingState> | undefined, fallbackWpm)
 
           const quizAttempts = (state.quizAttempts as QuizAttempt[] | undefined) ?? []
           state.quizAttempts = quizAttempts.map((attempt) => ({
@@ -2105,6 +2147,12 @@ export const useAppStore = create<AppState>()(
             state.sessions as ReadingSession[] | undefined,
             fallbackWpm,
           )
+        }
+        // v9 -> v10: seed per-document Reader resume memory.
+        if (fromVersion < 10) {
+          const reader = settings?.reader
+          const fallbackWpm = reader?.defaultWpm ?? defaultSettings.reader.defaultWpm
+          state.coaching = normalizeCoachingState(state.coaching as Partial<CoachingState> | undefined, fallbackWpm)
         }
         return state
       },

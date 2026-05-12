@@ -83,6 +83,7 @@ function renderReader(defaultMode: ReaderMode = 'rail', defaultPageLayout: PageL
       onBackToLibrary={vi.fn()}
       onSegmentReset={vi.fn()}
       onSegmentStart={vi.fn()}
+          onResumeUpdate={vi.fn()}
       onScopeChange={vi.fn()}
       onStartTest={vi.fn()}
     />,
@@ -125,6 +126,7 @@ function renderLongReader({
       onBackToLibrary={vi.fn()}
       onSegmentReset={vi.fn()}
       onSegmentStart={vi.fn()}
+          onResumeUpdate={vi.fn()}
       onScopeChange={vi.fn()}
       onStartTest={vi.fn()}
     />,
@@ -189,6 +191,7 @@ describe('ReaderRail focus mode', () => {
         onBackToLibrary={vi.fn()}
         onSegmentReset={vi.fn()}
         onSegmentStart={vi.fn()}
+          onResumeUpdate={vi.fn()}
         onScopeChange={vi.fn()}
         onStartTest={onStartTest}
       />,
@@ -301,6 +304,7 @@ describe('ReaderRail scope setup', () => {
           onBackToLibrary={vi.fn()}
           onSegmentReset={vi.fn()}
           onSegmentStart={vi.fn()}
+          onResumeUpdate={vi.fn()}
           onScopeChange={setScopeSelection}
           onStartTest={vi.fn()}
         />
@@ -353,6 +357,7 @@ describe('ReaderRail scope setup', () => {
           onBackToLibrary={vi.fn()}
           onSegmentReset={vi.fn()}
           onSegmentStart={vi.fn()}
+          onResumeUpdate={vi.fn()}
           onScopeChange={setScopeSelection}
           onStartTest={vi.fn()}
         />
@@ -401,6 +406,7 @@ describe('ReaderRail scope setup', () => {
         onBackToLibrary={vi.fn()}
         onSegmentReset={vi.fn()}
         onSegmentStart={vi.fn()}
+          onResumeUpdate={vi.fn()}
         onScopeChange={vi.fn()}
         onStartTest={vi.fn()}
       />,
@@ -441,6 +447,7 @@ describe('ReaderRail scope setup', () => {
         onBackToLibrary={vi.fn()}
         onSegmentReset={vi.fn()}
         onSegmentStart={vi.fn()}
+          onResumeUpdate={vi.fn()}
         onScopeChange={vi.fn()}
         onStartTest={onStartTest}
       />,
@@ -496,6 +503,7 @@ describe('ReaderRail comprehension prompts', () => {
         onBackToLibrary={vi.fn()}
         onSegmentReset={onSegmentReset}
         onSegmentStart={vi.fn()}
+          onResumeUpdate={vi.fn()}
         onScopeChange={vi.fn()}
         onStartTest={vi.fn()}
       />,
@@ -535,6 +543,7 @@ describe('ReaderRail comprehension prompts', () => {
         onBackToLibrary={vi.fn()}
         onSegmentReset={vi.fn()}
         onSegmentStart={vi.fn()}
+          onResumeUpdate={vi.fn()}
         onScopeChange={vi.fn()}
         onStartTest={vi.fn()}
       />,
@@ -574,6 +583,7 @@ describe('ReaderRail comprehension prompts', () => {
         onBackToLibrary={vi.fn()}
         onSegmentReset={onSegmentReset}
         onSegmentStart={vi.fn()}
+          onResumeUpdate={vi.fn()}
         onScopeChange={vi.fn()}
         onStartTest={vi.fn()}
       />,
@@ -617,6 +627,7 @@ describe('ReaderRail comprehension prompts', () => {
         onBackToLibrary={vi.fn()}
         onSegmentReset={vi.fn()}
         onSegmentStart={vi.fn()}
+          onResumeUpdate={vi.fn()}
         onScopeChange={vi.fn()}
         onStartTest={onStartTest}
       />,

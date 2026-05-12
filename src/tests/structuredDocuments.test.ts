@@ -378,6 +378,7 @@ describe('structured document store behavior', () => {
           targetWpm: 230,
         },
       },
+      readerResumeByDocument: {},
     }
     useAppStore.setState({
       sessions: [session],

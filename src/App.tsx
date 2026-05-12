@@ -22,7 +22,7 @@ import {
   type PrimaryRoute,
   type RouteState,
 } from './app/routes'
-import type { ReaderScopeSelection, ReaderSessionScopeMetadata } from './app/readerScopes'
+import { buildReaderScope, normalizeReaderScopeSelection, type ReaderScopeSelection, type ReaderSessionScopeMetadata } from './app/readerScopes'
 import { getRouteForShortcutEvent } from './app/shortcuts'
 import { selectActiveDocument, useAppStore, type OcrPageInput } from './app/store'
 import { TOUR_DEFINITIONS, type TourId } from './app/tours'
@@ -31,7 +31,7 @@ import { getDatabase, isTauriRuntime } from './lib/db/migrations'
 import { saveQuizAttemptToDatabase } from './lib/db/repository'
 import { generateQuizFromReading, type GeminiQuiz } from './lib/ai/geminiQuiz'
 import { buildGeneratedQuizAttempt, buildManualQuizAttempt, buildRetestQuizAttempt, scoreGeneratedQuizQuestions } from './lib/reading/coaching'
-import type { DocumentRecord, ReaderMode } from './types/domain'
+import type { DocumentRecord, ReaderMode, ReaderResumeMemory, ReaderResumeSlot, ReadingScopeType } from './types/domain'
 
 type PendingSession = {
   mode: ReaderMode
@@ -96,6 +96,7 @@ function App() {
   const addQuizAttempt = useAppStore((state) => state.addQuizAttempt)
   const resetCoachingSegment = useAppStore((state) => state.resetCoachingSegment)
   const startCoachingSegment = useAppStore((state) => state.startCoachingSegment)
+  const updateReaderResume = useAppStore((state) => state.updateReaderResume)
   const skipOnboarding = useAppStore((state) => state.skipOnboarding)
   const completeOnboardingIntro = useAppStore((state) => state.completeOnboardingIntro)
   const reopenOnboarding = useAppStore((state) => state.reopenOnboarding)
@@ -106,11 +107,26 @@ function App() {
   const recoverDurableStateFromDatabase = useAppStore((state) => state.recoverDurableStateFromDatabase)
   const createAiUsageLineItem = useAppStore((state) => state.createAiUsageLineItem)
   const route = navigation.route
-  const readerScopeSelection = useMemo(() => readerScopeSelectionFromRoute(navigation), [navigation])
   const routedDocument = navigation.documentId
     ? documents.find((document) => document.id === navigation.documentId) ?? null
     : null
   const displayedDocument = routedDocument ?? activeDocument
+  const routeReaderScopeSelection = useMemo(() => readerScopeSelectionFromRoute(navigation), [navigation])
+  const readerResume = useMemo(
+    () =>
+      displayedDocument
+        ? resolveReaderResume({
+            document: displayedDocument,
+            chapters: documentChapters,
+            pages: documentPages,
+            routeState: navigation,
+            memory: coaching.readerResumeByDocument[displayedDocument.id],
+            fallbackChunkSize: settings.reader.chunkSize,
+          })
+        : null,
+    [coaching.readerResumeByDocument, displayedDocument, documentChapters, documentPages, navigation, settings.reader.chunkSize],
+  )
+  const readerScopeSelection = readerResume?.selection ?? routeReaderScopeSelection
 
   useEffect(() => {
     document.documentElement.dataset.theme = settings.reader.theme
@@ -669,7 +685,7 @@ function App() {
           <ReaderRail
             baselineResult={baselineResult}
             chapters={documentChapters}
-            defaultChunkSize={settings.reader.chunkSize}
+            defaultChunkSize={readerResume?.chunkSize ?? settings.reader.chunkSize}
             defaultMode={settings.reader.defaultMode}
             defaultPageLayout={settings.reader.defaultPageLayout ?? 1}
             defaultWpm={coaching.recommendedWpm || settings.reader.defaultWpm}
@@ -680,11 +696,12 @@ function App() {
             pages={documentPages}
             scopeSelection={readerScopeSelection}
             segmentStartWordIndex={
-              displayedDocument ? coaching.lastResetWordIndexByDocument[displayedDocument.id] ?? 0 : 0
+              displayedDocument ? readerResume?.wordIndex ?? coaching.lastResetWordIndexByDocument[displayedDocument.id] ?? 0 : 0
             }
             onBackToLibrary={() => navigate({ route: 'library-saved', documentId: null })}
             onSegmentReset={resetCoachingSegment}
             onSegmentStart={(documentId, segment) => startCoachingSegment(documentId, segment)}
+            onResumeUpdate={updateReaderResume}
             onScopeChange={(selection) => {
               if (displayedDocument) {
                 navigate(routeForReaderScope(displayedDocument.id, selection))
@@ -842,6 +859,111 @@ function routeForReaderScope(documentId: string, selection: ReaderScopeSelection
     startPageNumber: selection.startPageNumber ?? null,
     endPageNumber: selection.endPageNumber ?? selection.startPageNumber ?? null,
   }
+}
+
+type ResolvedReaderResume = {
+  selection: ReaderScopeSelection
+  wordIndex: number
+  chunkSize: number
+}
+
+function resolveReaderResume({
+  document,
+  chapters,
+  pages,
+  routeState,
+  memory,
+  fallbackChunkSize,
+}: {
+  document: DocumentRecord
+  chapters: Parameters<typeof buildReaderScope>[1]
+  pages: Parameters<typeof buildReaderScope>[2]
+  routeState: RouteState
+  memory: ReaderResumeMemory | undefined
+  fallbackChunkSize: number
+}): ResolvedReaderResume | null {
+  if (routeState.route !== 'reader') {
+    return null
+  }
+
+  const routeSelection = normalizeReaderScopeSelection(document, chapters, pages, readerScopeSelectionFromRoute(routeState))
+  const isExplicitScopeRoute = Boolean(routeState.chapterId)
+  if (isExplicitScopeRoute) {
+    const matchingSlot = getReaderResumeSlotForSelection(memory, routeSelection)
+    const scope = buildReaderScope(document, chapters, pages, routeSelection)
+    return {
+      selection: routeSelection,
+      wordIndex: matchingSlot ? clampResumeWordIndex(matchingSlot.wordIndex, scope) : scope.startWordOffset,
+      chunkSize: matchingSlot?.chunkSize ?? fallbackChunkSize,
+    }
+  }
+
+  const slot = getLatestReaderResumeSlot(memory)
+  if (!slot) {
+    return null
+  }
+
+  const selection = normalizeReaderScopeSelection(document, chapters, pages, readerResumeSlotToSelection(slot))
+  const scope = buildReaderScope(document, chapters, pages, selection)
+  return {
+    selection,
+    wordIndex: clampResumeWordIndex(slot.wordIndex, scope),
+    chunkSize: slot.chunkSize || fallbackChunkSize,
+  }
+}
+
+function getLatestReaderResumeSlot(memory: ReaderResumeMemory | undefined): ReaderResumeSlot | null {
+  const slots = (['document', 'chapter', 'pages'] as ReadingScopeType[])
+    .map((scopeType) => memory?.[scopeType] ?? null)
+    .filter((slot): slot is ReaderResumeSlot => Boolean(slot))
+  if (slots.length === 0) {
+    return null
+  }
+
+  return slots.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0]
+}
+
+function getReaderResumeSlotForSelection(
+  memory: ReaderResumeMemory | undefined,
+  selection: ReaderScopeSelection,
+): ReaderResumeSlot | null {
+  const slot = memory?.[selection.scopeType]
+  return slot && readerResumeSlotMatchesSelection(slot, selection) ? slot : null
+}
+
+function readerResumeSlotMatchesSelection(slot: ReaderResumeSlot, selection: ReaderScopeSelection): boolean {
+  if (slot.scopeType !== selection.scopeType) {
+    return false
+  }
+  if (selection.scopeType === 'document') {
+    return true
+  }
+  if (slot.chapterId !== selection.chapterId) {
+    return false
+  }
+  if (selection.scopeType === 'chapter') {
+    return true
+  }
+  return slot.startPageNumber === selection.startPageNumber && slot.endPageNumber === selection.endPageNumber
+}
+
+function readerResumeSlotToSelection(slot: ReaderResumeSlot): ReaderScopeSelection {
+  if (slot.scopeType === 'document') {
+    return { scopeType: 'document' }
+  }
+  if (slot.scopeType === 'chapter') {
+    return { scopeType: 'chapter', chapterId: slot.chapterId }
+  }
+  return {
+    scopeType: 'pages',
+    chapterId: slot.chapterId,
+    startPageNumber: slot.startPageNumber,
+    endPageNumber: slot.endPageNumber ?? slot.startPageNumber,
+  }
+}
+
+function clampResumeWordIndex(wordIndex: number, scope: ReturnType<typeof buildReaderScope>): number {
+  return Math.max(scope.startWordOffset, Math.min(scope.endWordOffset, Math.round(wordIndex)))
 }
 
 function excerptWords(content: string, startWordIndex: number, endWordIndex: number): string {

@@ -192,10 +192,23 @@ export type CoachingSegmentState = {
   targetWpm: number | null
 }
 
+export type ReaderResumeSlot = {
+  scopeType: ReadingScopeType
+  chapterId: string | null
+  startPageNumber: number | null
+  endPageNumber: number | null
+  wordIndex: number
+  chunkSize: number
+  updatedAt: string
+}
+
+export type ReaderResumeMemory = Partial<Record<ReadingScopeType, ReaderResumeSlot>>
+
 export type CoachingState = {
   recommendedWpm: number
   lastResetWordIndexByDocument: Record<string, number>
   activeSegmentByDocument: Record<string, CoachingSegmentState>
+  readerResumeByDocument: Record<string, ReaderResumeMemory>
 }
 
 export type SourceFileRecord = {

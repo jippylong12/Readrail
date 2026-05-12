@@ -54,6 +54,108 @@ afterEach(() => {
 })
 
 describe('generated coaching flow', () => {
+  it('restores the latest saved reader scope and position for generic reader routes', async () => {
+    useAppStore.setState((state) => ({
+      coaching: {
+        ...state.coaching,
+        readerResumeByDocument: {
+          [documentRecord.id]: {
+            pages: {
+              scopeType: 'pages',
+              chapterId: chapter.id,
+              startPageNumber: 2,
+              endPageNumber: 2,
+              wordIndex: 4,
+              chunkSize: 2,
+              updatedAt: '2026-05-12T12:05:00.000Z',
+            },
+          },
+        },
+      },
+    }))
+
+    render(<App />)
+
+    await waitFor(() => expect(screen.getAllByText('Chapter One, page 42').length).toBeGreaterThan(0))
+    expect(screen.getByLabelText('Start page')).toHaveProperty('value', '2')
+    expect(screen.getByLabelText('End page')).toHaveProperty('value', '2')
+    expect(screen.getByLabelText('Chunk')).toHaveProperty('value', '2')
+  })
+
+  it('prefers explicit reader URLs over saved resume scope', async () => {
+    window.history.replaceState(null, '', '/reader/document-1/chapters/chapter-1')
+    useAppStore.setState((state) => ({
+      coaching: {
+        ...state.coaching,
+        readerResumeByDocument: {
+          [documentRecord.id]: {
+            pages: {
+              scopeType: 'pages',
+              chapterId: chapter.id,
+              startPageNumber: 2,
+              endPageNumber: 2,
+              wordIndex: 4,
+              chunkSize: 2,
+              updatedAt: '2026-05-12T12:05:00.000Z',
+            },
+          },
+        },
+      },
+    }))
+
+    render(<App />)
+
+    await waitFor(() => expect(screen.getAllByText('Chapter One').length).toBeGreaterThan(0))
+    expect(screen.queryByLabelText('Start page')).toBeNull()
+  })
+
+  it('updates the active scope resume slot when reading pauses', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: 'Play' }))
+    await user.click(screen.getByRole('button', { name: 'Pause' }))
+
+    await waitFor(() => {
+      expect(useAppStore.getState().coaching.readerResumeByDocument[documentRecord.id]?.document).toMatchObject({
+        scopeType: 'document',
+        chapterId: null,
+        startPageNumber: null,
+        endPageNumber: null,
+        wordIndex: 4,
+        chunkSize: 4,
+      })
+    })
+    expect(useAppStore.getState().coaching.readerResumeByDocument[documentRecord.id]?.pages).toBeUndefined()
+  })
+
+  it('falls back gracefully when a saved chapter no longer exists', async () => {
+    useAppStore.setState((state) => ({
+      coaching: {
+        ...state.coaching,
+        readerResumeByDocument: {
+          [documentRecord.id]: {
+            chapter: {
+              scopeType: 'chapter',
+              chapterId: 'missing-chapter',
+              startPageNumber: null,
+              endPageNumber: null,
+              wordIndex: 999,
+              chunkSize: 3,
+              updatedAt: '2026-05-12T12:05:00.000Z',
+            },
+          },
+        },
+      },
+    }))
+
+    render(<App />)
+
+    await waitFor(() => expect(screen.getAllByText('Chapter One').length).toBeGreaterThan(0))
+    expect(screen.getByLabelText('Chapter')).toHaveProperty('value', chapter.id)
+    expect(screen.getByLabelText('Chunk')).toHaveProperty('value', '3')
+  })
+
   it('generates a full-document quiz from the completed reader segment with document attribution', async () => {
     const user = userEvent.setup()
     generateQuizFromReadingMock.mockImplementation(async (_apiKey, _title, _content, _wordCount, options) => {
@@ -247,6 +349,12 @@ function resetStore(): void {
     },
     baselineResult: null,
     quizAttempts: [],
+    coaching: {
+      recommendedWpm: 250,
+      lastResetWordIndexByDocument: {},
+      activeSegmentByDocument: {},
+      readerResumeByDocument: {},
+    },
   })
 }
 

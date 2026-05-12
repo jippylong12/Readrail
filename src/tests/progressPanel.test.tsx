@@ -23,6 +23,7 @@ const coaching: CoachingState = {
   recommendedWpm: 255,
   lastResetWordIndexByDocument: { 'doc-1': 300 },
   activeSegmentByDocument: {},
+  readerResumeByDocument: {},
 }
 
 const attempt: QuizAttempt = {

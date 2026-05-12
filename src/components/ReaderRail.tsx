@@ -7,6 +7,7 @@ import type {
   DocumentRecord,
   PageLayout,
   ReaderMode,
+  ReaderResumeSlot,
 } from '../types/domain'
 import { clampWpm, formatDuration } from '../lib/reading/pacing'
 import { cleanReadingText } from '../lib/text/cleanup'
@@ -56,6 +57,7 @@ type ReaderRailProps = {
   onBackToLibrary: () => void
   onSegmentReset: (documentId: string, wordIndex: number) => void
   onSegmentStart: (documentId: string, segment: { startWordIndex: number; startedAt: string; targetWpm: number }) => void
+  onResumeUpdate: (documentId: string, slot: Omit<ReaderResumeSlot, 'updatedAt'> & { updatedAt?: string }) => void
   onScopeChange: (selection: ReaderScopeSelection) => void
   onStartTest: (input: ReaderSegmentInput) => void
   onUpdateDocument?: (id: string, updates: Partial<Pick<DocumentRecord, 'title' | 'content'>>) => void
@@ -77,6 +79,7 @@ export function ReaderRail({
   onBackToLibrary,
   onSegmentReset,
   onSegmentStart,
+  onResumeUpdate,
   onScopeChange,
   onStartTest,
   onUpdateDocument,
@@ -132,6 +135,27 @@ export function ReaderRail({
   )
 
   useEffect(() => {
+    const localSegmentStart = getLocalSegmentStart(initialSegmentStartWordIndex, activeScope)
+    setActiveIndex(getChunkIndexForWord(chunks, localSegmentStart))
+    setIsRunning(false)
+    setIsFocusMode(false)
+    setHasStartedReading(false)
+    setElapsedSeconds(0)
+    setPauseCount(0)
+    setRegressionCount(0)
+    setSegmentStartWordIndex(localSegmentStart)
+    setSegmentStartElapsedSeconds(0)
+    setSuggestion(null)
+  }, [
+    activeScope?.scopeType,
+    activeScope?.selectedChapterId,
+    activeScope?.selectedStartPageNumber,
+    activeScope?.selectedEndPageNumber,
+    chunks,
+    initialSegmentStartWordIndex,
+  ])
+
+  useEffect(() => {
     const element = readingSurfaceRef.current
     if (!element) {
       return undefined
@@ -180,6 +204,7 @@ export function ReaderRail({
         if (index >= chunks.length - 1) {
           const finalWordIndex = chunks[index]?.endWord ?? document?.wordCount ?? currentWordIndex
           setIsRunning(false)
+          rememberResume(finalWordIndex)
           if (finalWordIndex - segmentStartWordIndex >= comprehensionSuggestionThresholdWords) {
             setSuggestion('threshold')
           }
@@ -277,6 +302,7 @@ export function ReaderRail({
     setHasStartedReading(true)
     setSegmentStartWordIndex(startWordIndex)
     setSegmentStartElapsedSeconds(elapsedSeconds)
+    rememberResume(startWordIndex)
     if (document) {
       onSegmentStart(document.id, {
         startWordIndex: (activeScope?.startWordOffset ?? 0) + startWordIndex,
@@ -291,6 +317,7 @@ export function ReaderRail({
     setSegmentStartWordIndex(normalizedWordIndex)
     setSegmentStartElapsedSeconds(elapsedSeconds)
     setSuggestion(null)
+    rememberResume(normalizedWordIndex)
     if (document) {
       onSegmentReset(document.id, (activeScope?.startWordOffset ?? 0) + normalizedWordIndex)
     }
@@ -313,6 +340,7 @@ export function ReaderRail({
     setIsRunning(false)
     setIsFocusMode(false)
     setSuggestion(null)
+    rememberResume(currentWordIndex)
     onStartTest(buildSegment())
   }
 
@@ -359,9 +387,25 @@ export function ReaderRail({
   function pauseReading(): void {
     setIsRunning(false)
     setPauseCount((count) => count + 1)
+    rememberResume(currentWordIndex)
     if (untestedWordCount >= comprehensionSuggestionThresholdWords) {
       setSuggestion('threshold')
     }
+  }
+
+  function rememberResume(scopeWordIndex: number): void {
+    if (!document || !activeScope) {
+      return
+    }
+
+    onResumeUpdate(document.id, {
+      scopeType: activeScope.scopeType,
+      chapterId: activeScope.scopeType === 'document' ? null : activeScope.selectedChapterId,
+      startPageNumber: activeScope.scopeType === 'pages' ? activeScope.selectedStartPageNumber : null,
+      endPageNumber: activeScope.scopeType === 'pages' ? activeScope.selectedEndPageNumber : null,
+      wordIndex: activeScope.startWordOffset + Math.max(0, Math.min(activeScope.wordCount, Math.round(scopeWordIndex))),
+      chunkSize,
+    })
   }
 
   function toggleRunning(): void {
@@ -689,6 +733,22 @@ function getLocalSegmentStart(documentWordIndex: number, scope: BuiltReaderScope
 }
 
 type Chunk = { id: string; text: string; startWord: number; endWord: number; startsNewParagraph?: boolean }
+
+function getChunkIndexForWord(chunks: Chunk[], wordIndex: number): number {
+  if (chunks.length === 0) {
+    return 0
+  }
+
+  const normalizedWordIndex = Math.max(0, Math.round(wordIndex))
+  const exactIndex = chunks.findIndex(
+    (chunk) => normalizedWordIndex >= chunk.startWord && normalizedWordIndex < chunk.endWord,
+  )
+  if (exactIndex >= 0) {
+    return exactIndex
+  }
+
+  return normalizedWordIndex >= chunks[chunks.length - 1].endWord ? chunks.length - 1 : 0
+}
 
 type MultiPageLayoutProps = {
   chunks: Chunk[]
