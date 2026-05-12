@@ -29,6 +29,8 @@ type DocumentDetailProps = {
   onMoveChapter: (documentId: string, chapterId: string, direction: -1 | 1) => void
   onDeleteChapter: (chapterId: string) => void
   onMovePage: (pageId: string, targetChapterId: string, targetIndex: number) => void
+  onDeletePage: (pageId: string) => void
+  onDeletePages: (pageIds: string[]) => number
   onUpdatePageMetadata: (
     pageId: string,
     updates: Partial<Pick<DocumentPageRecord, 'sourcePageNumber' | 'title'>>,
@@ -56,6 +58,8 @@ export function DocumentDetail({
   onMoveChapter,
   onDeleteChapter,
   onMovePage,
+  onDeletePage,
+  onDeletePages,
   onUpdatePageMetadata,
   onAppendPages,
   onCreateDocument,
@@ -136,6 +140,8 @@ export function DocumentDetail({
           document={document}
           onCreateChapter={onCreateChapter}
           onDeleteChapter={onDeleteChapter}
+          onDeletePage={onDeletePage}
+          onDeletePages={onDeletePages}
           onMoveChapter={onMoveChapter}
           onMovePage={onMovePage}
           onSelectChapter={(chapterId) => onDocumentViewChange(document.id, chapterId, 1)}

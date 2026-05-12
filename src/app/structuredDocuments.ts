@@ -114,6 +114,16 @@ export function renderStructuredContent(
     .join('\n\n\f\n\n')
 }
 
+export function getDefaultPageTitle(page: Pick<DocumentPageRecord, 'pageNumber' | 'sourcePageNumber'>): string {
+  return `Page ${page.sourcePageNumber ?? page.pageNumber}`
+}
+
+export function getDocumentPageDisplayTitle(
+  page: Pick<DocumentPageRecord, 'pageNumber' | 'sourcePageNumber' | 'title'>,
+): string {
+  return page.title?.trim() || getDefaultPageTitle(page)
+}
+
 export function normalizeDocumentStructureOrder(
   documentId: string,
   chapters: DocumentChapterRecord[],

@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import { cleanReadingText } from '../lib/text/cleanup'
 import { countWords } from '../lib/text/wordCount'
+import { getDefaultPageTitle } from '../app/structuredDocuments'
 import {
   OCR_PROGRESS_STEPS,
   initialOcrProgressState,
@@ -658,13 +659,14 @@ function OcrFocusedPageEditor({
 }) {
   const cleanedText = cleanReadingText(entry.page.text, { preservePageBreaks })
   const wordCount = countWords(cleanedText)
+  const displayTitle = entry.page.title?.trim() || getDefaultPageTitle(entry.page)
 
   return (
     <article className="ocr-page-card">
       <div className="ocr-page-header">
         <div>
           <span className="eyebrow">Page {entry.page.pageNumber}</span>
-          <h3>{entry.page.sourceFileName ?? `Source page ${entry.page.sourcePageNumber ?? entry.pageIndex + 1}`}</h3>
+          <h3>{displayTitle}</h3>
         </div>
         <span className="status-pill">{wordCount.toLocaleString()} words</span>
       </div>
@@ -701,7 +703,7 @@ function OcrFocusedPageEditor({
         Page title (optional)
         <input
           onChange={(event) => onUpdatePage(entry.item.id, entry.page.pageNumber, { title: event.target.value })}
-          placeholder="Shown in organizer"
+          placeholder={getDefaultPageTitle(entry.page)}
           value={entry.page.title ?? ''}
         />
       </label>
@@ -947,7 +949,7 @@ function formatReviewEntryTitle(entry: OcrReviewEntry): string {
     return entry.item.sourceFileName
   }
 
-  return entry.page.title?.trim() || entry.page.sourceFileName || `Source page ${entry.page.sourcePageNumber ?? entry.pageIndex + 1}`
+  return entry.page.title?.trim() || getDefaultPageTitle(entry.page)
 }
 
 function normalizeSourcePageNumber(value: string): number | null {

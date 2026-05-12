@@ -74,6 +74,8 @@ function App() {
   const moveChapter = useAppStore((state) => state.moveChapter)
   const deleteChapter = useAppStore((state) => state.deleteChapter)
   const movePage = useAppStore((state) => state.movePage)
+  const deletePage = useAppStore((state) => state.deletePage)
+  const deletePages = useAppStore((state) => state.deletePages)
   const updatePageMetadata = useAppStore((state) => state.updatePageMetadata)
   const updateDocument = useAppStore((state) => state.updateDocument)
   const archiveDocument = useAppStore((state) => state.archiveDocument)
@@ -466,6 +468,10 @@ function App() {
           onDeleteChapter={(chapterId) => {
             deleteChapter(chapterId)
           }}
+          onDeletePage={(pageId) => {
+            deletePage(pageId)
+          }}
+          onDeletePages={deletePages}
           onMoveChapter={moveChapter}
           onMovePage={movePage}
           onOpenReader={(documentId) => {

@@ -6,6 +6,7 @@ import {
   defaultDocumentChapterId,
   defaultDocumentPageId,
   ensureStructuredDocumentCollections,
+  getDocumentPageDisplayTitle,
   getOrderedChapterPages,
   getOrderedDocumentPages,
 } from '../app/structuredDocuments'
@@ -453,6 +454,87 @@ describe('structured document store behavior', () => {
       content: ['First introduction page.', 'Second introduction page.', 'Appendix page text.'].join('\n\n\f\n\n'),
       wordCount: 9,
     })
+  })
+
+  it('deletes one structured page, rebuilds reader text, and normalizes remaining page order', () => {
+    const document = buildStructuredDocumentFixture()
+
+    const deleted = useAppStore.getState().deletePage('page-intro-1')
+
+    const state = useAppStore.getState()
+    const orderedPages = getOrderedDocumentPages(document.id, state.documentChapters, state.documentPages)
+
+    expect(deleted).toBe(true)
+    expect(state.documentPages.some((page) => page.id === 'page-intro-1')).toBe(false)
+    expect(orderedPages.map((page) => page.id)).toEqual(['page-intro-2', 'page-appendix-1'])
+    expect(orderedPages.map((page) => page.pageNumber)).toEqual([1, 2])
+    expect(getOrderedChapterPages('chapter-intro', state.documentPages).map((page) => page.sortOrder)).toEqual([0])
+    expect(getOrderedChapterPages('chapter-appendix', state.documentPages).map((page) => page.sortOrder)).toEqual([0])
+    expect(state.documents[0]).toMatchObject({
+      id: document.id,
+      content: ['Second introduction page.', 'Appendix page text.'].join('\n\n\f\n\n'),
+      wordCount: 6,
+      estimatedPages: 0,
+    })
+    expect(state.documentChapters.filter((chapter) => chapter.documentId === document.id)).toHaveLength(2)
+  })
+
+  it('deletes multiple structured pages in one rebuild without deleting the final page', () => {
+    const document = buildStructuredDocumentFixture()
+
+    const deletedCount = useAppStore.getState().deletePages(['page-intro-1', 'page-intro-2'])
+
+    let state = useAppStore.getState()
+    let orderedPages = getOrderedDocumentPages(document.id, state.documentChapters, state.documentPages)
+    expect(deletedCount).toBe(2)
+    expect(orderedPages.map((page) => page.id)).toEqual(['page-appendix-1'])
+    expect(orderedPages[0]).toMatchObject({
+      pageNumber: 1,
+      sortOrder: 0,
+      text: 'Appendix page text.',
+    })
+    expect(state.documents[0]).toMatchObject({
+      content: 'Appendix page text.',
+      wordCount: 3,
+    })
+
+    const blockedCount = useAppStore.getState().deletePages(['page-appendix-1'])
+
+    state = useAppStore.getState()
+    orderedPages = getOrderedDocumentPages(document.id, state.documentChapters, state.documentPages)
+    expect(blockedCount).toBe(0)
+    expect(orderedPages.map((page) => page.id)).toEqual(['page-appendix-1'])
+  })
+
+  it('prevents deleting the final remaining structured page', () => {
+    const document = useAppStore.getState().createDocument({
+      title: 'Single page book',
+      content: 'Only remaining page.',
+      sourceType: 'paste',
+    })
+    const page = useAppStore.getState().documentPages.find((candidate) => candidate.documentId === document.id)!
+
+    const deleted = useAppStore.getState().deletePage(page.id)
+
+    const state = useAppStore.getState()
+    expect(deleted).toBe(false)
+    expect(state.documentPages.filter((candidate) => candidate.documentId === document.id)).toHaveLength(1)
+    expect(state.documents.find((candidate) => candidate.id === document.id)?.content).toBe('Only remaining page.')
+  })
+
+  it('renders untitled pages from source page defaults without overwriting custom labels', () => {
+    buildStructuredDocumentFixture()
+    let page = useAppStore.getState().documentPages.find((candidate) => candidate.id === 'page-intro-1')!
+
+    expect(getDocumentPageDisplayTitle(page)).toBe('Page 21')
+
+    useAppStore.getState().updatePageMetadata(page.id, { sourcePageNumber: 101 })
+    page = useAppStore.getState().documentPages.find((candidate) => candidate.id === 'page-intro-1')!
+    expect(getDocumentPageDisplayTitle(page)).toBe('Page 101')
+
+    useAppStore.getState().updatePageMetadata(page.id, { title: 'Opening page', sourcePageNumber: 102 })
+    page = useAppStore.getState().documentPages.find((candidate) => candidate.id === 'page-intro-1')!
+    expect(getDocumentPageDisplayTitle(page)).toBe('Opening page')
   })
 
   it('reorders chapters and regenerates reader text in chapter/page order', () => {

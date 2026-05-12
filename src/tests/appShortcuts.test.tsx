@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { act } from 'react'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../App'
 import { pathForRoute, routeFromPath } from '../app/routes'
 import { getRouteForShortcutEvent, isEditableShortcutTarget } from '../app/shortcuts'
@@ -133,6 +133,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.restoreAllMocks()
   cleanup()
 })
 
@@ -183,7 +184,8 @@ describe('app section shortcuts', () => {
     render(<App />)
 
     expect(screen.getByRole('heading', { name: activeDocument.title })).toBeTruthy()
-    expect(screen.getByRole('button', { name: /Chapter Two/i }).getAttribute('aria-current')).toBe('page')
+    const chapterNav = screen.getByRole('navigation', { name: 'Document chapters' })
+    expect(within(chapterNav).getByRole('button', { name: /Chapter Two/i }).getAttribute('aria-current')).toBe('page')
     expect(screen.getByText((_, element) => element?.textContent === 'Page 2 of 2 - showing 9-10 of 10')).toBeTruthy()
     expect(screen.getByText('Chapter Two page 9')).toBeTruthy()
     expect(screen.queryByText('Chapter Two page 1')).toBeNull()
@@ -194,11 +196,52 @@ describe('app section shortcuts', () => {
     expect(screen.getByText((_, element) => element?.textContent === 'Page 1 of 2 - showing 1-8 of 10')).toBeTruthy()
     expect(screen.getByText('Chapter Two page 1')).toBeTruthy()
 
-    await user.click(screen.getByRole('button', { name: /Chapter One/i }))
+    await user.click(within(chapterNav).getByRole('button', { name: /Chapter One/i }))
     expect(window.location.pathname).toBe('/library/documents/document-1/chapters/chapter-1')
     expect(screen.getByText((_, element) => element?.textContent === 'Page 1 of 1 - showing 1-3 of 3')).toBeTruthy()
     expect(screen.getByText('Chapter One page 1')).toBeTruthy()
     expect(screen.getByLabelText('Label for page 1')).toBeTruthy()
+  })
+
+  it('confirms before deleting a structured page from the document organizer', async () => {
+    const user = userEvent.setup()
+    seedMultiChapterDocument()
+    window.history.replaceState(null, '', '/library/documents/document-1/chapters/chapter-1')
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true)
+    render(<App />)
+
+    expect(screen.getByText('Chapter One page 1')).toBeTruthy()
+
+    await user.click(screen.getByRole('button', { name: 'Delete Chapter One page 1' }))
+    expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining('Delete Chapter One page 1?'))
+    expect(screen.getByText('Chapter One page 1')).toBeTruthy()
+
+    await user.click(screen.getByRole('button', { name: 'Delete Chapter One page 1' }))
+    expect(screen.queryByText('Chapter One page 1')).toBeNull()
+    expect(useAppStore.getState().documentPages.some((page) => page.id === 'page-chapter-1-1')).toBe(false)
+    expect(useAppStore.getState().documents[0].content).not.toContain('Chapter One page 1 text.')
+  })
+
+  it('selects multiple structured pages and deletes them together from the organizer', async () => {
+    const user = userEvent.setup()
+    seedMultiChapterDocument()
+    window.history.replaceState(null, '', '/library/documents/document-1/chapters/chapter-1')
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    render(<App />)
+
+    await user.click(screen.getByLabelText('Select Chapter One page 1'))
+    await user.click(screen.getByLabelText('Select Chapter One page 2'))
+    expect(screen.getByText('2 selected')).toBeTruthy()
+
+    await user.click(screen.getByRole('button', { name: 'Delete 2 selected pages' }))
+
+    expect(confirmSpy).toHaveBeenCalledWith('Delete 2 pages? This removes their text from the document.')
+    expect(screen.queryByText('Chapter One page 1')).toBeNull()
+    expect(screen.queryByText('Chapter One page 2')).toBeNull()
+    expect(useAppStore.getState().documentPages.some((page) => page.id === 'page-chapter-1-1')).toBe(false)
+    expect(useAppStore.getState().documentPages.some((page) => page.id === 'page-chapter-1-2')).toBe(false)
+    expect(useAppStore.getState().documents[0].content).not.toContain('Chapter One page 1 text.')
+    expect(useAppStore.getState().documents[0].content).not.toContain('Chapter One page 2 text.')
   })
 
   it('navigates primary sections with Command shortcuts', () => {

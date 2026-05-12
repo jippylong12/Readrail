@@ -1,5 +1,10 @@
 import { useState } from 'react'
-import { getOrderedChapterPages, getOrderedDocumentChapters } from '../app/structuredDocuments'
+import { ArrowDown, ArrowUp, Trash2 } from 'lucide-react'
+import {
+  getDocumentPageDisplayTitle,
+  getOrderedChapterPages,
+  getOrderedDocumentChapters,
+} from '../app/structuredDocuments'
 import type { DocumentChapterRecord, DocumentPageRecord, DocumentRecord } from '../types/domain'
 
 type DocumentOrganizerProps = {
@@ -11,6 +16,8 @@ type DocumentOrganizerProps = {
   onMoveChapter: (documentId: string, chapterId: string, direction: -1 | 1) => void
   onDeleteChapter: (chapterId: string) => void
   onMovePage: (pageId: string, targetChapterId: string, targetIndex: number) => void
+  onDeletePage: (pageId: string) => void
+  onDeletePages: (pageIds: string[]) => number
   onSelectChapter: (chapterId: string) => void
   onSelectPage: (pageNumber: number) => void
   onUpdatePageMetadata: (
@@ -31,6 +38,8 @@ export function DocumentOrganizer({
   onMoveChapter,
   onDeleteChapter,
   onMovePage,
+  onDeletePage,
+  onDeletePages,
   onSelectChapter,
   onSelectPage,
   onUpdatePageMetadata,
@@ -43,6 +52,7 @@ export function DocumentOrganizer({
   const [chapterTitleDraft, setChapterTitleDraft] = useState('')
   const [pageLabelDrafts, setPageLabelDrafts] = useState<Record<string, string>>({})
   const [sourcePageDrafts, setSourcePageDrafts] = useState<Record<string, string>>({})
+  const [selectedPageIds, setSelectedPageIds] = useState<Set<string>>(() => new Set())
   const orderedChapters = getOrderedDocumentChapters(document.id, chapters)
   const selectedChapter = orderedChapters.find((chapter) => chapter.id === selectedChapterId) ?? orderedChapters[0] ?? null
   const selectedChapterIndex = selectedChapter
@@ -54,6 +64,11 @@ export function DocumentOrganizer({
   const visibleStartIndex = (currentPageNumber - 1) * pagesPerPage
   const visiblePages = selectedChapterPages.slice(visibleStartIndex, visibleStartIndex + pagesPerPage)
   const selectedChapterWords = selectedChapterPages.reduce((total, page) => total + page.wordCount, 0)
+  const validSelectedPageIds = new Set(pages.filter((page) => selectedPageIds.has(page.id)).map((page) => page.id))
+  const visibleSelectablePageIds = visiblePages.map((page) => page.id)
+  const selectedVisiblePageCount = visibleSelectablePageIds.filter((pageId) => validSelectedPageIds.has(pageId)).length
+  const selectedPageCount = validSelectedPageIds.size
+  const selectedPageDeleteDisabled = selectedPageCount === 0 || selectedPageCount >= pages.length
 
   function submitChapter(): void {
     onCreateChapter(document.id, newChapterTitle)
@@ -72,6 +87,77 @@ export function DocumentOrganizer({
 
   function sourcePageValue(page: DocumentPageRecord): string {
     return sourcePageDrafts[page.id] ?? page.sourcePageNumber?.toString() ?? ''
+  }
+
+  function confirmPageDelete(page: DocumentPageRecord): void {
+    const displayTitle = getDocumentPageDisplayTitle(page)
+    if (!window.confirm(`Delete ${displayTitle}? This removes its text from the document.`)) {
+      return
+    }
+
+    setPageLabelDrafts((drafts) => {
+      const nextDrafts = { ...drafts }
+      delete nextDrafts[page.id]
+      return nextDrafts
+    })
+    setSourcePageDrafts((drafts) => {
+      const nextDrafts = { ...drafts }
+      delete nextDrafts[page.id]
+      return nextDrafts
+    })
+    setSelectedPageIds((pageIds) => {
+      const nextPageIds = new Set(pageIds)
+      nextPageIds.delete(page.id)
+      return nextPageIds
+    })
+    onDeletePage(page.id)
+  }
+
+  function togglePageSelection(pageId: string): void {
+    setSelectedPageIds((currentPageIds) => {
+      const nextPageIds = new Set(currentPageIds)
+      if (nextPageIds.has(pageId)) {
+        nextPageIds.delete(pageId)
+      } else {
+        nextPageIds.add(pageId)
+      }
+      return nextPageIds
+    })
+  }
+
+  function toggleVisiblePageSelection(): void {
+    setSelectedPageIds((currentPageIds) => {
+      const nextPageIds = new Set(currentPageIds)
+      const allVisibleSelected = visibleSelectablePageIds.every((pageId) => nextPageIds.has(pageId))
+      for (const pageId of visibleSelectablePageIds) {
+        if (allVisibleSelected) {
+          nextPageIds.delete(pageId)
+        } else {
+          nextPageIds.add(pageId)
+        }
+      }
+      return nextPageIds
+    })
+  }
+
+  function clearPageSelection(): void {
+    setSelectedPageIds(new Set())
+  }
+
+  function confirmSelectedPageDelete(): void {
+    const pageIds = Array.from(validSelectedPageIds)
+    if (pageIds.length === 0 || pageIds.length >= pages.length) {
+      return
+    }
+
+    if (!window.confirm(`Delete ${pageIds.length} pages? This removes their text from the document.`)) {
+      return
+    }
+
+    const deletedCount = onDeletePages(pageIds)
+    if (deletedCount > 0) {
+      clearPageSelection()
+    }
   }
 
   return (
@@ -231,82 +317,141 @@ export function DocumentOrganizer({
                   <span>Move pages here or delete it.</span>
                 </div>
               ) : (
-                visiblePages.map((page, visiblePageIndex) => {
-                  const pageIndex = visibleStartIndex + visiblePageIndex
-                  return (
-                    <article className="organizer-page" key={page.id}>
-                      <div className="organizer-page-summary">
-                        <strong>{page.title || `Page ${page.pageNumber}`}</strong>
-                        <span>
-                          {page.wordCount.toLocaleString()} words - source page {page.sourcePageNumber ?? 'unset'} - {page.reviewStatus}
-                        </span>
+                <>
+                  <div className="organizer-page-selection">
+                    <label className="organizer-select-visible">
+                      <input
+                        checked={visiblePages.length > 0 && selectedVisiblePageCount === visiblePages.length}
+                        onChange={toggleVisiblePageSelection}
+                        type="checkbox"
+                      />
+                      Select visible
+                    </label>
+                    {selectedPageCount > 0 && (
+                      <div className="organizer-selected-actions">
+                        <span>{selectedPageCount} selected</span>
+                        <button className="ghost-button" onClick={clearPageSelection} type="button">
+                          Clear
+                        </button>
+                        <button
+                          aria-label={`Delete ${selectedPageCount} selected pages`}
+                          className="icon-button danger"
+                          disabled={selectedPageDeleteDisabled}
+                          onClick={confirmSelectedPageDelete}
+                          title={selectedPageDeleteDisabled ? 'Keep at least one page' : 'Delete selected'}
+                          type="button"
+                        >
+                          <Trash2 aria-hidden="true" size={16} />
+                        </button>
                       </div>
-                      <div className="organizer-page-controls">
-                        <button
-                          className="ghost-button"
-                          disabled={pageIndex === 0}
-                          onClick={() => onMovePage(page.id, selectedChapter.id, pageIndex - 1)}
-                          type="button"
-                        >
-                          Up
-                        </button>
-                        <button
-                          className="ghost-button"
-                          disabled={pageIndex === selectedChapterPages.length - 1}
-                          onClick={() => onMovePage(page.id, selectedChapter.id, pageIndex + 1)}
-                          type="button"
-                        >
-                          Down
-                        </button>
-                        <label className="field compact">
-                          Move to
-                          <select
-                            aria-label={`Move page ${page.pageNumber} to chapter`}
-                            onChange={(event) => {
-                              const nextChapterId = event.target.value
-                              if (nextChapterId !== selectedChapter.id) {
-                                const nextChapterPageCount = getOrderedChapterPages(nextChapterId, pages).length
-                                onMovePage(page.id, nextChapterId, nextChapterPageCount)
-                              }
-                            }}
-                            value={selectedChapter.id}
+                    )}
+                  </div>
+                  {visiblePages.map((page, visiblePageIndex) => {
+                    const pageIndex = visibleStartIndex + visiblePageIndex
+                    const displayTitle = getDocumentPageDisplayTitle(page)
+                    const isSelected = validSelectedPageIds.has(page.id)
+                    return (
+                      <article className={isSelected ? 'organizer-page selected' : 'organizer-page'} key={page.id}>
+                        <label className="organizer-page-select">
+                          <input
+                            aria-label={`Select ${displayTitle}`}
+                            checked={isSelected}
+                            onChange={() => togglePageSelection(page.id)}
+                            type="checkbox"
+                          />
+                        </label>
+                        <div className="organizer-page-summary">
+                          <strong>{displayTitle}</strong>
+                          <span>
+                            {page.wordCount.toLocaleString()} words - source page {page.sourcePageNumber ?? 'unset'} - {page.reviewStatus}
+                          </span>
+                        </div>
+                        <div className="organizer-page-controls">
+                        <div className="organizer-page-toolbar" aria-label={`${displayTitle} page actions`}>
+                          <button
+                            aria-label={`Move page ${page.pageNumber} up`}
+                            className="icon-button"
+                            disabled={pageIndex === 0}
+                            onClick={() => onMovePage(page.id, selectedChapter.id, pageIndex - 1)}
+                            title="Move up"
+                            type="button"
                           >
-                            {orderedChapters.map((candidate) => (
-                              <option key={candidate.id} value={candidate.id}>
-                                {candidate.title}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label className="field compact">
-                          Label
-                          <input
-                            aria-label={`Label for page ${page.pageNumber}`}
-                            onBlur={() => onUpdatePageMetadata(page.id, { title: pageLabelValue(page) })}
-                            onChange={(event) =>
-                              setPageLabelDrafts((drafts) => ({ ...drafts, [page.id]: event.target.value }))
-                            }
-                            value={pageLabelValue(page)}
-                          />
-                        </label>
-                        <label className="field compact">
-                          Source page
-                          <input
-                            aria-label={`Source page for page ${page.pageNumber}`}
-                            inputMode="numeric"
-                            onBlur={() =>
-                              onUpdatePageMetadata(page.id, { sourcePageNumber: parseOptionalPageNumber(sourcePageValue(page)) })
-                            }
-                            onChange={(event) =>
-                              setSourcePageDrafts((drafts) => ({ ...drafts, [page.id]: event.target.value }))
-                            }
-                            value={sourcePageValue(page)}
-                          />
-                        </label>
-                      </div>
-                    </article>
-                  )
-                })
+                            <ArrowUp aria-hidden="true" size={16} />
+                          </button>
+                          <button
+                            aria-label={`Move page ${page.pageNumber} down`}
+                            className="icon-button"
+                            disabled={pageIndex === selectedChapterPages.length - 1}
+                            onClick={() => onMovePage(page.id, selectedChapter.id, pageIndex + 1)}
+                            title="Move down"
+                            type="button"
+                          >
+                            <ArrowDown aria-hidden="true" size={16} />
+                          </button>
+                          <button
+                            aria-label={`Delete ${displayTitle}`}
+                            className="icon-button danger"
+                            disabled={pages.length <= 1}
+                            onClick={() => confirmPageDelete(page)}
+                            title={pages.length <= 1 ? 'Keep at least one page' : 'Delete'}
+                            type="button"
+                          >
+                            <Trash2 aria-hidden="true" size={16} />
+                          </button>
+                        </div>
+                        <div className="organizer-page-fields">
+                          <label className="field compact">
+                            Move to
+                            <select
+                              aria-label={`Move page ${page.pageNumber} to chapter`}
+                              onChange={(event) => {
+                                const nextChapterId = event.target.value
+                                if (nextChapterId !== selectedChapter.id) {
+                                  const nextChapterPageCount = getOrderedChapterPages(nextChapterId, pages).length
+                                  onMovePage(page.id, nextChapterId, nextChapterPageCount)
+                                }
+                              }}
+                              value={selectedChapter.id}
+                            >
+                              {orderedChapters.map((candidate) => (
+                                <option key={candidate.id} value={candidate.id}>
+                                  {candidate.title}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="field compact">
+                            Label
+                            <input
+                              aria-label={`Label for page ${page.pageNumber}`}
+                              onBlur={() => onUpdatePageMetadata(page.id, { title: pageLabelValue(page) })}
+                              onChange={(event) =>
+                                setPageLabelDrafts((drafts) => ({ ...drafts, [page.id]: event.target.value }))
+                              }
+                              placeholder={displayTitle}
+                              value={pageLabelValue(page)}
+                            />
+                          </label>
+                          <label className="field compact">
+                            Source page
+                            <input
+                              aria-label={`Source page for page ${page.pageNumber}`}
+                              inputMode="numeric"
+                              onBlur={() =>
+                                onUpdatePageMetadata(page.id, { sourcePageNumber: parseOptionalPageNumber(sourcePageValue(page)) })
+                              }
+                              onChange={(event) =>
+                                setSourcePageDrafts((drafts) => ({ ...drafts, [page.id]: event.target.value }))
+                              }
+                              value={sourcePageValue(page)}
+                            />
+                          </label>
+                        </div>
+                        </div>
+                      </article>
+                    )
+                  })}
+                </>
               )}
             </div>
           </article>

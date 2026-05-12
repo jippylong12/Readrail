@@ -145,6 +145,7 @@ describe('OcrReview', () => {
     expect(promptSpy).not.toHaveBeenCalled()
     expect(screen.getByText('Review 1 of 2')).toBeTruthy()
     expect(screen.getByText('Page 1')).toBeTruthy()
+    expect(screen.getAllByRole('heading', { name: 'Page 4' }).length).toBeGreaterThan(0)
     expect(screen.getByText('Approved 1')).toBeTruthy()
     expect(screen.getByText('Needs attention 1')).toBeTruthy()
     expect(screen.getAllByText('Cleaner pass removed a repeated header.').length).toBeGreaterThan(0)

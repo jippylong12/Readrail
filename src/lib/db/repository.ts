@@ -116,6 +116,15 @@ export async function saveDocumentToDatabase(
   }
 }
 
+export async function deleteDocumentPageFromDatabase(pageId: string): Promise<void> {
+  const database = await getDatabase()
+  if (!database) {
+    return
+  }
+
+  await database.execute('DELETE FROM document_pages WHERE id = $1', [pageId])
+}
+
 export async function saveSessionToDatabase(session: ReadingSession): Promise<void> {
   const database = await getDatabase()
   if (!database) {

@@ -26,7 +26,12 @@ import { stripImageMetadata } from '../lib/files/imageMetadata'
 import { calculateAdjustedWpm, calculateActualWpm } from '../lib/reading/pacing'
 import { cleanReadingText } from '../lib/text/cleanup'
 import { countWords, estimatePages } from '../lib/text/wordCount'
-import { saveDocumentToDatabase, saveOcrJobToDatabase, saveSessionToDatabase } from '../lib/db/repository'
+import {
+  deleteDocumentPageFromDatabase,
+  saveDocumentToDatabase,
+  saveOcrJobToDatabase,
+  saveSessionToDatabase,
+} from '../lib/db/repository'
 import {
   STRUCTURED_DOCUMENT_VERSION,
   createDefaultDocumentStructure,
@@ -144,6 +149,8 @@ type AppState = {
   moveChapter: (documentId: string, chapterId: string, direction: -1 | 1) => void
   deleteChapter: (chapterId: string) => boolean
   movePage: (pageId: string, targetChapterId: string, targetIndex: number) => void
+  deletePage: (pageId: string) => boolean
+  deletePages: (pageIds: string[]) => number
   updatePageMetadata: (
     pageId: string,
     updates: Partial<Pick<DocumentPageRecord, 'sourcePageNumber' | 'title'>>,
@@ -1289,6 +1296,123 @@ export const useAppStore = create<AppState>()(
             pages: changedPages,
           })
         }
+      },
+      deletePage: (pageId) => {
+        const now = new Date().toISOString()
+        let changedDocument: DocumentRecord | null = null
+        let changedChapters: DocumentChapterRecord[] = []
+        let changedPages: DocumentPageRecord[] = []
+        let deletedPageId: string | null = null
+        let deleted = false
+
+        set((state) => {
+          const page = state.documentPages.find((candidate) => candidate.id === pageId)
+          if (!page) {
+            return state
+          }
+          const document = state.documents.find((candidate) => candidate.id === page.documentId)
+          if (!document) {
+            return state
+          }
+
+          const documentPages = state.documentPages.filter((candidate) => candidate.documentId === page.documentId)
+          if (documentPages.length <= 1) {
+            return state
+          }
+
+          const documentChapters = state.documentChapters.filter((chapter) => chapter.documentId === page.documentId)
+          const remainingPages = documentPages.filter((candidate) => candidate.id !== pageId)
+          const rebuilt = rebuildDocumentFromStructure(document, documentChapters, remainingPages, now)
+          changedDocument = rebuilt.document
+          changedChapters = rebuilt.chapters
+          changedPages = rebuilt.pages
+          deletedPageId = pageId
+          deleted = true
+
+          return {
+            documents: state.documents.map((candidate) => (candidate.id === document.id ? rebuilt.document : candidate)),
+            documentChapters: [
+              ...state.documentChapters.filter((chapter) => chapter.documentId !== document.id),
+              ...rebuilt.chapters,
+            ],
+            documentPages: [
+              ...state.documentPages.filter((candidate) => candidate.documentId !== document.id),
+              ...rebuilt.pages,
+            ],
+          }
+        })
+
+        if (changedDocument && deletedPageId) {
+          void deleteDocumentPageFromDatabase(deletedPageId)
+          void saveDocumentToDatabase(changedDocument, {
+            chapters: changedChapters,
+            pages: changedPages,
+          })
+        }
+
+        return deleted
+      },
+      deletePages: (pageIds) => {
+        const pageIdSet = new Set(pageIds)
+        if (pageIdSet.size === 0) {
+          return 0
+        }
+
+        const now = new Date().toISOString()
+        let changedDocument: DocumentRecord | null = null
+        let changedChapters: DocumentChapterRecord[] = []
+        let changedPages: DocumentPageRecord[] = []
+        let deletedPageIds: string[] = []
+
+        set((state) => {
+          const firstPage = state.documentPages.find((candidate) => pageIdSet.has(candidate.id))
+          if (!firstPage) {
+            return state
+          }
+          const document = state.documents.find((candidate) => candidate.id === firstPage.documentId)
+          if (!document) {
+            return state
+          }
+
+          const documentPages = state.documentPages.filter((candidate) => candidate.documentId === firstPage.documentId)
+          const deletedIds = documentPages.filter((page) => pageIdSet.has(page.id)).map((page) => page.id)
+          if (deletedIds.length === 0 || deletedIds.length >= documentPages.length) {
+            return state
+          }
+
+          const deletedIdSet = new Set(deletedIds)
+          const documentChapters = state.documentChapters.filter((chapter) => chapter.documentId === firstPage.documentId)
+          const remainingPages = documentPages.filter((page) => !deletedIdSet.has(page.id))
+          const rebuilt = rebuildDocumentFromStructure(document, documentChapters, remainingPages, now)
+          changedDocument = rebuilt.document
+          changedChapters = rebuilt.chapters
+          changedPages = rebuilt.pages
+          deletedPageIds = deletedIds
+
+          return {
+            documents: state.documents.map((candidate) => (candidate.id === document.id ? rebuilt.document : candidate)),
+            documentChapters: [
+              ...state.documentChapters.filter((chapter) => chapter.documentId !== document.id),
+              ...rebuilt.chapters,
+            ],
+            documentPages: [
+              ...state.documentPages.filter((candidate) => candidate.documentId !== document.id),
+              ...rebuilt.pages,
+            ],
+          }
+        })
+
+        if (changedDocument && deletedPageIds.length > 0) {
+          for (const deletedPageId of deletedPageIds) {
+            void deleteDocumentPageFromDatabase(deletedPageId)
+          }
+          void saveDocumentToDatabase(changedDocument, {
+            chapters: changedChapters,
+            pages: changedPages,
+          })
+        }
+
+        return deletedPageIds.length
       },
       updatePageMetadata: (pageId, updates) => {
         const now = new Date().toISOString()
