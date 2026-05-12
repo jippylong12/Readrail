@@ -42,8 +42,8 @@ export const TOUR_DEFINITIONS: Record<TourId, TourDefinition> = {
       },
       {
         target: '[data-tour="reader-actions"]',
-        title: 'Pause, rewind, and reread',
-        body: 'Play starts the current untested segment. Pause stops timing, Rewind steps back one chunk, and Reread returns to the segment start.',
+        title: 'Play, pause, and pane navigation',
+        body: 'Play starts the current untested segment. Pause stops timing. Previous pane and Next pane move the visible panes without changing your saved reading point.',
       },
       {
         target: '[data-tour="reader-surface"]',

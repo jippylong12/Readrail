@@ -615,45 +615,6 @@ export function ReaderRail({
     }
   }
 
-  function rewindPlayback(): void {
-    const rewindWordIndex = getPreviousChunkStartWord({
-      activeIndex,
-      activeScope,
-      activeWindow,
-      chunkSize,
-      chunks,
-    })
-    setIsRunning(false)
-    setHasStartedReading(false)
-    setSuggestion(null)
-    setCursorWordIndex(rewindWordIndex)
-    setReadThroughWordIndex(Math.max(rewindWordIndex, chunks[getChunkIndexForWord(chunks, rewindWordIndex)]?.endWord ?? rewindWordIndex))
-    setActiveWindowStartWordIndex(getWindowStartForWord(activeScope, rewindWordIndex))
-    setManualVisiblePaneStartIndex(null)
-    rememberResume({
-      cursorWordIndex: rewindWordIndex,
-      readThroughWordIndex: Math.max(rewindWordIndex, chunks[getChunkIndexForWord(chunks, rewindWordIndex)]?.endWord ?? rewindWordIndex),
-    })
-  }
-
-  function rereadSegment(): void {
-    const rereadWordIndex = Math.max(0, segmentStartWordIndex)
-    const nextRegressionCount = regressionCount + 1
-    setRegressionCount(nextRegressionCount)
-    setIsRunning(false)
-    setHasStartedReading(false)
-    setSuggestion(null)
-    setCursorWordIndex(rereadWordIndex)
-    setReadThroughWordIndex(Math.max(rereadWordIndex, chunks[getChunkIndexForWord(chunks, rereadWordIndex)]?.endWord ?? rereadWordIndex))
-    setActiveWindowStartWordIndex(getWindowStartForWord(activeScope, rereadWordIndex))
-    setManualVisiblePaneStartIndex(null)
-    rememberResume({
-      cursorWordIndex: rereadWordIndex,
-      readThroughWordIndex: Math.max(rereadWordIndex, chunks[getChunkIndexForWord(chunks, rereadWordIndex)]?.endWord ?? rereadWordIndex),
-      regressionCount: nextRegressionCount,
-    })
-  }
-
   function changeMode(nextMode: ReaderMode): void {
     setMode(nextMode)
     rememberResume({ mode: nextMode })
@@ -773,8 +734,6 @@ export function ReaderRail({
         onModeChange={changeMode}
         onPageLayoutChange={changePageLayout}
         onPreviousPane={goToPreviousPane}
-        onRegression={rereadSegment}
-        onRewind={rewindPlayback}
         onToggleRunning={toggleRunning}
         onWpmChange={changeTargetWpm}
         targetWpm={targetWpm}
@@ -1100,35 +1059,6 @@ function materializeSegmentContent(scope: ReaderContentModel, startWordIndex: nu
   }
 
   return parts.join(' ')
-}
-
-function getPreviousChunkStartWord({
-  activeIndex,
-  activeScope,
-  activeWindow,
-  chunkSize,
-  chunks,
-}: {
-  activeIndex: number
-  activeScope: ReaderContentModel | null
-  activeWindow: ReaderContentWindow | null
-  chunkSize: number
-  chunks: Chunk[]
-}): number {
-  if (activeIndex > 0) {
-    return chunks[activeIndex - 1]?.startWord ?? 0
-  }
-
-  if (!activeScope || !activeWindow || activeWindow.startWordIndex <= 0) {
-    return 0
-  }
-
-  const previousWindowWordIndex = activeWindow.startWordIndex - 1
-  const previousWindow = activeScope.getWindowForWord(previousWindowWordIndex)
-  const previousChunks = chunkWindowContent(previousWindow, chunkSize)
-  const previousChunkIndex = getChunkIndexForWord(previousChunks, previousWindowWordIndex)
-
-  return previousChunks[previousChunkIndex]?.startWord ?? 0
 }
 
 function getChunkIndexForWord(chunks: Chunk[], wordIndex: number): number {

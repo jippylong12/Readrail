@@ -18,8 +18,6 @@ type ReaderControlsProps = {
   onFocusModeToggle: () => void
   onNextPane: () => void
   onPreviousPane: () => void
-  onRewind: () => void
-  onRegression: () => void
   onTest: () => void
   canGoNextPane: boolean
   canGoPreviousPane: boolean
@@ -83,8 +81,6 @@ export function ReaderControls({
   onFocusModeToggle,
   onNextPane,
   onPreviousPane,
-  onRewind,
-  onRegression,
   onTest,
   canGoNextPane,
   canGoPreviousPane,
@@ -162,12 +158,6 @@ export function ReaderControls({
           </button>
           <button className="secondary-button" disabled={!canGoNextPane} onClick={onNextPane} type="button">
             Next pane
-          </button>
-          <button className="secondary-button" onClick={onRewind} type="button">
-            Rewind
-          </button>
-          <button className="secondary-button" onClick={onRegression} type="button">
-            Reread
           </button>
           <button
             aria-pressed={isFocusMode}
