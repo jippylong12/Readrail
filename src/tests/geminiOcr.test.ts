@@ -110,6 +110,36 @@ describe('Gemini OCR normalization', () => {
     })
   })
 
+  it('converts literal escaped newline text into real paragraph breaks', () => {
+    const result = normalizeOcrResult({
+      pages: [
+        {
+          pageNumber: 7,
+          sourcePageNumber: 156,
+          text: 'First paragraph keeps its words.\\n\\nSecond paragraph starts here.',
+          notes: 'Formatter returned escaped newlines',
+          sourceFileName: 'scan-7.png',
+          uncertainSpans: [{ text: 'unclear', note: 'faint ink' }],
+        },
+      ],
+    })
+
+    expect(result.pages[0]).toMatchObject({
+      pageNumber: 7,
+      sourcePageNumber: 156,
+      text: 'First paragraph keeps its words.\n\nSecond paragraph starts here.',
+      notes: 'Formatter returned escaped newlines',
+      sourceFileName: 'scan-7.png',
+      uncertainSpans: [
+        {
+          text: 'unclear',
+          note: 'faint ink',
+        },
+      ],
+    })
+    expect(result.pages[0].text).not.toContain('\\n')
+  })
+
   it('clamps confidence values and drops empty uncertain spans', () => {
     const result = normalizeOcrResult({
       pages: [
@@ -166,6 +196,12 @@ describe('Gemini OCR normalization', () => {
 
   it('formats line-wrapped OCR text into paragraphs without changing words', () => {
     expect(applyOcrFormattingFallback('First line\ncontinues here.\n\nSecond para has man-\ndarins.')).toBe(
+      'First line continues here.\n\nSecond para has mandarins.',
+    )
+  })
+
+  it('formats literal escaped newline OCR text into readable paragraphs', () => {
+    expect(applyOcrFormattingFallback('First line\\ncontinues here.\\n\\nSecond para has man-\\ndarins.')).toBe(
       'First line continues here.\n\nSecond para has mandarins.',
     )
   })
@@ -315,6 +351,83 @@ describe('Gemini OCR normalization', () => {
     })
   })
 
+  it('sanitizes escaped newlines from formatter output while preserving page metadata', async () => {
+    const generateContent = vi
+      .fn()
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          titleGuess: 'Scanned book',
+          pages: [
+            {
+              pageNumber: 1,
+              sourcePageNumber: 12,
+              text: 'First cleaned line\ncontinues here.\n\nSecond paragraph.',
+              uncertainSpans: [{ text: 'unclear', startIndex: 6, endIndex: 13, confidence: 0.4 }],
+              confidence: 0.82,
+              notes: 'Cleaner note',
+              sourceFileName: 'scan-12.png',
+            },
+          ],
+          warnings: ['Cleaner warning'],
+        }),
+      })
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          titleGuess: 'Scanned book',
+          pages: [
+            {
+              pageNumber: 1,
+              sourcePageNumber: 12,
+              text: 'First cleaned line continues here.\\n\\nSecond paragraph.',
+              uncertainSpans: [{ text: 'unclear', startIndex: 6, endIndex: 13, confidence: 0.4 }],
+              confidence: 0.88,
+              notes: 'Formatter note',
+              sourceFileName: 'scan-12.png',
+            },
+          ],
+          warnings: ['Formatter warning'],
+        }),
+      })
+
+    const result = await runOcrPostProcessing(
+      { models: { generateContent } },
+      {
+        titleGuess: 'Scanned book',
+        pages: [
+          {
+            pageNumber: 1,
+            sourcePageNumber: null,
+            text: 'First cleaned line\ncontinues here.\n\nSecond paragraph.',
+            uncertainSpans: [],
+            confidence: null,
+            notes: null,
+            sourceFileName: 'scan-12.png',
+          },
+        ],
+        warnings: [],
+      },
+    )
+
+    expect(result.pages[0]).toMatchObject({
+      pageNumber: 1,
+      sourcePageNumber: 12,
+      text: 'First cleaned line continues here.\n\nSecond paragraph.',
+      confidence: 0.88,
+      notes: 'Cleaner note Formatter note',
+      sourceFileName: 'scan-12.png',
+      uncertainSpans: [
+        {
+          text: 'unclear',
+          startIndex: 6,
+          endIndex: 13,
+          confidence: 0.4,
+        },
+      ],
+    })
+    expect(result.pages[0].text).not.toContain('\\n')
+    expect(result.warnings).toEqual(['Cleaner warning', 'Formatter warning'])
+  })
+
   it('falls back to local cleanup when cleaner and formatter passes fail', async () => {
     const generateContent = vi
       .fn()
@@ -331,7 +444,7 @@ describe('Gemini OCR normalization', () => {
           {
             pageNumber: 1,
             sourcePageNumber: null,
-            text: '156\nSapiens\nWhy, then, were all of these man-\ndarins men?',
+            text: '156\\nSapiens\\nWhy, then, were all of these man-\\ndarins men?',
             uncertainSpans: [],
             confidence: null,
             notes: null,
@@ -379,6 +492,7 @@ describe('Gemini OCR normalization', () => {
       }),
     )
     expect(result.pages[0].text).toContain('mandarins')
+    expect(result.pages[0].text).not.toContain('\\n')
     expect(result.pages[0].sourcePageNumber).toBe(156)
     expect(result.warnings.join(' ')).toContain('Cleaner pass failed')
     expect(result.warnings.join(' ')).toContain('Formatter pass failed')
