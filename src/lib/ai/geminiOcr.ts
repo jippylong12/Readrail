@@ -140,6 +140,7 @@ export async function runGeminiOcrFromFiles(
               {
                 text:
                   'Perform faithful OCR only. Preserve headings, paragraph breaks, lists, page breaks, and reading order. ' +
+                  'For meaningful non-text images, figures, charts, diagrams, illustrations, or photos, insert a concise bracketed accessibility description in the page text using this exact form: [Image description: ...]. Preserve printed captions as normal text near the description. Skip purely decorative marks. Describe only visible content; do not invent details. ' +
                   'Mark uncertain words with [?word]. Return strict JSON with titleGuess, pages, and warnings. Do not summarize or add missing content.',
               },
               ...fileParts,
@@ -262,7 +263,7 @@ export function normalizeOcrResult(result: unknown): OcrResult {
           return {
             pageNumber: Number(page.pageNumber ?? index + 1),
             sourcePageNumber: normalizeNullableNumber(page.sourcePageNumber),
-            text: String(page.text ?? ''),
+            text: normalizeOcrText(String(page.text ?? '')),
             uncertainSpans: normalizeUncertainSpans(page.uncertainSpans),
             confidence: normalizeConfidence(page.confidence),
             notes: typeof page.notes === 'string' && page.notes.trim() ? page.notes.trim() : null,
@@ -285,7 +286,7 @@ export function applyConservativeOcrCleanup(result: OcrResult): OcrResult {
 }
 
 export function applyOcrFormattingFallback(text: string): string {
-  return text
+  return normalizeOcrText(text)
     .replace(/\r\n?/g, '\n')
     .replace(/([A-Za-z])-\n([a-z])/g, '$1$2')
     .split(/\n{2,}/)
@@ -306,7 +307,7 @@ function cleanOcrPage(
   repeatedFooters: Set<string>,
 ): OcrResultPage {
   const artifacts: string[] = []
-  const lines = page.text.replace(/\r\n?/g, '\n').split('\n')
+  const lines = normalizeOcrText(page.text).split('\n')
   const firstContentIndex = lines.findIndex((line) => line.trim())
   let sourcePageNumber = page.sourcePageNumber
 
@@ -352,6 +353,7 @@ function buildCleanupPrompt(result: OcrResult): string {
   return [
     'Clean OCR output conservatively. Return the same JSON shape.',
     'Remove only obvious scanned-book artifacts: standalone page numbers, repeated running headers or footers, broken hyphenation across line breaks, and empty scan noise.',
+    'Preserve bracketed accessibility descriptions exactly when they use the form [Image description: ...]. Do not treat those descriptions as scan noise or uncertain text.',
     'Do not summarize, paraphrase, modernize, reorder, or add content.',
     'If you remove headers, footers, or page-number artifacts, add a short note to that page notes field.',
     'Keep pageNumber as the current page order. Put detected book/scanned page numbers in sourcePageNumber.',
@@ -363,6 +365,8 @@ function buildFormatterPrompt(result: OcrResult): string {
   return [
     'Format cleaned OCR text for reading. Return the same JSON shape.',
     'Repair paragraph breaks and spacing while preserving all words, punctuation, order, page metadata, notes, warnings, and uncertain spans.',
+    'Use real paragraph breaks in page text. In returned JSON strings, newline escapes must parse to actual newline characters. Never leave literal backslash-n text such as \\n or \\n\\n in page content.',
+    'Preserve [Image description: ...] blocks as readable standalone paragraphs when present. Do not remove, paraphrase, or convert them into uncertain spans.',
     'Do not remove content except empty formatting noise. Do not summarize or rewrite meaning.',
     JSON.stringify(result),
   ].join('\n\n')
@@ -382,7 +386,7 @@ function mergeOcrResults(previous: OcrResult, next: OcrResult): OcrResult {
         ...previousPage,
         pageNumber: Number.isFinite(nextPage.pageNumber) ? nextPage.pageNumber : previousPage.pageNumber,
         sourcePageNumber: nextPage.sourcePageNumber ?? previousPage.sourcePageNumber,
-        text: nextPage.text || previousPage.text,
+        text: normalizeOcrText(nextPage.text || previousPage.text),
         uncertainSpans: nextPage.uncertainSpans.length ? nextPage.uncertainSpans : previousPage.uncertainSpans,
         confidence: nextPage.confidence ?? previousPage.confidence,
         notes: mergeNotes(previousPage.notes, nextPage.notes),
@@ -392,11 +396,21 @@ function mergeOcrResults(previous: OcrResult, next: OcrResult): OcrResult {
   }
 }
 
+function normalizeOcrText(text: string): string {
+  return text
+    .replace(/\r\n?/g, '\n')
+    .replace(/\\r\\n/g, '\n')
+    .replace(/\\n/g, '\n')
+    .replace(/\\r/g, '\n')
+    .replace(/[ \t\f\v]*\n[ \t\f\v]*/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+}
+
 function findRepeatedEdgeLines(pages: OcrResultPage[], edge: 'first' | 'last'): Set<string> {
   const counts = new Map<string, number>()
   pages.forEach((page) => {
-    const lines = page.text
-      .split(/\r?\n/)
+    const lines = normalizeOcrText(page.text)
+      .split('\n')
       .map((line) => line.trim())
       .filter(Boolean)
     const line = edge === 'first' ? lines[0] : lines[lines.length - 1]
