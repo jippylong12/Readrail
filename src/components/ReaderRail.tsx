@@ -35,7 +35,7 @@ import {
   type ReaderContentWindow,
 } from '../app/readerContentWindow'
 
-const DEFAULT_READER_SURFACE_SIZE = { width: 960, height: 420 }
+const DEFAULT_READER_SURFACE_SIZE = { width: 1720, height: 420 }
 
 export type ReaderSegmentInput = {
   mode: ReaderMode
@@ -190,7 +190,7 @@ export function ReaderRail({
   )
   const visiblePaneStartIndex = Math.max(
     0,
-    Math.min(manualVisiblePaneStartIndex ?? paneLayout.visibleStartPaneIndex, Math.max(0, paneLayout.panes.length - paneLayout.effectivePaneCount)),
+    Math.min(manualVisiblePaneStartIndex ?? paneLayout.visibleStartPaneIndex, Math.max(0, paneLayout.panes.length - 1)),
   )
   const displayPaneLayout = useMemo<VirtualReaderPaneLayout<Chunk>>(
     () => buildFilledVisibleReaderPaneLayout(chunks, activeIndex, paneLayout, paneMetrics, visiblePaneStartIndex),
@@ -472,6 +472,7 @@ export function ReaderRail({
     setCursorWordIndex(startWordIndex)
     setReadThroughWordIndex(Math.max(readThroughWordIndex, activeChunk?.endWord ?? startWordIndex))
     setActiveWindowStartWordIndex(getWindowStartForWord(activeScope, startWordIndex))
+    setManualVisiblePaneStartIndex(null)
 
     if (!hasStartedReading) {
       setSegmentStartWordIndex(startWordIndex)
@@ -539,7 +540,7 @@ export function ReaderRail({
     }
 
     setManualVisiblePaneStartIndex(
-      Math.min(Math.max(0, paneLayout.panes.length - paneLayout.effectivePaneCount), visiblePaneStartIndex + paneLayout.effectivePaneCount),
+      Math.min(Math.max(0, paneLayout.panes.length - 1), visiblePaneStartIndex + paneLayout.effectivePaneCount),
     )
   }
 
@@ -1108,9 +1109,14 @@ type MultiPageLayoutProps = {
 }
 
 function ReaderPaneLayout({ chunks, activeIndex, isCursorSelectionDisabled, onSelectChunk, paneLayout }: MultiPageLayoutProps) {
+  const activeVisiblePaneIndex = paneLayout.visiblePanes.findIndex(
+    (pane) => pane.startChunkIndex <= activeIndex && pane.endChunkIndex >= activeIndex,
+  )
+
   return (
     <div
       className="page-panes"
+      data-active-visible-pane-index={activeVisiblePaneIndex}
       data-effective-pane-count={paneLayout.effectivePaneCount}
       data-page-count={paneLayout.visiblePanes.length}
       data-visible-chunk-end={paneLayout.visiblePanes.at(-1)?.endChunkIndex ?? 0}
@@ -1118,12 +1124,12 @@ function ReaderPaneLayout({ chunks, activeIndex, isCursorSelectionDisabled, onSe
       data-visible-pane-start={paneLayout.visibleStartPaneIndex}
       style={{ gridTemplateColumns: `repeat(${paneLayout.visiblePanes.length || 1}, minmax(0, 1fr))` }}
     >
-      {paneLayout.visiblePanes.map((pane, visibleIndex) => (
+      {paneLayout.visiblePanes.map((pane) => (
         <ReaderPane
           activeIndex={activeIndex}
           chunks={chunks}
           isCursorSelectionDisabled={isCursorSelectionDisabled}
-          isActivePane={paneLayout.visibleStartPaneIndex + visibleIndex === paneLayout.activePaneIndex}
+          isActivePane={pane.startChunkIndex <= activeIndex && pane.endChunkIndex >= activeIndex}
           key={pane.id}
           onSelectChunk={onSelectChunk}
           pane={pane}

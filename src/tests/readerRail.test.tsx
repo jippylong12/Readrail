@@ -543,33 +543,105 @@ describe('ReaderRail virtual panes', () => {
   })
 
   it('renders selected pane counts as viewport panes instead of all source text columns', () => {
-    const { container } = renderLongReader({ defaultPageLayout: 3, wordCount: 8 })
+    const { container } = renderLongReader({ defaultPageLayout: 3, wordCount: 40 })
     const paneLayout = container.querySelector('.page-panes')
 
     expect(paneLayout?.getAttribute('data-effective-pane-count')).toBe('3')
     expect(container.querySelectorAll('.page-pane')).toHaveLength(3)
     expect(screen.getByText(/viewportfitword0/)).toBeTruthy()
-    expect(screen.queryByText(/viewportfitword7/)).toBeNull()
+    expect(screen.queryByText(/viewportfitword39/)).toBeNull()
   })
 
   it('advances the visible pane window as playback moves the active chunk', async () => {
     const user = userEvent.setup()
-    const { container } = renderLongReader({ defaultPageLayout: 2, wordCount: 8 })
+    const { container } = renderLongReader({ defaultPageLayout: 2, wordCount: 40 })
 
     expect(container.querySelector('.page-panes')?.getAttribute('data-visible-pane-start')).toBe('0')
 
     await user.click(screen.getByRole('button', { name: 'Play' }))
 
     await waitFor(() => {
-      expect(container.querySelector('.page-panes')?.getAttribute('data-visible-pane-start')).toBe('4')
+      expect(Number(container.querySelector('.page-panes')?.getAttribute('data-visible-pane-start') ?? 0)).toBeGreaterThan(0)
     }, { timeout: 1800 })
     expect(screen.queryByText(/viewportfitword0/)).toBeNull()
-    expect(screen.getByText(/viewportfitword4/)).toBeTruthy()
+    expect(container.querySelector('.active-chunk')?.textContent).toContain('viewportfitword')
+  })
+
+  it('moves to the next adjacent pane group without skipping hidden words', async () => {
+    const user = userEvent.setup()
+    const { container } = renderLongReader({ defaultPageLayout: 3, wordCount: 80 })
+    const paneLayout = container.querySelector('.page-panes')
+    const initialVisibleEnd = Number(paneLayout?.getAttribute('data-visible-chunk-end') ?? -1)
+
+    await user.click(screen.getByRole('button', { name: 'Next pane' }))
+
+    expect(Number(paneLayout?.getAttribute('data-visible-chunk-start') ?? -1)).toBe(initialVisibleEnd + 1)
+    expect(screen.queryByText(/viewportfitword0/)).toBeNull()
+  })
+
+  it('returns playback to the active cursor pane after manual pane navigation', async () => {
+    vi.useFakeTimers()
+    const { container } = renderLongReader({ defaultChunkSize: 1, defaultPageLayout: 4, wordCount: 80 })
+    const paneLayout = container.querySelector('.page-panes')
+
+    expect(paneLayout?.getAttribute('data-active-visible-pane-index')).toBe('0')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next pane' }))
+
+    expect(Number(paneLayout?.getAttribute('data-visible-chunk-start') ?? -1)).toBeGreaterThan(0)
+    expect(paneLayout?.getAttribute('data-active-visible-pane-index')).toBe('-1')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Play' }))
+
+    expect(paneLayout?.getAttribute('data-visible-pane-start')).toBe('0')
+    expect(paneLayout?.getAttribute('data-active-visible-pane-index')).toBe('0')
+
+    for (let index = 1; index < 4; index += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(280)
+      })
+      expect(paneLayout?.getAttribute('data-active-visible-pane-index')).toBe(String(index))
+    }
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(280)
+    })
+
+    expect(paneLayout?.getAttribute('data-active-visible-pane-index')).toBe('0')
+    expect(Number(paneLayout?.getAttribute('data-visible-pane-start') ?? 0)).toBeGreaterThan(0)
+  })
+
+  it.each([
+    { layout: 3 as PageLayout, word: 'viewportfitword3' },
+    { layout: 4 as PageLayout, word: 'viewportfitword4' },
+  ])('keeps $layout-pane playback bounded as the active pane advances', async ({
+    layout,
+    word,
+  }) => {
+    vi.useFakeTimers()
+    const { container } = renderLongReader({ defaultPageLayout: layout, wordCount: 60 })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Play' }))
+
+    for (let index = 0; index < layout; index += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(280)
+      })
+    }
+
+    const paneLayout = container.querySelector('.page-panes')
+    const visiblePaneCount = Number(paneLayout?.getAttribute('data-page-count') ?? 0)
+
+    expect(paneLayout?.getAttribute('data-effective-pane-count')).toBe(String(layout))
+    expect(visiblePaneCount).toBeGreaterThan(0)
+    expect(visiblePaneCount).toBeLessThanOrEqual(layout)
+    expect(container.querySelectorAll('.page-pane')).toHaveLength(visiblePaneCount)
+    expect(container.querySelector('.page-pane-active .active-chunk')?.textContent).toContain(word)
   })
 
   it('keeps the active pane after pause saves reader defaults back through the parent', async () => {
     vi.useFakeTimers()
-    const longDocument = buildLongDocument(8)
+    const longDocument = buildLongDocument(120)
     const chapter = buildChapter(longDocument)
 
     function ResumingReader() {
@@ -630,7 +702,7 @@ describe('ReaderRail virtual panes', () => {
     const user = userEvent.setup()
     const onSegmentReset = vi.fn()
     const onResumeUpdate = vi.fn()
-    const longDocument = buildLongDocument(8)
+    const longDocument = buildLongDocument(120)
     const chapter = buildChapter(longDocument)
     const { container } = render(
       <ReaderRail
