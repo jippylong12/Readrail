@@ -62,6 +62,7 @@ export const SCHEMA_STATEMENTS = [
     document_id TEXT REFERENCES documents(id),
     target_chapter_id TEXT REFERENCES document_chapters(id),
     status TEXT NOT NULL,
+    concurrent_item_limit INTEGER NOT NULL DEFAULT 10,
     model_id TEXT NOT NULL,
     input_file_count INTEGER NOT NULL,
     prompt_version TEXT NOT NULL,

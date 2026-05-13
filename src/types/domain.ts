@@ -178,6 +178,7 @@ export type PrivacySettings = {
 export type OcrSettings = {
   modelId: 'gemini-3.1-flash-lite'
   preservePageBreaks: boolean
+  concurrentItemLimit: number
 }
 
 export type AppSettings = {
@@ -245,6 +246,7 @@ export type OcrJob = {
   documentId: string | null
   targetChapterId: string | null
   status: 'queued' | 'running' | 'review' | 'saved' | 'failed' | 'cancelled'
+  concurrentItemLimit: number
   modelId: string
   inputFileCount: number
   promptVersion: string

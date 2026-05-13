@@ -777,6 +777,7 @@ describe('structured document store behavior', () => {
       documentId: document.id,
       targetChapterId: chapter.id,
       status: 'review',
+      concurrentItemLimit: 10,
       modelId: 'gemini-3.1-flash-lite',
       inputFileCount: 2,
       promptVersion: 'structured-import-v1',

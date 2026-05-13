@@ -21,6 +21,7 @@ const ocrJob: OcrJob = {
   documentId: 'doc-1',
   targetChapterId: null,
   status: 'saved',
+  concurrentItemLimit: 10,
   modelId: 'gemini-3.1-flash-lite',
   inputFileCount: 1,
   promptVersion: 'v1',
@@ -77,7 +78,7 @@ describe('cost report exports', () => {
     expect(rows[0]).toContain('ocr_job_id,ocr_job_label,ocr_item_id,ocr_item_label,source_file_name')
     expect(rows[1]).toContain('usage-1,2026-05-10T12:01:00.000Z')
     expect(rows[1]).toContain('"Structured, Book"')
-    expect(rows[1]).toContain('job-1,"OCR job')
+    expect(rows[1]).toContain('job-1,"OCR job, 10 at a time')
     expect(rows[1]).toContain('item-1,item-1,"scan,page.png"')
     expect(rows[1]).toContain('ocr_extraction,google,gemini-3.1-flash-lite,succeeded,estimated,USD')
     expect(rows[1]).toContain('"Needs ""review"", retry later"')
@@ -109,6 +110,18 @@ describe('cost report exports', () => {
     expect(report.lineItems).toHaveLength(3)
     expect(csvRows).toHaveLength(4)
     expect(csvRows[0]).not.toContain('bundle')
+  })
+
+  it('labels OCR job bundles with their concurrency limit in reports and exports', () => {
+    const report = buildCostReport({
+      documents: [documentRecord],
+      lineItems: [buildLineItem()],
+      ocrJobs: [{ ...ocrJob, concurrentItemLimit: 25 }],
+    })
+    const rows = exportCostReportCsv(report).split('\n')
+
+    expect(report.ocrJobBundles[0].ocrJobLabel).toContain('OCR job, 25 at a time')
+    expect(rows[1]).toContain('job-1,"OCR job, 25 at a time')
   })
 
   it('builds legacy OCR bundles when usage records do not have an OCR job id', () => {

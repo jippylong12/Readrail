@@ -447,7 +447,7 @@ function buildDocumentOptions(documents: DocumentRecord[], lineItems: AiUsageLin
 }
 
 function buildOcrJobOptions(ocrJobs: OcrJob[], lineItems: AiUsageLineItem[]): Array<{ value: string; label: string }> {
-  const jobById = new Map(ocrJobs.map((job) => [job.id, `OCR job ${formatDate(job.createdAt)}`]))
+  const jobById = new Map(ocrJobs.map((job) => [job.id, `OCR job, ${job.concurrentItemLimit} at a time ${formatDate(job.createdAt)}`]))
   const optionByValue = new Map<string, string>()
   for (const job of ocrJobs) {
     optionByValue.set(job.id, jobById.get(job.id) ?? job.id)

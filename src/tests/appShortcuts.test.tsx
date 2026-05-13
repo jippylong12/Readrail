@@ -91,6 +91,7 @@ function buildOcrJob(): OcrJob {
     documentId: activeDocument.id,
     targetChapterId: null,
     status: 'review',
+    concurrentItemLimit: 10,
     modelId: 'gemini-3.1-flash-lite',
     inputFileCount: 1,
     promptVersion: 'v1',
@@ -266,7 +267,7 @@ describe('app section shortcuts', () => {
     expect(window.location.search).toBe('?documentId=document-1')
     expect((screen.getByLabelText('Document') as HTMLSelectElement).value).toBe('document-1')
 
-    await user.click(screen.getByRole('button', { name: /Show OCR job/ }))
+    await user.click(screen.getByRole('button', { name: /Show .*OCR job/ }))
 
     expect(screen.getByText('scan.png')).toBeTruthy()
   })

@@ -60,6 +60,7 @@ function createReviewJob(overrides: Partial<OcrJob> = {}): OcrJob {
     documentId: null,
     targetChapterId: null,
     status: 'review',
+    concurrentItemLimit: 10,
     modelId: 'gemini-3.1-flash-lite',
     inputFileCount: 1,
     promptVersion: 'structured-import-v1',
@@ -119,6 +120,13 @@ afterEach(() => {
     ocrJobs: [],
     ocrJobItems: [],
     ocrRuntimeJobs: {},
+    settings: {
+      ...useAppStore.getState().settings,
+      ocr: {
+        ...useAppStore.getState().settings.ocr,
+        concurrentItemLimit: 10,
+      },
+    },
   })
   vi.restoreAllMocks()
   cleanup()
@@ -153,6 +161,7 @@ describe('OcrReview', () => {
       documentId: null,
       targetChapterId: null,
       status: 'review',
+      concurrentItemLimit: 10,
       modelId: 'gemini-3.1-flash-lite',
       inputFileCount: 1,
       promptVersion: 'v1',
@@ -518,13 +527,10 @@ describe('OcrReview', () => {
     await user.upload(input!, new File(['image'], 'scan.png', { type: 'image/png' }))
     await user.click(screen.getByRole('button', { name: 'Process 1 page(s)' }))
 
-    await waitFor(() =>
-      expect(screen.getByText('Processing item 1 of 1: Removing page numbers, headers, footers, and scan artifacts.')).toBeTruthy(),
-    )
+    await waitFor(() => expect(screen.getByText('0 of 1 complete · 1 running · 0 queued')).toBeTruthy())
     expect(screen.getByRole('progressbar').getAttribute('aria-valuenow')).toBe('33')
-    expect(screen.getByText('OCR: done')).toBeTruthy()
-    expect(screen.getByText('Cleaner: running')).toBeTruthy()
-    expect(screen.getByText('Formatter: waiting')).toBeTruthy()
+    expect(screen.getByText('Cleaner')).toBeTruthy()
+    expect(screen.getByText('Removing page numbers, headers, footers, and scan artifacts.')).toBeTruthy()
 
     resolveOcr({
       titleGuess: 'Finished scan',
@@ -818,7 +824,8 @@ describe('OcrReview', () => {
     await user.click(screen.getByRole('button', { name: 'Process 2 page(s)' }))
 
     await waitFor(() => expect(screen.getByDisplayValue('First item ready.')).toBeTruthy())
-    expect(screen.getByText('Processing item 2 of 2: Reading scans with Gemini OCR.')).toBeTruthy()
+    expect(screen.getByText('1 of 2 complete · 1 running · 0 queued')).toBeTruthy()
+    expect(screen.getByText('Reading scans with Gemini OCR.')).toBeTruthy()
     expect(screen.getByText('Pending 1')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Create document from pages' })).toHaveProperty('disabled', true)
 
@@ -852,6 +859,233 @@ describe('OcrReview', () => {
       expect.objectContaining({ sourceFileName: 'first-page.png', text: 'Edited while second runs.' }),
       expect.objectContaining({ sourceFileName: 'second-page.png', text: 'Second item finished.' }),
     ])
+  })
+
+  it('runs concurrent OCR items out of completion order while keeping review order stable', async () => {
+    let resolveFirst!: (value: OcrResult) => void
+    let resolveSecond!: (value: OcrResult) => void
+    let resolveThird!: (value: OcrResult) => void
+    const firstPromise = new Promise<OcrResult>((resolve) => {
+      resolveFirst = resolve
+    })
+    const secondPromise = new Promise<OcrResult>((resolve) => {
+      resolveSecond = resolve
+    })
+    const thirdPromise = new Promise<OcrResult>((resolve) => {
+      resolveThird = resolve
+    })
+    runGeminiOcrFromFilesMock.mockImplementation(async (_apiKey, files, options) => {
+      options?.onProgress?.({ stage: 'ocr', status: 'running', message: 'Reading scans with Gemini OCR.' })
+      const fileName = files[0]?.name
+      if (fileName === 'first.png') {
+        return firstPromise
+      }
+      if (fileName === 'second.png') {
+        return secondPromise
+      }
+      return thirdPromise
+    })
+
+    const jobId = useAppStore.getState().startOcrJob({
+      files: [
+        { file: new File(['first'], 'first.png', { type: 'image/png' }), title: '', sourcePageNumber: 1 },
+        { file: new File(['second'], 'second.png', { type: 'image/png' }), title: '', sourcePageNumber: 2 },
+        { file: new File(['third'], 'third.png', { type: 'image/png' }), title: '', sourcePageNumber: 3 },
+      ],
+      documentId: null,
+      targetChapterId: null,
+      loadApiKey: vi.fn().mockResolvedValue('browser-key'),
+      stripImageMetadataBeforeOcr: false,
+      concurrentItemLimit: 10,
+    })!
+
+    await waitFor(() => expect(runGeminiOcrFromFilesMock).toHaveBeenCalledTimes(3))
+    expect(useAppStore.getState().ocrRuntimeJobs[jobId]?.progressMessage).toBe('0 of 3 complete · 3 running · 0 queued')
+    expect(Object.values(useAppStore.getState().ocrRuntimeJobs[jobId]?.itemProgressById ?? {}).map((progress) => progress.message)).toEqual([
+      'Reading scans with Gemini OCR.',
+      'Reading scans with Gemini OCR.',
+      'Reading scans with Gemini OCR.',
+    ])
+
+    resolveThird({
+      titleGuess: 'Concurrent import',
+      pages: [
+        {
+          pageNumber: 1,
+          sourcePageNumber: null,
+          text: 'Third finished first.',
+          confidence: null,
+          notes: null,
+          sourceFileName: null,
+          uncertainSpans: [],
+        },
+      ],
+      warnings: [],
+    })
+    await waitFor(() =>
+      expect(useAppStore.getState().ocrJobItems.find((item) => item.sourceFileName === 'third.png')?.status).toBe('review'),
+    )
+
+    resolveFirst({
+      titleGuess: null,
+      pages: [
+        {
+          pageNumber: 1,
+          sourcePageNumber: null,
+          text: 'First finished second.',
+          confidence: null,
+          notes: null,
+          sourceFileName: null,
+          uncertainSpans: [],
+        },
+      ],
+      warnings: [],
+    })
+    resolveSecond({
+      titleGuess: null,
+      pages: [
+        {
+          pageNumber: 1,
+          sourcePageNumber: null,
+          text: 'Second finished last.',
+          confidence: null,
+          notes: null,
+          sourceFileName: null,
+          uncertainSpans: [],
+        },
+      ],
+      warnings: [],
+    })
+
+    await waitFor(() => expect(useAppStore.getState().ocrJobs.find((job) => job.id === jobId)?.status).toBe('review'))
+    const items = useAppStore.getState().ocrJobItems.filter((item) => item.jobId === jobId)
+
+    expect(items.map((item) => item.sourceFileName)).toEqual(['first.png', 'second.png', 'third.png'])
+    expect(items.map((item) => item.pages[0]?.text)).toEqual([
+      'First finished second.',
+      'Second finished last.',
+      'Third finished first.',
+    ])
+    expect(useAppStore.getState().ocrJobs.find((job) => job.id === jobId)?.concurrentItemLimit).toBe(10)
+  })
+
+  it('clamps OCR concurrency settings to the supported queue range', () => {
+    useAppStore.getState().updateSettings({
+      ocr: {
+        ...useAppStore.getState().settings.ocr,
+        concurrentItemLimit: 50,
+      },
+    })
+    expect(useAppStore.getState().settings.ocr.concurrentItemLimit).toBe(25)
+
+    useAppStore.getState().updateSettings({
+      ocr: {
+        ...useAppStore.getState().settings.ocr,
+        concurrentItemLimit: 0,
+      },
+    })
+    expect(useAppStore.getState().settings.ocr.concurrentItemLimit).toBe(1)
+  })
+
+  it('renders concurrent OCR review with mixed running, review, and failed items', () => {
+    const job = createReviewJob({
+      id: 'concurrent-mixed-job',
+      inputFileCount: 3,
+      status: 'running',
+      concurrentItemLimit: 10,
+      completedAt: null,
+    })
+    const items: OcrJobItem[] = [
+      createReviewItem({
+        id: 'concurrent-ready',
+        jobId: job.id,
+        orderIndex: 0,
+        sourceFileName: '01-ready.png',
+        pages: [createReviewPage({ text: 'Ready in first position.', reviewStatus: 'reviewed', sourceFileName: '01-ready.png' })],
+      }),
+      createReviewItem({
+        id: 'concurrent-running',
+        jobId: job.id,
+        orderIndex: 1,
+        sourceFileName: '02-running.png',
+        status: 'running',
+        pages: [],
+        ocrText: null,
+      }),
+      createReviewItem({
+        id: 'concurrent-failed',
+        jobId: job.id,
+        orderIndex: 2,
+        sourceFileName: '03-failed.png',
+        status: 'failed',
+        pages: [],
+        ocrText: null,
+        failureReason: 'Rate limit reached.',
+      }),
+    ]
+    useAppStore.setState({
+      ocrJobs: [job],
+      ocrJobItems: items,
+      ocrRuntimeJobs: {
+        [job.id]: {
+          jobId: job.id,
+          filesByItemId: {},
+          progressMessage: '2 of 3 complete · 1 running · 0 queued',
+          progressState: { ocr: 'running', cleaner: 'pending', formatter: 'pending' },
+          itemProgressById: {
+            'concurrent-ready': {
+              itemId: 'concurrent-ready',
+              progressState: { ocr: 'done', cleaner: 'done', formatter: 'done' },
+              message: 'Ready for review.',
+              startedAt: '2026-05-11T12:00:00.000Z',
+              completedAt: '2026-05-11T12:00:05.000Z',
+              failureMessage: null,
+            },
+            'concurrent-running': {
+              itemId: 'concurrent-running',
+              progressState: { ocr: 'done', cleaner: 'running', formatter: 'pending' },
+              message: 'Removing page numbers, headers, footers, and scan artifacts.',
+              startedAt: '2026-05-11T12:00:01.000Z',
+              completedAt: null,
+              failureMessage: null,
+            },
+            'concurrent-failed': {
+              itemId: 'concurrent-failed',
+              progressState: { ocr: 'failed', cleaner: 'pending', formatter: 'pending' },
+              message: 'Rate limit reached.',
+              startedAt: '2026-05-11T12:00:02.000Z',
+              completedAt: '2026-05-11T12:00:03.000Z',
+              failureMessage: 'Rate limit reached.',
+            },
+          },
+          titleGuess: null,
+          documentTitle: '',
+          error: null,
+        },
+      },
+    })
+
+    render(
+      <OcrReview
+        documents={[]}
+        hasKey
+        loadApiKey={vi.fn().mockResolvedValue('browser-key')}
+        onAppendPages={vi.fn()}
+        onCreateDocument={vi.fn()}
+        preservePageBreaks
+        stripImageMetadataBeforeOcr={false}
+      />,
+    )
+
+    expect(screen.getByText('2 of 3 complete · 1 running · 0 queued')).toBeTruthy()
+    expect(screen.getByText('02-running.png')).toBeTruthy()
+    expect(screen.getByText('Cleaner')).toBeTruthy()
+    expect(screen.getByText('Removing page numbers, headers, footers, and scan artifacts.')).toBeTruthy()
+    expect(screen.getByText('Approved 1')).toBeTruthy()
+    expect(screen.getByText('Pending 1')).toBeTruthy()
+    expect(screen.getByText('Failed 1')).toBeTruthy()
+    expect(screen.getByText('Ready in first position.')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Create document from pages' })).toHaveProperty('disabled', true)
   })
 
   it('keeps active OCR progress and review state after the route unmounts and returns', async () => {
@@ -900,7 +1134,7 @@ describe('OcrReview', () => {
     await user.click(screen.getByRole('button', { name: 'Process 2 page(s)' }))
 
     await waitFor(() => expect(screen.getByDisplayValue('First route-safe page.')).toBeTruthy())
-    expect(screen.getByText('Processing item 2 of 2: Reading scans with Gemini OCR.')).toBeTruthy()
+    expect(screen.getByText('1 of 2 complete · 1 running · 0 queued')).toBeTruthy()
 
     cleanup()
     render(
@@ -917,7 +1151,7 @@ describe('OcrReview', () => {
 
     expect(screen.getByDisplayValue('First route-safe page.')).toBeTruthy()
     expect(screen.getByText('Pending 1')).toBeTruthy()
-    expect(screen.getByText('Processing item 2 of 2: Reading scans with Gemini OCR.')).toBeTruthy()
+    expect(screen.getByText('1 of 2 complete · 1 running · 0 queued')).toBeTruthy()
 
     resolveSecondOcr({
       titleGuess: null,
@@ -994,7 +1228,7 @@ describe('OcrReview', () => {
 
     expect(screen.getByDisplayValue('Recovered route page.')).toBeTruthy()
     await user.click(screen.getByRole('button', { name: 'Next' }))
-    expect(screen.getByText('Route-safe OCR failure.')).toBeTruthy()
+    expect(screen.getAllByText('Route-safe OCR failure.').length).toBeGreaterThan(0)
     expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Replace file' })).toBeTruthy()
   })
@@ -1006,6 +1240,7 @@ describe('OcrReview', () => {
       documentId: null,
       targetChapterId: null,
       status: 'running',
+      concurrentItemLimit: 10,
       modelId: 'gemini-3.1-flash-lite',
       inputFileCount: 2,
       promptVersion: 'structured-import-v1',
@@ -1175,7 +1410,7 @@ describe('OcrReview', () => {
     await waitFor(() => expect(screen.getByText('Successful page text.')).toBeTruthy())
     expect(screen.getByText('Failed 1')).toBeTruthy()
     await user.click(screen.getByRole('button', { name: 'Next' }))
-    expect(screen.getByText('Gemini could not read the scan.')).toBeTruthy()
+    expect(screen.getAllByText('Gemini could not read the scan.').length).toBeGreaterThan(0)
     expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Skip' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Replace file' })).toBeTruthy()
@@ -1258,7 +1493,7 @@ describe('OcrReview', () => {
 
     await waitFor(() => expect(screen.getByText('Failed 1')).toBeTruthy())
     await user.click(screen.getByRole('button', { name: 'Next' }))
-    expect(screen.getByText('Temporary OCR failure.')).toBeTruthy()
+    expect(screen.getAllByText('Temporary OCR failure.').length).toBeGreaterThan(0)
     await user.click(screen.getByRole('button', { name: 'Retry' }))
 
     await waitFor(() => expect(screen.getByText('Approved 2')).toBeTruthy())
@@ -1334,7 +1569,7 @@ describe('OcrReview', () => {
 
     await waitFor(() => expect(screen.getByText('Failed 1')).toBeTruthy())
     await user.click(screen.getByRole('button', { name: 'Next' }))
-    expect(screen.getByText('Unreadable original.')).toBeTruthy()
+    expect(screen.getAllByText('Unreadable original.').length).toBeGreaterThan(0)
     await user.upload(
       screen.getByLabelText('Replacement file for z-bad-page.png'),
       new File(['replacement'], 'replacement-page.png', { type: 'image/png' }),

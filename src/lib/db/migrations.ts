@@ -170,4 +170,7 @@ async function runOcrJobSqliteMigration(database: SqlDatabase): Promise<void> {
     await database.execute("ALTER TABLE ocr_jobs ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''")
     await database.execute("UPDATE ocr_jobs SET updated_at = created_at WHERE updated_at = ''")
   }
+  if (!ocrJobColumns.some((column) => column.name === 'concurrent_item_limit')) {
+    await database.execute('ALTER TABLE ocr_jobs ADD COLUMN concurrent_item_limit INTEGER NOT NULL DEFAULT 10')
+  }
 }
