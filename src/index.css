@@ -1675,7 +1675,7 @@ h3 {
   min-height: 420px;
   margin-top: 20px;
   padding: 28px;
-  overflow: hidden;
+  overflow: clip;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface) 70%, var(--surface-muted));
@@ -1847,7 +1847,7 @@ h3 {
 }
 
 .page-pane {
-  overflow: hidden;
+  overflow: clip;
   padding: 20px 22px;
   border: 1px solid var(--line);
   border-radius: 8px;

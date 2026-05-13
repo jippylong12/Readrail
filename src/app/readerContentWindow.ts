@@ -80,12 +80,27 @@ export function buildReaderContentModel(
 
   function getWindowForWord(scopeWordIndex: number): ReaderContentWindow {
     const normalizedWordIndex = Math.max(0, Math.min(Math.floor(scopeWordIndex), Math.max(0, scope.wordCount - 1)))
-    const windowStart = Math.floor(normalizedWordIndex / advanceThresholdWords) * advanceThresholdWords
+    const windowStart = getReaderAlignedWindowStart(
+      sourcePages,
+      scope,
+      normalizedWordIndex,
+      activeWindowWords,
+      advanceThresholdWords,
+    )
     return getWindow(windowStart)
   }
 
   function getNextWindow(window: ReaderContentWindow): ReaderContentWindow {
-    return getWindow(Math.min(scope.wordCount, window.startWordIndex + advanceThresholdWords))
+    const nextWordIndex = Math.min(scope.wordCount, window.startWordIndex + advanceThresholdWords)
+    return getWindow(
+      getReaderAlignedWindowStart(
+        sourcePages,
+        scope,
+        nextWordIndex,
+        activeWindowWords,
+        advanceThresholdWords,
+      ),
+    )
   }
 
   function shouldAdvanceWindow(scopeWordIndex: number, window: ReaderContentWindow): boolean {
@@ -190,10 +205,38 @@ function buildPageOffsets(pages: DocumentPageRecord[]): PageWithOffset[] {
   let wordCursor = 0
   return pages.map((page) => {
     const startWordOffset = wordCursor
-    const endWordOffset = startWordOffset + page.wordCount
+    const endWordOffset = startWordOffset + tokenizeReadableWords(page.text).length
     wordCursor = endWordOffset
     return { page, startWordOffset, endWordOffset }
   })
+}
+
+function getReaderAlignedWindowStart(
+  pagesWithOffsets: PageWithOffset[],
+  scope: ReaderScopeDescriptor,
+  scopeWordIndex: number,
+  activeWindowWords: number,
+  advanceThresholdWords: number,
+): number {
+  const normalizedWordIndex = Math.max(0, Math.min(Math.floor(scopeWordIndex), Math.max(0, scope.wordCount - 1)))
+  const defaultWindowStart = Math.floor(normalizedWordIndex / advanceThresholdWords) * advanceThresholdWords
+  const documentWordIndex = scope.startWordOffset + normalizedWordIndex
+  const activePage = pagesWithOffsets.find(
+    ({ startWordOffset, endWordOffset }) => documentWordIndex >= startWordOffset && documentWordIndex < endWordOffset,
+  )
+
+  if (!activePage) {
+    return defaultWindowStart
+  }
+
+  const pageScopeStartWordIndex = Math.max(0, activePage.startWordOffset - scope.startWordOffset)
+  const pageRelativeWordIndex = normalizedWordIndex - pageScopeStartWordIndex
+
+  if (pageRelativeWordIndex >= 0 && pageRelativeWordIndex < activeWindowWords) {
+    return pageScopeStartWordIndex
+  }
+
+  return defaultWindowStart
 }
 
 function buildVirtualDocumentPage(document: DocumentRecord): DocumentPageRecord {

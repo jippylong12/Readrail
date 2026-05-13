@@ -108,17 +108,77 @@ describe('reader content windows', () => {
     expect(model.shouldAdvanceWindow(1000, firstWindow)).toBe(true)
 
     const nextWindow = model.getNextWindow(firstWindow)
-    expect(nextWindow.startWordIndex).toBe(1000)
+    expect(nextWindow.startWordIndex).toBe(800)
     expect(nextWindow.endWordIndex).toBe(1305)
     expect(nextWindow.isAtEnd).toBe(true)
+    expect(nextWindow.content).toContain('w800')
 
     const endWindow = model.getWindowForWord(1200)
-    expect(endWindow.startWordIndex).toBe(1000)
+    expect(endWindow.startWordIndex).toBe(800)
     expect(endWindow.endWordIndex).toBe(1305)
     expect(endWindow.pageIds).toEqual(['page-3'])
-    expect(endWindow.content).toContain('w1000')
+    expect(endWindow.content).toContain('w800')
     expect(endWindow.content).toContain('w1304')
     expect(endWindow.isAtEnd).toBe(true)
+  })
+
+  it('aligns automatic windows to source page starts when the active page fits in a window', () => {
+    const chapter = buildChapter('chapter-1', 'All pages', 0)
+    const pageTexts = [
+      words('page1word', 420),
+      words('page2word', 380),
+      [
+        'During that time she had fewer opportunities to obtain food.',
+        words('page3middle', 170),
+        'elephant societies are controlled by strong networks of cooperative females, while the self-centred males are pushed aside.',
+        words('page3tail', 140),
+      ].join(' '),
+      words('page4word', 420),
+    ]
+    const document = buildDocument(pageTexts.map((text) => ({ text })))
+    const pages = pageTexts.map((text, index) =>
+      buildPage(`page-${index + 1}`, chapter.id, index + 1, index, text, index + 1),
+    )
+    const model = buildReaderContentModel(document, [chapter], pages, { scopeType: 'document' })
+    const activeWordIndex = 1_000
+
+    const activeWindow = model.getWindowForWord(activeWordIndex)
+
+    expect(activeWindow.startWordIndex).toBe(800)
+    expect(activeWindow.pageIds).toContain('page-3')
+    expect(activeWindow.content).toContain('During that time she had fewer opportunities')
+    expect(activeWindow.content).toContain('elephant societies are controlled by strong networks')
+  })
+
+  it('uses actual page text length instead of stale stored page word counts for windows', () => {
+    const chapter = buildChapter('chapter-1', 'All pages', 0)
+    const pageTexts = [
+      words('page1word', 420),
+      words('page2word', 380),
+      [
+        'During that time she had fewer opportunities to obtain food.',
+        words('page3middle', 170),
+        'elephant societies are controlled by strong networks of cooperative females, while the self-centred males are pushed aside.',
+        words('page3tail', 140),
+      ].join(' '),
+      words('page4word', 420),
+    ]
+    const document = buildDocument(pageTexts.map((text) => ({ text })))
+    const pages = pageTexts.map((text, index) =>
+      buildPage(`page-${index + 1}`, chapter.id, index + 1, index, text, index + 1),
+    )
+    const pagesWithStaleCounts = pages.map((page) =>
+      page.id === 'page-3' ? { ...page, wordCount: 6 } : page,
+    )
+
+    const model = buildReaderContentModel(document, [chapter], pagesWithStaleCounts, { scopeType: 'document' })
+    const activeWindow = model.getWindowForWord(1_000)
+
+    expect(model.wordCount).toBe(document.wordCount)
+    expect(activeWindow.startWordIndex).toBe(800)
+    expect(activeWindow.content).toContain('During that time she had fewer opportunities')
+    expect(activeWindow.content).toContain('elephant societies are controlled by strong networks')
+    expect(activeWindow.content).toContain('page3tail139')
   })
 
   it('preserves chapter metadata and document-level offsets inside chapter windows', () => {
