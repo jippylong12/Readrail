@@ -94,11 +94,21 @@ export type OcrFileInput = {
 
 export type OcrStageState = OcrPipelineProgress['status'] | 'pending'
 
+export type OcrRuntimeItemProgress = {
+  itemId: string
+  progressState: Record<OcrPipelineStage, OcrStageState>
+  message: string
+  startedAt: string | null
+  completedAt: string | null
+  failureMessage: string | null
+}
+
 export type OcrRuntimeJobState = {
   jobId: string
   filesByItemId: Record<string, File>
   progressMessage: string
   progressState: Record<OcrPipelineStage, OcrStageState>
+  itemProgressById: Record<string, OcrRuntimeItemProgress>
   titleGuess: string | null
   documentTitle: string
   error: string | null
@@ -110,6 +120,7 @@ type StartOcrJobInput = {
   targetChapterId: string | null
   loadApiKey: () => Promise<string | null>
   stripImageMetadataBeforeOcr: boolean
+  concurrentItemLimit: number
 }
 
 type RetryOcrJobItemInput = {
@@ -246,11 +257,15 @@ const defaultSettings: AppSettings = {
   ocr: {
     modelId: 'gemini-3.1-flash-lite',
     preservePageBreaks: true,
+    concurrentItemLimit: 10,
   },
 }
 
 const OCR_PROMPT_VERSION = 'structured-import-v1'
 const OCR_MODEL_ID = 'gemini-3.1-flash-lite'
+export const OCR_CONCURRENT_ITEM_LIMIT_MIN = 1
+export const OCR_CONCURRENT_ITEM_LIMIT_MAX = 25
+export const OCR_CONCURRENT_ITEM_LIMIT_DEFAULT = 10
 const OCR_INTERRUPTED_MESSAGE = 'OCR was interrupted while the app was closed. Replace the file to retry or skip this item.'
 
 export const OCR_PROGRESS_STEPS: Array<{ stage: OcrPipelineStage; label: string }> = [
@@ -635,10 +650,12 @@ function createOcrJobRecords(
   fileInputs: OcrFileInput[],
   documentId: string | null,
   targetChapterId: string | null,
+  concurrentItemLimit: number,
 ): { job: OcrJob; items: OcrJobItem[]; filesByItemId: Record<string, File> } {
   const now = new Date().toISOString()
   const jobId = crypto.randomUUID()
   const filesByItemId: Record<string, File> = {}
+  const normalizedConcurrentItemLimit = normalizeOcrConcurrentItemLimit(concurrentItemLimit)
   const items = fileInputs.map((input, index) => {
     const itemId = crypto.randomUUID()
     filesByItemId[itemId] = input.file
@@ -668,6 +685,7 @@ function createOcrJobRecords(
       documentId,
       targetChapterId,
       status: 'queued',
+      concurrentItemLimit: normalizedConcurrentItemLimit,
       modelId: OCR_MODEL_ID,
       inputFileCount: fileInputs.length,
       promptVersion: OCR_PROMPT_VERSION,
@@ -706,6 +724,7 @@ function setOcrRuntimeState(jobId: string, updates: Partial<OcrRuntimeJobState>)
         filesByItemId: {},
         progressMessage: '',
         progressState: { ...initialOcrProgressState },
+        itemProgressById: {},
         titleGuess: null,
         documentTitle: '',
         error: null,
@@ -719,6 +738,47 @@ function setOcrRuntimeState(jobId: string, updates: Partial<OcrRuntimeJobState>)
           ...updates,
           progressState: updates.progressState ?? currentRuntime.progressState,
           filesByItemId: updates.filesByItemId ?? currentRuntime.filesByItemId,
+          itemProgressById: updates.itemProgressById ?? currentRuntime.itemProgressById,
+        },
+      },
+    }
+  })
+}
+
+function setOcrRuntimeItemProgress(
+  jobId: string,
+  itemId: string,
+  updates: Partial<OcrRuntimeItemProgress>,
+): void {
+  useAppStore.setState((state) => {
+    const currentRuntime =
+      state.ocrRuntimeJobs[jobId] ??
+      ({
+        jobId,
+        filesByItemId: {},
+        progressMessage: '',
+        progressState: { ...initialOcrProgressState },
+        itemProgressById: {},
+        titleGuess: null,
+        documentTitle: '',
+        error: null,
+      } satisfies OcrRuntimeJobState)
+    const currentItemProgress = currentRuntime.itemProgressById[itemId] ?? buildInitialOcrItemProgress(itemId)
+    const nextItemProgress: OcrRuntimeItemProgress = {
+      ...currentItemProgress,
+      ...updates,
+      progressState: updates.progressState ?? currentItemProgress.progressState,
+    }
+
+    return {
+      ocrRuntimeJobs: {
+        ...state.ocrRuntimeJobs,
+        [jobId]: {
+          ...currentRuntime,
+          itemProgressById: {
+            ...currentRuntime.itemProgressById,
+            [itemId]: nextItemProgress,
+          },
         },
       },
     }
@@ -732,22 +792,12 @@ async function runOcrJob(jobId: string, input: RetryOcrJobItemInput): Promise<vo
       throw new Error('Add a Gemini API key in Settings before running OCR.')
     }
 
-    let snapshot = getOcrJobSnapshot(jobId)
+    const snapshot = getOcrJobSnapshot(jobId)
     if (!snapshot) {
       return
     }
 
-    for (const item of snapshot.items) {
-      if (item.status !== 'queued') {
-        continue
-      }
-      await processOcrJobItem(jobId, item.id, apiKey, input.stripImageMetadataBeforeOcr)
-      snapshot = getOcrJobSnapshot(jobId)
-      if (!snapshot) {
-        return
-      }
-    }
-
+    await runQueuedOcrJobItems(jobId, apiKey, input.stripImageMetadataBeforeOcr, snapshot.job.concurrentItemLimit)
     finalizeOcrJob(jobId)
   } catch (error) {
     const message = formatOcrErrorMessage(error)
@@ -770,6 +820,41 @@ async function runOcrJob(jobId: string, input: RetryOcrJobItemInput): Promise<vo
   }
 }
 
+async function runQueuedOcrJobItems(
+  jobId: string,
+  apiKey: string,
+  shouldStripImageMetadata: boolean,
+  concurrentItemLimit: number,
+  itemIds?: string[],
+): Promise<void> {
+  const snapshot = getOcrJobSnapshot(jobId)
+  if (!snapshot) {
+    return
+  }
+
+  const itemIdFilter = itemIds ? new Set(itemIds) : null
+  const queuedItemIds = snapshot.items
+    .filter((item) => item.status === 'queued' && (!itemIdFilter || itemIdFilter.has(item.id)))
+    .map((item) => item.id)
+  const workerCount = Math.min(normalizeOcrConcurrentItemLimit(concurrentItemLimit), queuedItemIds.length)
+  setOcrRuntimeState(jobId, {
+    error: null,
+    progressMessage: formatOcrQueueProgressMessage(snapshot.items),
+    progressState: { ...initialOcrProgressState },
+  })
+
+  let nextIndex = 0
+  const processNextItem = async (): Promise<void> => {
+    while (nextIndex < queuedItemIds.length) {
+      const itemId = queuedItemIds[nextIndex]
+      nextIndex += 1
+      await processOcrJobItem(jobId, itemId, apiKey, shouldStripImageMetadata)
+    }
+  }
+
+  await Promise.all(Array.from({ length: workerCount }, () => processNextItem()))
+}
+
 async function processOcrJobItem(
   jobId: string,
   itemId: string,
@@ -783,6 +868,9 @@ async function processOcrJobItem(
   const activeFile = runtime?.filesByItemId[itemId]
   if (!snapshot || !activeItem || !activeFile) {
     markOcrItemFailed(jobId, itemId, 'Replace the source file before retrying this OCR item.')
+    return
+  }
+  if (activeItem.status !== 'queued') {
     return
   }
 
@@ -803,10 +891,15 @@ async function processOcrJobItem(
     ),
   )
 
-  const itemProgressPrefix = `Processing item ${activeItem.orderIndex + 1} of ${snapshot.items.length}`
   setOcrRuntimeState(jobId, {
     error: null,
-    progressMessage: `${itemProgressPrefix}.`,
+    progressMessage: formatOcrQueueProgressMessage(getOcrJobSnapshot(jobId)?.items ?? snapshot.items),
+  })
+  setOcrRuntimeItemProgress(jobId, itemId, {
+    message: 'Preparing OCR.',
+    startedAt,
+    completedAt: null,
+    failureMessage: null,
     progressState: { ...initialOcrProgressState },
   })
 
@@ -822,14 +915,21 @@ async function processOcrJobItem(
       recordUsage: (lineItem) => {
         useAppStore.getState().createAiUsageLineItem(lineItem)
       },
-      onProgress: (progress) =>
-        setOcrRuntimeState(jobId, {
-          progressMessage: `${itemProgressPrefix}: ${progress.message}`,
+      onProgress: (progress) => {
+        const currentProgressState =
+          useAppStore.getState().ocrRuntimeJobs[jobId]?.itemProgressById[itemId]?.progressState ?? initialOcrProgressState
+        setOcrRuntimeItemProgress(jobId, itemId, {
+          message: progress.message,
           progressState: {
-            ...(useAppStore.getState().ocrRuntimeJobs[jobId]?.progressState ?? initialOcrProgressState),
+            ...currentProgressState,
             [progress.stage]: progress.status,
           },
-        }),
+          failureMessage: progress.status === 'failed' ? progress.message : null,
+        })
+        setOcrRuntimeState(jobId, {
+          progressMessage: formatOcrQueueProgressMessage(getOcrJobSnapshot(jobId)?.items ?? snapshot.items),
+        })
+      },
     })
     const selectedFile = preparedFiles.files[0] ?? activeFile
     const finishedAt = new Date().toISOString()
@@ -867,9 +967,24 @@ async function processOcrJobItem(
     setOcrRuntimeState(jobId, {
       titleGuess: nextRuntime?.titleGuess ?? result.titleGuess,
       documentTitle: nextRuntime?.documentTitle || inferredTitle,
+      progressMessage: formatOcrQueueProgressMessage(getOcrJobSnapshot(jobId)?.items ?? nextSnapshot.items),
+    })
+    setOcrRuntimeItemProgress(jobId, itemId, {
+      message: 'Ready for review.',
+      completedAt: finishedAt,
+      failureMessage: null,
     })
   } catch (error) {
-    markOcrItemFailed(jobId, itemId, formatOcrErrorMessage(error))
+    const failureMessage = formatOcrErrorMessage(error)
+    markOcrItemFailed(jobId, itemId, failureMessage)
+    setOcrRuntimeItemProgress(jobId, itemId, {
+      message: failureMessage,
+      completedAt: new Date().toISOString(),
+      failureMessage,
+    })
+    setOcrRuntimeState(jobId, {
+      progressMessage: formatOcrQueueProgressMessage(getOcrJobSnapshot(jobId)?.items ?? snapshot.items),
+    })
   }
 }
 
@@ -927,6 +1042,41 @@ function finalizeOcrJob(jobId: string): void {
   })
 }
 
+function formatOcrQueueProgressMessage(items: OcrJobItem[]): string {
+  const processedCount = items.filter((item) => item.status === 'review' || item.status === 'failed' || item.status === 'skipped').length
+  const runningCount = items.filter((item) => item.status === 'running').length
+  const queuedCount = items.filter((item) => item.status === 'queued').length
+  const totalCount = items.length
+  if (processedCount >= totalCount && totalCount > 0) {
+    return 'OCR queue finished.'
+  }
+  return totalCount > 0
+    ? `${processedCount} of ${totalCount} complete · ${runningCount} running · ${queuedCount} queued`
+    : 'Preparing OCR queue.'
+}
+
+function buildInitialOcrItemProgress(itemId: string): OcrRuntimeItemProgress {
+  return {
+    itemId,
+    progressState: { ...initialOcrProgressState },
+    message: 'Queued.',
+    startedAt: null,
+    completedAt: null,
+    failureMessage: null,
+  }
+}
+
+function buildInitialOcrItemProgressById(items: OcrJobItem[]): Record<string, OcrRuntimeItemProgress> {
+  return Object.fromEntries(items.map((item) => [item.id, buildInitialOcrItemProgress(item.id)]))
+}
+
+function normalizeOcrConcurrentItemLimit(value: unknown): number {
+  return Math.min(
+    OCR_CONCURRENT_ITEM_LIMIT_MAX,
+    Math.max(OCR_CONCURRENT_ITEM_LIMIT_MIN, Math.round(typeof value === 'number' && Number.isFinite(value) ? value : OCR_CONCURRENT_ITEM_LIMIT_DEFAULT)),
+  )
+}
+
 async function retryOcrJobItemInBackground(jobId: string, itemId: string, input: RetryOcrJobItemInput): Promise<void> {
   try {
     const apiKey = await input.loadApiKey()
@@ -947,7 +1097,14 @@ async function retryOcrJobItemInBackground(jobId: string, itemId: string, input:
           : item,
       ),
     )
-    await processOcrJobItem(jobId, itemId, apiKey, input.stripImageMetadataBeforeOcr)
+    setOcrRuntimeItemProgress(jobId, itemId, {
+      message: 'Queued.',
+      startedAt: null,
+      completedAt: null,
+      failureMessage: null,
+      progressState: { ...initialOcrProgressState },
+    })
+    await runQueuedOcrJobItems(jobId, apiKey, input.stripImageMetadataBeforeOcr, 1, [itemId])
     finalizeOcrJob(jobId)
   } catch (error) {
     setOcrRuntimeState(jobId, { error: formatOcrErrorMessage(error), progressMessage: formatOcrErrorMessage(error) })
@@ -1242,17 +1399,16 @@ export const useAppStore = create<AppState>()(
           return null
         }
 
-        const records = createOcrJobRecords(input.files, input.documentId, input.targetChapterId)
+        const records = createOcrJobRecords(input.files, input.documentId, input.targetChapterId, input.concurrentItemLimit)
         set((state) => ({
           ocrRuntimeJobs: {
             ...state.ocrRuntimeJobs,
             [records.job.id]: {
               jobId: records.job.id,
               filesByItemId: records.filesByItemId,
-              progressMessage: input.stripImageMetadataBeforeOcr
-                ? 'Preparing images and removing metadata.'
-                : 'Preparing OCR.',
+              progressMessage: `0 of ${records.items.length} complete · 0 running · ${records.items.length} queued`,
               progressState: { ...initialOcrProgressState },
+              itemProgressById: buildInitialOcrItemProgressById(records.items),
               titleGuess: null,
               documentTitle: '',
               error: null,
@@ -2007,7 +2163,13 @@ export const useAppStore = create<AppState>()(
           settings: {
             reader: { ...state.settings.reader, ...settings.reader },
             privacy: { ...state.settings.privacy, ...settings.privacy },
-            ocr: { ...state.settings.ocr, ...settings.ocr },
+            ocr: {
+              ...state.settings.ocr,
+              ...settings.ocr,
+              concurrentItemLimit: normalizeOcrConcurrentItemLimit(
+                settings.ocr?.concurrentItemLimit ?? state.settings.ocr.concurrentItemLimit,
+              ),
+            },
           },
         }))
       },
@@ -2207,12 +2369,15 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: 'readrail-local-state',
-      version: 10,
+      version: 12,
       migrate: (persistedState: unknown, fromVersion: number) => {
         const state = persistedState as Record<string, unknown>
         const settings = state.settings as AppSettings | undefined
         if (settings?.privacy && settings.privacy.stripImageMetadataBeforeOcr === undefined) {
           settings.privacy.stripImageMetadataBeforeOcr = defaultSettings.privacy.stripImageMetadataBeforeOcr
+        }
+        if (settings?.ocr && settings.ocr.concurrentItemLimit === undefined) {
+          settings.ocr.concurrentItemLimit = defaultSettings.ocr.concurrentItemLimit
         }
         // v1 → v2: seed defaultPageLayout for existing users
         if (fromVersion < 2) {
@@ -2279,6 +2444,24 @@ export const useAppStore = create<AppState>()(
           const reader = settings?.reader
           const fallbackWpm = reader?.defaultWpm ?? defaultSettings.reader.defaultWpm
           state.coaching = normalizeCoachingState(state.coaching as Partial<CoachingState> | undefined, fallbackWpm)
+        }
+        // v10 -> v12: seed OCR concurrency for settings and historical OCR jobs.
+        if (fromVersion < 11) {
+          const jobs = (state.ocrJobs as OcrJob[] | undefined) ?? []
+          state.ocrJobs = jobs.map((job) => ({
+            ...job,
+            concurrentItemLimit: job.concurrentItemLimit ?? defaultSettings.ocr.concurrentItemLimit,
+          }))
+        }
+        if (fromVersion < 12) {
+          if (settings?.ocr) {
+            settings.ocr.concurrentItemLimit = normalizeOcrConcurrentItemLimit(settings.ocr.concurrentItemLimit)
+          }
+          const jobs = (state.ocrJobs as OcrJob[] | undefined) ?? []
+          state.ocrJobs = jobs.map((job) => ({
+            ...job,
+            concurrentItemLimit: normalizeOcrConcurrentItemLimit(job.concurrentItemLimit),
+          }))
         }
         return state
       },

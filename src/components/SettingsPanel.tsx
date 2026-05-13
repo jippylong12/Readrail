@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
+import { OCR_CONCURRENT_ITEM_LIMIT_MAX, OCR_CONCURRENT_ITEM_LIMIT_MIN } from '../app/store'
 import type { TourId } from '../app/tours'
 import type { AppSettings, BaselineAssessmentResult, PageLayout, ReaderMode, ThemeMode } from '../types/domain'
 import { isTauriRuntime } from '../lib/db/migrations'
@@ -178,6 +179,23 @@ export function SettingsPanel({
           </label>
           <p className="settings-note">
             Supported image files are re-encoded locally before Gemini OCR. PDFs and unsupported image formats are sent unchanged.
+          </p>
+          <label className="field">
+            OCR concurrency
+            <input
+              max={OCR_CONCURRENT_ITEM_LIMIT_MAX}
+              min={OCR_CONCURRENT_ITEM_LIMIT_MIN}
+              onChange={(event) =>
+                onSettingsChange({
+                  ocr: { ...settings.ocr, concurrentItemLimit: Number(event.target.value) },
+                })
+              }
+              type="number"
+              value={settings.ocr.concurrentItemLimit}
+            />
+          </label>
+          <p className="settings-note">
+            Higher values send more Gemini requests at once.
           </p>
           <button className="danger-button" onClick={onResetData} type="button">
             Delete local app data

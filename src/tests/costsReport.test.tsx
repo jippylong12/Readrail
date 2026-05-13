@@ -24,6 +24,7 @@ const ocrJob: OcrJob = {
   documentId: 'doc-1',
   targetChapterId: null,
   status: 'saved',
+  concurrentItemLimit: 10,
   modelId: 'gemini-3.1-flash-lite',
   inputFileCount: 1,
   promptVersion: 'v1',
@@ -94,7 +95,7 @@ describe('CostsReport', () => {
     expect(screen.getByText('Filtered to one OCR job.')).toBeTruthy()
     expect(screen.getByText('OCR cost bundles')).toBeTruthy()
 
-    await user.click(screen.getByRole('button', { name: /Show OCR job/ }))
+    await user.click(screen.getByRole('button', { name: /Show .*OCR job/ }))
 
     expect(screen.getByText('item-7')).toBeTruthy()
     expect(screen.getByText('scan.png')).toBeTruthy()
@@ -167,7 +168,7 @@ describe('CostsReport', () => {
     expect(screen.getByRole('heading', { name: 'OCR cost bundles' })).toBeTruthy()
     expect(screen.queryByText('scan,page.png')).toBeNull()
 
-    await user.click(screen.getByRole('button', { name: /Show OCR job/ }))
+    await user.click(screen.getByRole('button', { name: /Show .*OCR job/ }))
 
     expect(screen.getByText('1 OCR item')).toBeTruthy()
     expect(screen.getByText('3 AI transactions')).toBeTruthy()
@@ -188,13 +189,14 @@ describe('CostsReport', () => {
           buildLineItem({ id: 'usage-page-2-extract', ocrItemId: 'item-2', sourceFileName: 'page-2.png', stage: 'ocr_extraction' }),
           buildLineItem({ id: 'usage-page-2-clean', ocrItemId: 'item-2', sourceFileName: 'page-2.png', stage: 'ocr_cleaner' }),
         ]}
-        ocrJobs={[{ ...ocrJob, inputFileCount: 2 }]}
+        ocrJobs={[{ ...ocrJob, inputFileCount: 2, concurrentItemLimit: 25 }]}
       />,
     )
 
+    expect(screen.getAllByText(/OCR job, 25 at a time/).length).toBeGreaterThan(0)
     expect(screen.queryByText('page-1.png')).toBeNull()
 
-    await user.click(screen.getByRole('button', { name: /Show OCR job/ }))
+    await user.click(screen.getByRole('button', { name: /Show .*OCR job/ }))
 
     expect(screen.getByText('2 OCR items')).toBeTruthy()
     expect(screen.getByText('4 AI transactions')).toBeTruthy()

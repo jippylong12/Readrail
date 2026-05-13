@@ -551,7 +551,7 @@ function getOcrJobLabel(ocrJobId: string | null, ocrJobById: Map<string, OcrJob>
     return 'Unknown OCR job'
   }
 
-  return `OCR job ${formatDateTime(job.createdAt)}`
+  return `OCR job, ${job.concurrentItemLimit} at a time ${formatDateTime(job.createdAt)}`
 }
 
 function getOcrItemLabel(ocrItemId: string | null): string {

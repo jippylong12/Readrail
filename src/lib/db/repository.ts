@@ -246,13 +246,14 @@ export async function saveOcrJobToDatabase(job: OcrJob, items: OcrJobItem[]): Pr
 
   await database.execute(
     `INSERT INTO ocr_jobs (
-      id, document_id, target_chapter_id, status, model_id, input_file_count, prompt_version,
+      id, document_id, target_chapter_id, status, concurrent_item_limit, model_id, input_file_count, prompt_version,
       warnings_json, error_message, created_at, updated_at, completed_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
     ON CONFLICT(id) DO UPDATE SET
       document_id = excluded.document_id,
       target_chapter_id = excluded.target_chapter_id,
       status = excluded.status,
+      concurrent_item_limit = excluded.concurrent_item_limit,
       input_file_count = excluded.input_file_count,
       warnings_json = excluded.warnings_json,
       error_message = excluded.error_message,
@@ -263,6 +264,7 @@ export async function saveOcrJobToDatabase(job: OcrJob, items: OcrJobItem[]): Pr
       job.documentId,
       job.targetChapterId,
       job.status,
+      job.concurrentItemLimit,
       job.modelId,
       job.inputFileCount,
       job.promptVersion,
@@ -562,6 +564,7 @@ type OcrJobRow = {
   document_id: string | null
   target_chapter_id: string | null
   status: OcrJob['status']
+  concurrent_item_limit: number | null
   model_id: string
   input_file_count: number
   prompt_version: string
@@ -721,6 +724,7 @@ function ocrJobFromRow(row: OcrJobRow): OcrJob {
     documentId: row.document_id,
     targetChapterId: row.target_chapter_id,
     status: normalizeOcrJobStatus(row.status),
+    concurrentItemLimit: normalizeOcrConcurrentItemLimit(row.concurrent_item_limit),
     modelId: row.model_id,
     inputFileCount: normalizeNumber(row.input_file_count, 0),
     promptVersion: row.prompt_version,
@@ -866,6 +870,10 @@ function normalizeOcrJobStatus(status: string): OcrJob['status'] {
     return status
   }
   return 'cancelled'
+}
+
+function normalizeOcrConcurrentItemLimit(value: unknown): number {
+  return Math.min(25, Math.max(1, Math.round(normalizeNumber(value, 10))))
 }
 
 function normalizeOcrJobItemStatus(status: string): OcrJobItem['status'] {

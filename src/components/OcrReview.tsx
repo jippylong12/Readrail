@@ -9,9 +9,8 @@ import {
   useAppStore,
   type OcrFileInput,
   type OcrPageInput,
-  type OcrStageState,
+  type OcrRuntimeItemProgress,
 } from '../app/store'
-import type { OcrPipelineStage } from '../lib/ai/geminiOcr'
 import type {
   DocumentChapterRecord,
   DocumentRecord,
@@ -105,6 +104,7 @@ export function OcrReview({
   const ocrJobs = useAppStore((state) => state.ocrJobs)
   const ocrJobItems = useAppStore((state) => state.ocrJobItems)
   const ocrRuntimeJobs = useAppStore((state) => state.ocrRuntimeJobs)
+  const ocrConcurrentItemLimit = useAppStore((state) => state.settings.ocr.concurrentItemLimit)
   const startOcrJob = useAppStore((state) => state.startOcrJob)
   const retryOcrJobItem = useAppStore((state) => state.retryOcrJobItem)
   const replaceOcrJobItemFile = useAppStore((state) => state.replaceOcrJobItemFile)
@@ -180,9 +180,12 @@ export function OcrReview({
     [pagesForSave, preservePageBreaks],
   )
   const canSavePages = totalWords > 0 && !hasBlockingItems && !hasUnapprovedPages
-  const progressState = runtimeJob?.progressState ?? deriveProgressState(activeJob, jobItems)
   const progressMessage = runtimeJob?.progressMessage || formatJobProgressMessage(activeJob)
-  const progressPercent = calculateProgressPercent(activeJob?.status ?? 'idle', jobItems, progressState)
+  const itemProgressById = runtimeJob?.itemProgressById ?? {}
+  const progressPercent = calculateProgressPercent(activeJob?.status ?? 'idle', jobItems, itemProgressById)
+  const progressSummary = summarizeOcrProgress(jobItems)
+  const progressSummaryText = formatOcrProgressSummary(progressSummary)
+  const progressDetail = progressMessage && progressMessage !== progressSummaryText ? progressMessage : ''
   const isRunning = activeJob?.status === 'running' || jobItems.some((item) => item.status === 'queued' || item.status === 'running')
   const warnings = activeJob?.warnings ?? selectionWarnings
   const error = runtimeJob?.error ?? activeJob?.errorMessage ?? ''
@@ -210,6 +213,7 @@ export function OcrReview({
       targetChapterId: selectedAppendChapterIdBeforeJob,
       loadApiKey,
       stripImageMetadataBeforeOcr,
+      concurrentItemLimit: ocrConcurrentItemLimit,
     })
     if (!jobId) {
       return
@@ -535,13 +539,16 @@ export function OcrReview({
       {activeJob && (
         <div className="ocr-progress" aria-label="OCR progress">
           <div className="ocr-progress-header">
-            <strong>{progressMessage || 'Preparing OCR.'}</strong>
+            <div>
+              <strong>{progressSummaryText}</strong>
+              {progressDetail && <span>{progressDetail}</span>}
+            </div>
             {onOpenJobCosts && (
               <button className="ghost-button" onClick={() => onOpenJobCosts(activeJob.id)} type="button">
                 View job costs
               </button>
             )}
-            <span>{progressPercent}%</span>
+            <strong>{progressPercent}%</strong>
           </div>
           <div
             aria-valuemax={100}
@@ -552,12 +559,32 @@ export function OcrReview({
           >
             <span style={{ width: `${progressPercent}%` }} />
           </div>
-          <div className="ocr-progress-steps">
-            {OCR_PROGRESS_STEPS.map((step) => (
-              <span className={`ocr-progress-step ${progressState[step.stage]}`} key={step.stage}>
-                {step.label}: {formatStageStatus(progressState[step.stage])}
-              </span>
-            ))}
+          <div className="ocr-progress-table-wrap">
+            <table className="ocr-progress-table">
+              <thead>
+                <tr>
+                  <th>File</th>
+                  <th>Source</th>
+                  <th>Status</th>
+                  <th>Stage</th>
+                  <th>Message</th>
+                </tr>
+              </thead>
+              <tbody>
+                {jobItems.map((item) => {
+                  const itemProgress = itemProgressById[item.id]
+                  return (
+                    <tr key={item.id}>
+                      <td>{item.sourceFileName}</td>
+                      <td>{item.sourcePageNumber ?? item.orderIndex + 1}</td>
+                      <td>{formatItemStatus(item.status)}</td>
+                      <td>{formatItemProgressStage(item, itemProgress)}</td>
+                      <td>{formatItemProgressMessage(item, itemProgress)}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
           </div>
         </div>
       )}
@@ -981,7 +1008,7 @@ function buildReviewedPages(items: OcrJobItem[], preservePageBreaks: boolean): O
 function calculateProgressPercent(
   status: OcrJob['status'] | 'idle',
   items: OcrJobItem[],
-  progressState: Record<OcrPipelineStage, OcrStageState>,
+  itemProgressById: Record<string, OcrRuntimeItemProgress>,
 ): number {
   if (status === 'review' || status === 'saved') {
     return 100
@@ -990,25 +1017,70 @@ function calculateProgressPercent(
     return 0
   }
 
-  const completedItems = items.filter((item) => item.status === 'review' || item.status === 'failed' || item.status === 'skipped').length
-  const runningItem = items.some((item) => item.status === 'running') ? 1 : 0
-  const completedStages = OCR_PROGRESS_STEPS.filter(({ stage }) => ['done', 'failed'].includes(progressState[stage])).length
-  const runningProgress = runningItem ? completedStages / OCR_PROGRESS_STEPS.length : 0
-  return Math.round(((completedItems + runningProgress) / items.length) * 100)
+  const progressUnits = items.reduce((total, item) => total + calculateItemProgressUnit(item, itemProgressById[item.id]), 0)
+  return Math.round((progressUnits / items.length) * 100)
 }
 
-function deriveProgressState(
-  job: OcrJob | null,
-  items: OcrJobItem[],
-): Record<OcrPipelineStage, OcrStageState> {
-  if (!job || !items.some((item) => item.status === 'running')) {
-    return { ...initialOcrProgressState }
+function calculateItemProgressUnit(item: OcrJobItem, progress: OcrRuntimeItemProgress | undefined): number {
+  if (item.status === 'review' || item.status === 'failed' || item.status === 'skipped') {
+    return 1
+  }
+  if (item.status !== 'running') {
+    return 0
   }
 
+  const progressState = progress?.progressState ?? initialOcrProgressState
+  const completedStages = OCR_PROGRESS_STEPS.filter(({ stage }) => ['done', 'failed'].includes(progressState[stage])).length
+  return completedStages / OCR_PROGRESS_STEPS.length
+}
+
+function summarizeOcrProgress(items: OcrJobItem[]): { complete: number; running: number; queued: number; total: number } {
   return {
-    ...initialOcrProgressState,
-    ocr: 'running',
+    complete: items.filter((item) => item.status === 'review' || item.status === 'failed' || item.status === 'skipped').length,
+    running: items.filter((item) => item.status === 'running').length,
+    queued: items.filter((item) => item.status === 'queued').length,
+    total: items.length,
   }
+}
+
+function formatOcrProgressSummary(summary: { complete: number; running: number; queued: number; total: number }): string {
+  return `${summary.complete} of ${summary.total} complete · ${summary.running} running · ${summary.queued} queued`
+}
+
+function formatItemProgressStage(item: OcrJobItem, progress: OcrRuntimeItemProgress | undefined): string {
+  if (item.status === 'queued') {
+    return 'Waiting'
+  }
+  if (item.status === 'review') {
+    return 'Ready'
+  }
+  if (item.status === 'failed') {
+    return 'Failed'
+  }
+  if (item.status === 'skipped') {
+    return 'Skipped'
+  }
+
+  const progressState = progress?.progressState ?? initialOcrProgressState
+  const runningStep = OCR_PROGRESS_STEPS.find(({ stage }) => progressState[stage] === 'running')
+  if (runningStep) {
+    return runningStep.label
+  }
+  const lastCompletedStep = [...OCR_PROGRESS_STEPS].reverse().find(({ stage }) => ['done', 'failed'].includes(progressState[stage]))
+  return lastCompletedStep ? lastCompletedStep.label : 'Starting'
+}
+
+function formatItemProgressMessage(item: OcrJobItem, progress: OcrRuntimeItemProgress | undefined): string {
+  if (progress?.message) {
+    return progress.message
+  }
+  if (item.status === 'queued') {
+    return 'Queued.'
+  }
+  if (item.status === 'review') {
+    return 'Ready for review.'
+  }
+  return item.failureReason ?? formatItemStatus(item.status)
 }
 
 function inferDocumentTitle(items: OcrJobItem[], fallbackDrafts: OcrFileDraft[]): string {
@@ -1062,20 +1134,6 @@ function renumberFileDraftsFromStart(drafts: OcrFileDraft[], firstPage: number):
 
 function pageKey(item: OcrJobItem, page: OcrJobItemPage): string {
   return `${item.id}:page:${page.pageNumber}`
-}
-
-function formatStageStatus(status: OcrStageState): string {
-  if (status === 'done') {
-    return 'done'
-  }
-  if (status === 'failed') {
-    return 'fallback'
-  }
-  if (status === 'running') {
-    return 'running'
-  }
-
-  return 'waiting'
 }
 
 function formatItemStatus(status: OcrJobItemStatus): string {

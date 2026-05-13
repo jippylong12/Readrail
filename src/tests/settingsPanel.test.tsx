@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SettingsPanel } from '../components/SettingsPanel'
@@ -13,6 +13,7 @@ const settings: AppSettings = {
   ocr: {
     modelId: 'gemini-3.1-flash-lite',
     preservePageBreaks: true,
+    concurrentItemLimit: 10,
   },
   privacy: {
     confirmRemoteOcrEachTime: true,
@@ -59,6 +60,31 @@ describe('SettingsPanel', () => {
     expect(screen.getByRole('option', { name: '4 panes' })).toBeTruthy()
     expect(onSettingsChange).toHaveBeenCalledWith({
       reader: expect.objectContaining({ defaultPageLayout: 4 }),
+    })
+  })
+
+  it('saves the selected OCR concurrency with direct rate-limit copy', () => {
+    const onSettingsChange = vi.fn()
+
+    render(
+      <SettingsPanel
+        baselineResult={null}
+        settings={settings}
+        onKeyStateChange={vi.fn()}
+        onOpenJourney={vi.fn()}
+        onReplayTour={vi.fn()}
+        onResetData={vi.fn()}
+        onResetTours={vi.fn()}
+        onSettingsChange={onSettingsChange}
+      />,
+    )
+
+    expect(screen.getByText('Higher values send more Gemini requests at once.')).toBeTruthy()
+
+    fireEvent.change(screen.getByLabelText('OCR concurrency'), { target: { value: '25' } })
+
+    expect(onSettingsChange).toHaveBeenCalledWith({
+      ocr: expect.objectContaining({ concurrentItemLimit: 25 }),
     })
   })
 })

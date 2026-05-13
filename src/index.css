@@ -634,18 +634,27 @@ h3 {
   padding: 10px;
 }
 
-.ocr-progress-header,
-.ocr-progress-steps {
+.ocr-progress-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
 }
 
-.ocr-progress-header span {
+.ocr-progress-header div {
+  display: grid;
+  gap: 2px;
+}
+
+.ocr-progress-header span,
+.ocr-progress-table td {
   color: var(--muted);
   font-size: 0.86rem;
-  font-weight: 800;
+}
+
+.ocr-progress-header > strong {
+  color: var(--muted);
+  font-size: 0.9rem;
 }
 
 .ocr-progress-bar {
@@ -663,34 +672,34 @@ h3 {
   transition: width 180ms ease;
 }
 
-.ocr-progress-steps {
-  flex-wrap: wrap;
-  justify-content: flex-start;
+.ocr-progress-table-wrap {
+  overflow-x: auto;
 }
 
-.ocr-progress-step {
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--surface);
-  color: var(--muted);
-  font-size: 0.8rem;
+.ocr-progress-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.86rem;
+}
+
+.ocr-progress-table th,
+.ocr-progress-table td {
+  border-bottom: 1px solid var(--line);
+  padding: 7px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.ocr-progress-table th {
+  color: var(--text);
+  font-size: 0.74rem;
   font-weight: 800;
-  padding: 4px 8px;
+  text-transform: uppercase;
 }
 
-.ocr-progress-step.running {
-  border-color: color-mix(in srgb, var(--primary) 45%, var(--line));
-  color: var(--primary);
-}
-
-.ocr-progress-step.done {
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
-  color: var(--accent);
-}
-
-.ocr-progress-step.failed {
-  border-color: color-mix(in srgb, var(--warning) 45%, var(--line));
-  color: var(--warning);
+.ocr-progress-table td:first-child {
+  color: var(--text);
+  font-weight: 700;
 }
 
 .ocr-job-status-list {
