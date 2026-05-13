@@ -265,6 +265,9 @@ describe('app section shortcuts', () => {
     expect(window.location.pathname).toBe('/costs')
     expect(window.location.search).toBe('?documentId=document-1')
     expect((screen.getByLabelText('Document') as HTMLSelectElement).value).toBe('document-1')
+
+    await user.click(screen.getByRole('button', { name: /Show OCR job/ }))
+
     expect(screen.getByText('scan.png')).toBeTruthy()
   })
 

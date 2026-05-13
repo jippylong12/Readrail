@@ -64,6 +64,41 @@ export type CostRollupRow = {
   currency: string | null
 }
 
+export type CostReportOcrItemBreakdown = {
+  key: string
+  ocrItemId: string | null
+  ocrItemLabel: string
+  sourceFileName: string
+  recordCount: number
+  failedCount: number
+  unknownCostCount: number
+  totalTokens: number
+  estimatedTotalCost: number
+  currency: string | null
+  lineItems: CostReportLineItem[]
+}
+
+export type CostReportOcrJobBundle = {
+  key: string
+  ocrJobId: string | null
+  ocrJobLabel: string
+  documentId: string | null
+  documentTitle: string
+  status: OcrJob['status'] | 'unknown'
+  startedAt: string
+  completedAt: string | null
+  itemCount: number
+  sourceCount: number
+  transactionCount: number
+  failedCount: number
+  unknownCostCount: number
+  totalTokens: number
+  estimatedTotalCost: number
+  currency: string | null
+  confidence: AiCostConfidence
+  items: CostReportOcrItemBreakdown[]
+}
+
 export type CostReportSummary = {
   recordCount: number
   failedCount: number
@@ -83,6 +118,7 @@ export type CostReport = {
     byModel: CostRollupRow[]
     byTimePeriod: CostRollupRow[]
   }
+  ocrJobBundles: CostReportOcrJobBundle[]
   lineItems: CostReportLineItem[]
 }
 
@@ -140,6 +176,7 @@ export function buildCostReport(input: CostReportInput): CostReport {
         label: getTimePeriodLabel(lineItem.startedAt, timePeriod),
       })),
     },
+    ocrJobBundles: buildOcrJobBundles(lineItems, ocrJobById),
     lineItems,
   }
 }
@@ -151,6 +188,7 @@ export function exportCostReportJson(report: CostReport): string {
       filters: report.filters,
       summary: report.summary,
       rollups: report.rollups,
+      ocrJobBundles: report.ocrJobBundles,
       lineItems: report.lineItems,
     },
     null,
@@ -341,6 +379,158 @@ function rollupRows(
     }
     return left.label.localeCompare(right.label)
   })
+}
+
+function buildOcrJobBundles(
+  rows: CostReportLineItem[],
+  ocrJobById: Map<string, OcrJob>,
+): CostReportOcrJobBundle[] {
+  const rowsByJob = new Map<string, CostReportLineItem[]>()
+  for (const row of rows) {
+    if (!isOcrStage(row.stage)) {
+      continue
+    }
+
+    const bundleKey = getOcrBundleKey(row)
+    rowsByJob.set(bundleKey, [...(rowsByJob.get(bundleKey) ?? []), row])
+  }
+
+  return [...rowsByJob.entries()]
+    .map(([bundleKey, jobRows]) => {
+      const ocrJobId = jobRows[0]?.ocrJobId ?? null
+      const job = ocrJobId ? ocrJobById.get(ocrJobId) : undefined
+      const summary = summarizeCostRows(jobRows)
+      const itemKeys = uniqueCount(jobRows.map((row) => row.ocrItemId ?? row.sourceFileName ?? row.id))
+      const sourceCount = uniqueCount(jobRows.map((row) => row.sourceFileName).filter((value) => value !== 'No source file'))
+      const sortedRows = [...jobRows].sort(compareByItemThenStage)
+      const startedAt = minIso(jobRows.map((row) => row.startedAt)) ?? job?.createdAt ?? ''
+
+      return {
+        key: bundleKey,
+        ocrJobId,
+        ocrJobLabel: getOcrBundleLabel(ocrJobId, jobRows, ocrJobById, startedAt),
+        documentId: job?.documentId ?? jobRows[0]?.documentId ?? null,
+        documentTitle: jobRows[0]?.documentTitle ?? 'Unknown document',
+        status: job?.status ?? 'unknown',
+        startedAt,
+        completedAt: maxIso(jobRows.map((row) => row.completedAt).filter((value): value is string => value !== null)) ?? job?.completedAt ?? null,
+        itemCount: itemKeys,
+        sourceCount,
+        transactionCount: jobRows.length,
+        failedCount: summary.failedCount,
+        unknownCostCount: summary.unknownCostCount,
+        totalTokens: summary.totalTokens,
+        estimatedTotalCost: summary.estimatedTotalCost,
+        currency: summary.currency,
+        confidence: summarizeConfidence(jobRows),
+        items: buildOcrItemBreakdowns(sortedRows),
+      } satisfies CostReportOcrJobBundle
+    })
+    .sort((left, right) => {
+      const dateCompare = right.startedAt.localeCompare(left.startedAt)
+      return dateCompare === 0 ? left.ocrJobLabel.localeCompare(right.ocrJobLabel) : dateCompare
+    })
+}
+
+function getOcrBundleKey(row: CostReportLineItem): string {
+  if (row.ocrJobId) {
+    return `job:${row.ocrJobId}`
+  }
+
+  return [
+    'legacy',
+    row.documentId ?? 'unattributed',
+    row.ocrItemId ?? row.sourceFileName ?? row.startedAt,
+  ].join(':')
+}
+
+function getOcrBundleLabel(
+  ocrJobId: string | null,
+  rows: CostReportLineItem[],
+  ocrJobById: Map<string, OcrJob>,
+  startedAt: string,
+): string {
+  if (ocrJobId) {
+    return rows[0]?.ocrJobLabel ?? getOcrJobLabel(ocrJobId, ocrJobById)
+  }
+
+  return `OCR bundle ${formatDateTime(startedAt)}`
+}
+
+function buildOcrItemBreakdowns(rows: CostReportLineItem[]): CostReportOcrItemBreakdown[] {
+  const grouped = new Map<string, CostReportLineItem[]>()
+  for (const row of rows) {
+    const key = row.ocrItemId ?? row.sourceFileName ?? row.id
+    grouped.set(key, [...(grouped.get(key) ?? []), row])
+  }
+
+  return [...grouped.entries()].map(([key, itemRows]) => {
+    const summary = summarizeCostRows(itemRows)
+    return {
+      key,
+      ocrItemId: itemRows[0]?.ocrItemId ?? null,
+      ocrItemLabel: itemRows[0]?.ocrItemLabel ?? 'No OCR item',
+      sourceFileName: itemRows[0]?.sourceFileName ?? 'No source file',
+      recordCount: itemRows.length,
+      failedCount: summary.failedCount,
+      unknownCostCount: summary.unknownCostCount,
+      totalTokens: summary.totalTokens,
+      estimatedTotalCost: summary.estimatedTotalCost,
+      currency: summary.currency,
+      lineItems: [...itemRows].sort(compareByItemThenStage),
+    } satisfies CostReportOcrItemBreakdown
+  })
+}
+
+function compareByItemThenStage(left: CostReportLineItem, right: CostReportLineItem): number {
+  const itemCompare = left.ocrItemLabel.localeCompare(right.ocrItemLabel)
+  if (itemCompare !== 0) {
+    return itemCompare
+  }
+
+  const stageCompare = getStageSortIndex(left.stage) - getStageSortIndex(right.stage)
+  if (stageCompare !== 0) {
+    return stageCompare
+  }
+
+  return left.startedAt.localeCompare(right.startedAt)
+}
+
+function getStageSortIndex(stage: AiUsageStage): number {
+  return STAGE_SORT_ORDER[stage] ?? Number.MAX_SAFE_INTEGER
+}
+
+const STAGE_SORT_ORDER: Record<AiUsageStage, number> = {
+  ocr_extraction: 0,
+  ocr_cleaner: 1,
+  ocr_formatter: 2,
+  generated_quiz: 3,
+}
+
+function isOcrStage(stage: AiUsageStage): boolean {
+  return stage === 'ocr_extraction' || stage === 'ocr_cleaner' || stage === 'ocr_formatter'
+}
+
+function summarizeConfidence(rows: CostReportLineItem[]): AiCostConfidence {
+  if (rows.some((row) => row.confidence === 'unknown')) {
+    return 'unknown'
+  }
+  if (rows.some((row) => row.confidence === 'estimated')) {
+    return 'estimated'
+  }
+  return 'exact'
+}
+
+function uniqueCount(values: Array<string | null>): number {
+  return new Set(values.filter((value): value is string => Boolean(value))).size
+}
+
+function minIso(values: string[]): string | null {
+  return values.reduce<string | null>((current, value) => (current === null || value < current ? value : current), null)
+}
+
+function maxIso(values: string[]): string | null {
+  return values.reduce<string | null>((current, value) => (current === null || value > current ? value : current), null)
 }
 
 function getDocumentLabel(documentId: string | null, documentById: Map<string, DocumentRecord>): string {

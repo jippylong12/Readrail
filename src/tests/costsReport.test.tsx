@@ -68,7 +68,7 @@ describe('CostsReport', () => {
       />,
     )
 
-    expect(screen.getByText('scan.png')).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'OCR cost bundles' })).toBeTruthy()
     expect(screen.getAllByText('Generated quiz').length).toBeGreaterThan(0)
 
     await user.selectOptions(screen.getByLabelText('Stage'), 'generated_quiz')
@@ -78,7 +78,8 @@ describe('CostsReport', () => {
     expect(screen.getAllByText('No OCR job').length).toBeGreaterThan(0)
   })
 
-  it('initializes document and OCR job drilldown filters from route state', () => {
+  it('initializes document and OCR job drilldown filters from route state', async () => {
+    const user = userEvent.setup()
     render(
       <CostsReport
         documents={[documentRecord]}
@@ -91,6 +92,10 @@ describe('CostsReport', () => {
     expect((screen.getByLabelText('Document') as HTMLSelectElement).value).toBe('doc-1')
     expect((screen.getByLabelText('OCR job') as HTMLSelectElement).value).toBe('job-1')
     expect(screen.getByText('Filtered to one OCR job.')).toBeTruthy()
+    expect(screen.getByText('OCR cost bundles')).toBeTruthy()
+
+    await user.click(screen.getByRole('button', { name: /Show OCR job/ }))
+
     expect(screen.getByText('item-7')).toBeTruthy()
     expect(screen.getByText('scan.png')).toBeTruthy()
   })
@@ -143,6 +148,97 @@ describe('CostsReport', () => {
 
     expect(screen.getByText('Unknown costs')).toBeTruthy()
     expect(screen.getAllByText('Unknown').length).toBeGreaterThan(0)
+  })
+
+  it('renders a one-item OCR job as an expandable bundle with transaction details', async () => {
+    const user = userEvent.setup()
+    render(
+      <CostsReport
+        documents={[documentRecord]}
+        lineItems={[
+          buildLineItem({ id: 'usage-extract', stage: 'ocr_extraction' }),
+          buildLineItem({ id: 'usage-clean', stage: 'ocr_cleaner', startedAt: '2026-05-10T12:02:00.000Z' }),
+          buildLineItem({ id: 'usage-format', stage: 'ocr_formatter', startedAt: '2026-05-10T12:03:00.000Z' }),
+        ]}
+        ocrJobs={[ocrJob]}
+      />,
+    )
+
+    expect(screen.getByRole('heading', { name: 'OCR cost bundles' })).toBeTruthy()
+    expect(screen.queryByText('scan,page.png')).toBeNull()
+
+    await user.click(screen.getByRole('button', { name: /Show OCR job/ }))
+
+    expect(screen.getByText('1 OCR item')).toBeTruthy()
+    expect(screen.getByText('3 AI transactions')).toBeTruthy()
+    expect(screen.getAllByText('OCR extraction').length).toBeGreaterThan(1)
+    expect(screen.getAllByText('OCR cleaner').length).toBeGreaterThan(1)
+    expect(screen.getAllByText('OCR formatter').length).toBeGreaterThan(1)
+    expect(screen.getAllByText('scan,page.png').length).toBeGreaterThan(0)
+  })
+
+  it('bundles multi-item OCR jobs while preserving each source transaction after expansion', async () => {
+    const user = userEvent.setup()
+    render(
+      <CostsReport
+        documents={[documentRecord]}
+        lineItems={[
+          buildLineItem({ id: 'usage-page-1-extract', ocrItemId: 'item-1', sourceFileName: 'page-1.png', stage: 'ocr_extraction' }),
+          buildLineItem({ id: 'usage-page-1-format', ocrItemId: 'item-1', sourceFileName: 'page-1.png', stage: 'ocr_formatter' }),
+          buildLineItem({ id: 'usage-page-2-extract', ocrItemId: 'item-2', sourceFileName: 'page-2.png', stage: 'ocr_extraction' }),
+          buildLineItem({ id: 'usage-page-2-clean', ocrItemId: 'item-2', sourceFileName: 'page-2.png', stage: 'ocr_cleaner' }),
+        ]}
+        ocrJobs={[{ ...ocrJob, inputFileCount: 2 }]}
+      />,
+    )
+
+    expect(screen.queryByText('page-1.png')).toBeNull()
+
+    await user.click(screen.getByRole('button', { name: /Show OCR job/ }))
+
+    expect(screen.getByText('2 OCR items')).toBeTruthy()
+    expect(screen.getByText('4 AI transactions')).toBeTruthy()
+    expect(screen.getAllByText('item-1').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('item-2').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('page-1.png').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('page-2.png').length).toBeGreaterThan(0)
+  })
+
+  it('shows legacy OCR usage without an OCR job id as bundles instead of main-page transactions', async () => {
+    const user = userEvent.setup()
+    render(
+      <CostsReport
+        documents={[documentRecord]}
+        lineItems={[
+          buildLineItem({
+            id: 'legacy-extract',
+            ocrJobId: null,
+            ocrItemId: 'legacy-item',
+            sourceFileName: 'legacy-scan.png',
+            stage: 'ocr_extraction',
+          }),
+          buildLineItem({
+            id: 'legacy-clean',
+            ocrJobId: null,
+            ocrItemId: 'legacy-item',
+            sourceFileName: 'legacy-scan.png',
+            stage: 'ocr_cleaner',
+          }),
+        ]}
+        ocrJobs={[]}
+      />,
+    )
+
+    expect(screen.getByRole('heading', { name: 'OCR cost bundles' })).toBeTruthy()
+    expect(screen.getByText(/OCR bundle/)).toBeTruthy()
+    expect(screen.queryByText('legacy-scan.png')).toBeNull()
+    expect(screen.queryByRole('heading', { name: 'Other usage records' })).toBeNull()
+
+    await user.click(screen.getByRole('button', { name: /Show OCR bundle/ }))
+
+    expect(screen.getByText('1 OCR item')).toBeTruthy()
+    expect(screen.getByText('2 AI transactions')).toBeTruthy()
+    expect(screen.getAllByText('legacy-scan.png').length).toBeGreaterThan(0)
   })
 })
 

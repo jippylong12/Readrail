@@ -1991,6 +1991,49 @@ h3 {
   min-width: 1200px;
 }
 
+.cost-bundle-table {
+  min-width: 1040px;
+}
+
+.cost-primary-text,
+.cost-secondary-text {
+  display: block;
+}
+
+.cost-primary-text {
+  font-weight: 800;
+}
+
+.cost-secondary-text {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.cost-breakdown-toggle {
+  min-width: 72px;
+  padding: 7px 10px;
+}
+
+.cost-breakdown-row td {
+  background: var(--surface-muted);
+  padding: 14px;
+}
+
+.cost-breakdown-content {
+  display: grid;
+  gap: 12px;
+}
+
+.cost-breakdown-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  color: var(--muted);
+  font-size: 0.86rem;
+  font-weight: 750;
+}
+
 .muted-text {
   color: var(--muted);
   font-size: 0.9rem;
