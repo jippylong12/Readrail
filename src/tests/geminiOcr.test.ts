@@ -194,6 +194,33 @@ describe('Gemini OCR normalization', () => {
     expect(result.pages[0].notes).toContain('Removed standalone page number')
   })
 
+  it('preserves bracketed image descriptions during local cleanup', () => {
+    const result = applyConservativeOcrCleanup({
+      titleGuess: 'Science text',
+      pages: [
+        {
+          pageNumber: 1,
+          sourcePageNumber: null,
+          text:
+            '42\n' +
+            '[Image description: A labeled diagram shows sunlight reaching a leaf and arrows moving toward roots.]\n\n' +
+            'The surrounding paragraph continues below the figure.',
+          uncertainSpans: [],
+          confidence: 0.9,
+          notes: null,
+          sourceFileName: 'scan.png',
+        },
+      ],
+      warnings: [],
+    })
+
+    expect(result.pages[0].sourcePageNumber).toBe(42)
+    expect(result.pages[0].text).toContain(
+      '[Image description: A labeled diagram shows sunlight reaching a leaf and arrows moving toward roots.]',
+    )
+    expect(result.pages[0].text).toContain('The surrounding paragraph continues below the figure.')
+  })
+
   it('formats line-wrapped OCR text into paragraphs without changing words', () => {
     expect(applyOcrFormattingFallback('First line\ncontinues here.\n\nSecond para has man-\ndarins.')).toBe(
       'First line continues here.\n\nSecond para has mandarins.',
@@ -204,6 +231,14 @@ describe('Gemini OCR normalization', () => {
     expect(applyOcrFormattingFallback('First line\\ncontinues here.\\n\\nSecond para has man-\\ndarins.')).toBe(
       'First line continues here.\n\nSecond para has mandarins.',
     )
+  })
+
+  it('keeps image descriptions readable when formatting OCR text', () => {
+    expect(
+      applyOcrFormattingFallback(
+        '[Image description: A chart compares reading speed\nbefore and after practice.]\n\nThe caption follows.',
+      ),
+    ).toBe('[Image description: A chart compares reading speed before and after practice.]\n\nThe caption follows.')
   })
 
   it('records OCR extraction, cleaner, and formatter usage with Gemini token metadata', async () => {
@@ -236,6 +271,15 @@ describe('Gemini OCR normalization', () => {
       'ocr_cleaner',
       'ocr_formatter',
     ])
+    const ocrPrompt = generateContent.mock.calls[0][0].contents[0].parts[0].text
+    const cleanupPrompt = generateContent.mock.calls[1][0].contents
+    const formatterPrompt = generateContent.mock.calls[2][0].contents
+    expect(ocrPrompt).toContain('[Image description: ...]')
+    expect(ocrPrompt).toContain('Preserve printed captions')
+    expect(ocrPrompt).toContain('Skip purely decorative marks')
+    expect(cleanupPrompt).toContain('Preserve bracketed accessibility descriptions')
+    expect(cleanupPrompt).toContain('[Image description: ...]')
+    expect(formatterPrompt).toContain('Preserve [Image description: ...] blocks')
     expect(recordUsage.mock.calls[0][0]).toMatchObject({
       documentId: 'doc-1',
       ocrJobId: 'job-1',
