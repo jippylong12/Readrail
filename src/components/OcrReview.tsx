@@ -109,6 +109,7 @@ export function OcrReview({
   const retryOcrJobItem = useAppStore((state) => state.retryOcrJobItem)
   const replaceOcrJobItemFile = useAppStore((state) => state.replaceOcrJobItemFile)
   const skipOcrJobItem = useAppStore((state) => state.skipOcrJobItem)
+  const approveAllOcrJobReviewPages = useAppStore((state) => state.approveAllOcrJobReviewPages)
   const updateOcrJobPage = useAppStore((state) => state.updateOcrJobPage)
   const markOcrJobSaved = useAppStore((state) => state.markOcrJobSaved)
   const setOcrJobDocumentTitle = useAppStore((state) => state.setOcrJobDocumentTitle)
@@ -165,6 +166,7 @@ export function OcrReview({
     ? reviewEntries.findIndex((entry) => entry.id === focusedReviewEntry.id)
     : -1
   const reviewSummary = useMemo(() => summarizeReviewEntries(reviewEntries), [reviewEntries])
+  const reviewablePageCount = useMemo(() => countReviewablePages(jobItems), [jobItems])
   const pagesForSave = useMemo(() => buildReviewedPages(jobItems, preservePageBreaks), [jobItems, preservePageBreaks])
   const hasBlockingItems = jobItems.some((item) => item.status === 'queued' || item.status === 'running' || item.status === 'failed')
   const hasUnapprovedPages = jobItems.some(
@@ -590,6 +592,15 @@ export function OcrReview({
                     </span>
                   ),
                 )}
+                {reviewablePageCount > 0 && (
+                  <button
+                    className="secondary-button ocr-accept-all-button"
+                    onClick={() => approveAllOcrJobReviewPages(activeJob.id)}
+                    type="button"
+                  >
+                    Accept all
+                  </button>
+                )}
               </div>
               <div className="ocr-review-strip" aria-label="OCR review pages">
                 {reviewEntries.map((entry, index) => (
@@ -930,6 +941,16 @@ function summarizeReviewEntries(entries: OcrReviewEntry[]): OcrReviewSummary {
       failed: 0,
     },
   )
+}
+
+function countReviewablePages(items: OcrJobItem[]): number {
+  return items
+    .filter((item) => item.status === 'review')
+    .reduce(
+      (total, item) =>
+        total + item.pages.filter((page) => page.reviewStatus !== 'reviewed' && page.reviewStatus !== 'skipped').length,
+      0,
+    )
 }
 
 function buildReviewedPages(items: OcrJobItem[], preservePageBreaks: boolean): OcrPageInput[] {

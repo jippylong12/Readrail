@@ -7,7 +7,7 @@ import { useAppStore } from '../app/store'
 import { runGeminiOcrFromFiles } from '../lib/ai/geminiOcr'
 import { stripImageMetadata } from '../lib/files/imageMetadata'
 import type { OcrResult } from '../lib/ai/geminiOcr'
-import type { DocumentChapterRecord, DocumentRecord, OcrJob, OcrJobItem } from '../types/domain'
+import type { DocumentChapterRecord, DocumentRecord, OcrJob, OcrJobItem, OcrJobItemPage } from '../types/domain'
 
 vi.mock('../lib/ai/geminiOcr', () => ({
   runGeminiOcrFromFiles: vi.fn(),
@@ -52,6 +52,64 @@ const existingChapters: DocumentChapterRecord[] = [
     updatedAt: existingDocument.updatedAt,
   },
 ]
+
+function createReviewJob(overrides: Partial<OcrJob> = {}): OcrJob {
+  const now = '2026-05-11T12:00:00.000Z'
+  return {
+    id: 'review-all-job',
+    documentId: null,
+    targetChapterId: null,
+    status: 'review',
+    modelId: 'gemini-3.1-flash-lite',
+    inputFileCount: 1,
+    promptVersion: 'structured-import-v1',
+    warnings: [],
+    errorMessage: null,
+    createdAt: now,
+    updatedAt: now,
+    completedAt: now,
+    ...overrides,
+  }
+}
+
+function createReviewPage(overrides: Partial<OcrJobItemPage> = {}): OcrJobItemPage {
+  return {
+    pageNumber: 1,
+    sourcePageNumber: 1,
+    title: null,
+    text: 'Review page text.',
+    reviewStatus: 'unreviewed',
+    ocrConfidence: null,
+    ocrNotes: null,
+    uncertainSpans: [],
+    sourceFileName: 'review-page.png',
+    sourceKind: 'image',
+    ...overrides,
+  }
+}
+
+function createReviewItem(overrides: Partial<OcrJobItem> = {}): OcrJobItem {
+  const now = '2026-05-11T12:00:00.000Z'
+  return {
+    id: 'review-all-item',
+    jobId: 'review-all-job',
+    orderIndex: 0,
+    sourceFileName: 'review-page.png',
+    sourceFileType: 'image/png',
+    sourceFileSize: 5,
+    sourceFileLastModified: 1,
+    sourcePageNumber: 1,
+    title: null,
+    status: 'review',
+    ocrText: 'Review page text.',
+    pages: [createReviewPage()],
+    warnings: [],
+    failureReason: null,
+    createdAt: now,
+    updatedAt: now,
+    ...overrides,
+  }
+}
 
 afterEach(() => {
   runGeminiOcrFromFilesMock.mockReset()
@@ -153,6 +211,108 @@ describe('OcrReview', () => {
     await user.click(screen.getByRole('button', { name: 'View job costs' }))
 
     expect(onOpenJobCosts).toHaveBeenCalledWith('job-costs')
+  })
+
+  it('reviews all pending OCR pages without changing failed, skipped, queued, or running items', async () => {
+    const user = userEvent.setup()
+    const job = createReviewJob({ id: 'mixed-review-job', inputFileCount: 5 })
+    const items: OcrJobItem[] = [
+      createReviewItem({
+        id: 'mixed-ready',
+        jobId: job.id,
+        orderIndex: 0,
+        pages: [
+          createReviewPage({ pageNumber: 1, reviewStatus: 'unreviewed', text: 'Unreviewed page.' }),
+          createReviewPage({ pageNumber: 2, sourcePageNumber: 2, reviewStatus: 'needs_attention', text: 'Attention page.' }),
+          createReviewPage({ pageNumber: 3, sourcePageNumber: 3, reviewStatus: 'skipped', text: 'Skipped page.' }),
+        ],
+      }),
+      createReviewItem({ id: 'mixed-failed', jobId: job.id, orderIndex: 1, status: 'failed', pages: [], failureReason: 'Unreadable.' }),
+      createReviewItem({ id: 'mixed-skipped', jobId: job.id, orderIndex: 2, status: 'skipped', pages: [] }),
+      createReviewItem({ id: 'mixed-queued', jobId: job.id, orderIndex: 3, status: 'queued', pages: [] }),
+      createReviewItem({ id: 'mixed-running', jobId: job.id, orderIndex: 4, status: 'running', pages: [] }),
+    ]
+    useAppStore.setState({ ocrJobs: [job], ocrJobItems: items, ocrRuntimeJobs: {} })
+
+    render(
+      <OcrReview
+        documents={[]}
+        hasKey
+        loadApiKey={vi.fn().mockResolvedValue('browser-key')}
+        onAppendPages={vi.fn()}
+        onCreateDocument={vi.fn()}
+        preservePageBreaks
+        stripImageMetadataBeforeOcr={false}
+      />,
+    )
+
+    expect(screen.getByText('Pending 2')).toBeTruthy()
+    expect(screen.getByText('Needs attention 2')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Accept all' }))
+
+    expect(screen.getByText('Pending 2')).toBeTruthy()
+    expect(screen.getByText('Approved 2')).toBeTruthy()
+    expect(screen.getByText('Needs attention 0')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Accept all' })).toBeNull()
+    expect(
+      useAppStore
+        .getState()
+        .ocrJobItems.filter((item) => item.jobId === job.id)
+        .sort((left, right) => left.orderIndex - right.orderIndex)
+        .map((item) => ({
+          id: item.id,
+          status: item.status,
+          pageStatuses: item.pages.map((page) => page.reviewStatus),
+        })),
+    ).toEqual([
+      { id: 'mixed-ready', status: 'review', pageStatuses: ['reviewed', 'reviewed', 'skipped'] },
+      { id: 'mixed-failed', status: 'failed', pageStatuses: [] },
+      { id: 'mixed-skipped', status: 'skipped', pageStatuses: [] },
+      { id: 'mixed-queued', status: 'queued', pageStatuses: [] },
+      { id: 'mixed-running', status: 'running', pageStatuses: [] },
+    ])
+  })
+
+  it('enables saving immediately after Review All approves the remaining reviewable pages', async () => {
+    const user = userEvent.setup()
+    const onCreateDocument = vi.fn()
+    const job = createReviewJob()
+    useAppStore.setState({
+      ocrJobs: [job],
+      ocrJobItems: [
+        createReviewItem({
+          jobId: job.id,
+          pages: [
+            createReviewPage({ pageNumber: 1, reviewStatus: 'unreviewed', text: 'First page.' }),
+            createReviewPage({ pageNumber: 2, sourcePageNumber: 2, reviewStatus: 'needs_attention', text: 'Second page.' }),
+          ],
+        }),
+      ],
+      ocrRuntimeJobs: {},
+    })
+
+    render(
+      <OcrReview
+        documents={[]}
+        hasKey
+        loadApiKey={vi.fn().mockResolvedValue('browser-key')}
+        onAppendPages={vi.fn()}
+        onCreateDocument={onCreateDocument}
+        preservePageBreaks
+        stripImageMetadataBeforeOcr={false}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: 'Create document from pages' })).toHaveProperty('disabled', true)
+    await user.click(screen.getByRole('button', { name: 'Accept all' }))
+
+    expect(screen.getByRole('button', { name: 'Create document from pages' })).toHaveProperty('disabled', false)
+    await user.click(screen.getByRole('button', { name: 'Create document from pages' }))
+
+    expect(onCreateDocument).toHaveBeenCalledWith('review-page', [
+      expect.objectContaining({ pageNumber: 1, text: 'First page.', reviewStatus: 'reviewed' }),
+      expect.objectContaining({ pageNumber: 2, text: 'Second page.', reviewStatus: 'reviewed' }),
+    ])
   })
 
   it('reviews OCR output as editable page items and saves a new structured document', async () => {

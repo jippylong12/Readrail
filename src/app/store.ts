@@ -190,6 +190,7 @@ type AppState = {
   retryOcrJobItem: (jobId: string, itemId: string, input: RetryOcrJobItemInput) => void
   replaceOcrJobItemFile: (jobId: string, itemId: string, file: File, input: RetryOcrJobItemInput) => void
   skipOcrJobItem: (jobId: string, itemId: string) => void
+  approveAllOcrJobReviewPages: (jobId: string) => void
   updateOcrJobPage: (jobId: string, itemId: string, pageNumber: number, updates: Partial<OcrJobItemPage>) => void
   markOcrJobSaved: (jobId: string) => void
   setOcrJobDocumentTitle: (jobId: string, title: string) => void
@@ -1320,6 +1321,37 @@ export const useAppStore = create<AppState>()(
           ),
         )
         finalizeOcrJob(jobId)
+      },
+      approveAllOcrJobReviewPages: (jobId) => {
+        const snapshot = getOcrJobSnapshot(jobId)
+        if (!snapshot) {
+          return
+        }
+        const updatedAt = new Date().toISOString()
+        let changed = false
+        const changedItems = snapshot.items.map((item) => {
+          if (item.status !== 'review') {
+            return item
+          }
+
+          let itemChanged = false
+          const pages = item.pages.map((page) => {
+            if (page.reviewStatus === 'reviewed' || page.reviewStatus === 'skipped') {
+              return page
+            }
+            itemChanged = true
+            changed = true
+            return { ...page, reviewStatus: 'reviewed' as const }
+          })
+
+          return itemChanged ? { ...item, pages, updatedAt } : item
+        })
+
+        if (!changed) {
+          return
+        }
+
+        useAppStore.getState().saveOcrJob({ ...snapshot.job, updatedAt }, changedItems)
       },
       updateOcrJobPage: (jobId, itemId, pageNumber, updates) => {
         const snapshot = getOcrJobSnapshot(jobId)

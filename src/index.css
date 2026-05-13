@@ -360,6 +360,15 @@ h3 {
   padding: 5px 8px;
 }
 
+.secondary-button.ocr-accept-all-button {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: white;
+  padding: 5px 12px;
+  font-size: 0.82rem;
+  line-height: 1.1;
+}
+
 .ocr-review-step {
   display: grid;
   min-width: 68px;
