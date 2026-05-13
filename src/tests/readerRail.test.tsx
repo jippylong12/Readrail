@@ -289,6 +289,112 @@ describe('ReaderRail focus mode', () => {
 })
 
 describe('ReaderRail virtual panes', () => {
+  it.each([
+    { chunkSize: 5, nextWord: 'viewportfitword5', selectedDurationMs: 1500, targetWpm: 200 },
+    { chunkSize: 6, nextWord: 'viewportfitword6', selectedDurationMs: 1200, targetWpm: 300 },
+  ])('uses the active WPM timing when chunk size is $chunkSize', async ({
+    chunkSize,
+    nextWord,
+    selectedDurationMs,
+    targetWpm,
+  }) => {
+    vi.useFakeTimers()
+    const { container } = renderLongReader({
+      defaultChunkSize: chunkSize,
+      defaultPageLayout: 1,
+      defaultWpm: 240,
+      wordCount: 14,
+    })
+
+    fireEvent.change(screen.getByLabelText('WPM'), { target: { value: targetWpm.toString() } })
+    fireEvent.click(screen.getByRole('button', { name: 'Play' }))
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(selectedDurationMs - 1)
+    })
+
+    expect(container.querySelector('.active-chunk')?.textContent).toContain('viewportfitword0')
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1)
+    })
+
+    expect(container.querySelector('.active-chunk')?.textContent).toContain(nextWord)
+  })
+
+  it('preserves non-default WPM and chunk size above 4 while pausing and resuming', async () => {
+    vi.useFakeTimers()
+    const longDocument = buildLongDocument(14)
+    const chapter = buildChapter(longDocument)
+    let latestSlot: ReaderResumeSlot | null = null
+
+    function ResumingReader() {
+      const [resumeMemory, setResumeMemory] = useState<ReaderResumeMemory>({})
+      const resumeSlot = resumeMemory.document
+      return (
+        <ReaderRail
+          baselineResult={null}
+          chapters={[chapter]}
+          defaultChunkSize={resumeSlot?.chunkSize ?? 4}
+          defaultMode={resumeSlot?.mode ?? 'rail'}
+          defaultPageLayout={resumeSlot?.pageLayout ?? 1}
+          defaultWpm={resumeSlot?.targetWpm ?? 240}
+          document={longDocument}
+          fontSize={20}
+          lineHeight={1.65}
+          pages={[buildPage(longDocument, chapter.id)]}
+          resumeMemory={resumeMemory}
+          scopeSelection={{ scopeType: 'document' }}
+          segmentStartWordIndex={resumeSlot?.segmentStartWordIndex ?? 0}
+          initialCursorWordIndex={resumeSlot?.cursorWordIndex ?? 0}
+          initialReadThroughWordIndex={resumeSlot?.readThroughWordIndex ?? 0}
+          onBackToLibrary={vi.fn()}
+          onSegmentReset={vi.fn()}
+          onSegmentStart={vi.fn()}
+          onResumeUpdate={(_documentId, slot) => {
+            latestSlot = buildResumeSlot({
+              ...slot,
+              scopeType: 'document',
+              updatedAt: slot.updatedAt ?? new Date().toISOString(),
+            })
+            setResumeMemory({ document: latestSlot })
+          }}
+          onScopeChange={vi.fn()}
+          onStartTest={vi.fn()}
+        />
+      )
+    }
+
+    const { container } = render(<ResumingReader />)
+
+    fireEvent.change(screen.getByLabelText('Chunk'), { target: { value: '6' } })
+    fireEvent.change(screen.getByLabelText('WPM'), { target: { value: '300' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Play' }))
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1200)
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Pause' }))
+
+    expect(screen.getByLabelText('Chunk')).toHaveProperty('value', '6')
+    expect(screen.getByLabelText('WPM')).toHaveProperty('value', '300')
+    expect(latestSlot).toMatchObject({
+      chunkSize: 6,
+      cursorWordIndex: 6,
+      readThroughWordIndex: 12,
+      targetWpm: 300,
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Play' }))
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1200)
+    })
+
+    expect(container.querySelector('.active-chunk')?.textContent).toContain('viewportfitword12')
+  })
+
   it('renders only the initial bounded content window for long documents', () => {
     const { container } = renderLongReader({ defaultPageLayout: 1, wordCount: 1_505 })
     const readingSurface = container.querySelector('.reading-surface')
@@ -334,6 +440,58 @@ describe('ReaderRail virtual panes', () => {
     expect(pane?.innerHTML).toContain('</button> </span><span')
   })
 
+  it('fills a sparse active reader pane with surrounding context', () => {
+    const paddingWord = 'contextpadding'.repeat(28)
+    const sparseDocument: DocumentRecord = {
+      ...documentRecord,
+      id: 'sparse-pane-document',
+      content: [
+        'During',
+        'that',
+        'time',
+        'she',
+        paddingWord,
+        paddingWord,
+        'elephant',
+        'societies',
+        'are',
+        'controlled',
+        'by',
+        'females',
+      ].join(' '),
+      wordCount: 12,
+    }
+    const chapter = buildChapter(sparseDocument)
+    const { container } = render(
+      <ReaderRail
+        baselineResult={null}
+        chapters={[chapter]}
+        defaultChunkSize={6}
+        defaultMode="rail"
+        defaultPageLayout={1}
+        defaultWpm={240}
+        document={sparseDocument}
+        fontSize={20}
+        initialCursorWordIndex={6}
+        lineHeight={1.65}
+        pages={[buildPage(sparseDocument, chapter.id)]}
+        scopeSelection={{ scopeType: 'document' }}
+        segmentStartWordIndex={0}
+        onBackToLibrary={vi.fn()}
+        onSegmentReset={vi.fn()}
+        onSegmentStart={vi.fn()}
+        onResumeUpdate={vi.fn()}
+        onScopeChange={vi.fn()}
+        onStartTest={vi.fn()}
+      />,
+    )
+
+    expect(container.querySelector('.page-panes')?.getAttribute('data-visible-chunk-start')).toBe('0')
+    expect(container.querySelector('.page-panes')?.getAttribute('data-visible-chunk-end')).toBe('1')
+    expect(container.querySelector('.page-pane')?.textContent).toContain('During that time she')
+    expect(container.querySelector('.page-pane')?.textContent).toContain('elephant societies are controlled')
+  })
+
   it('advances the content window after the active word leaves the current stream', async () => {
     const user = userEvent.setup()
     const { container } = renderLongReader({
@@ -354,6 +512,34 @@ describe('ReaderRail virtual panes', () => {
     expect(screen.queryByText(/viewportfitword0/)).toBeNull()
     expect(screen.queryByText(/viewportfitword999/)).toBeNull()
     expect(screen.getByText(/viewportfitword1000/)).toBeTruthy()
+  })
+
+  it('lets previous navigation return to an earlier content window after progress advances', async () => {
+    const user = userEvent.setup()
+    const { container } = renderLongReader({
+      defaultChunkSize: 500,
+      defaultPageLayout: 1,
+      defaultWpm: 120_000,
+      wordCount: 1_505,
+    })
+    const readingSurface = container.querySelector('.reading-surface')
+
+    expect(screen.getByRole('button', { name: 'Previous pane' })).toHaveProperty('disabled', true)
+
+    await user.click(screen.getByRole('button', { name: 'Play' }))
+
+    await waitFor(() => {
+      expect(readingSurface?.getAttribute('data-window-start')).toBe('1000')
+    }, { timeout: 1200 })
+
+    await user.click(screen.getByRole('button', { name: 'Pause' }))
+
+    expect(screen.getByRole('button', { name: 'Previous pane' })).toHaveProperty('disabled', false)
+
+    await user.click(screen.getByRole('button', { name: 'Previous pane' }))
+
+    expect(readingSurface?.getAttribute('data-window-start')).toBe('0')
+    expect(screen.getByText(/viewportfitword999/)).toBeTruthy()
   })
 
   it('renders selected pane counts as viewport panes instead of all source text columns', () => {
@@ -534,6 +720,49 @@ describe('ReaderRail virtual panes', () => {
     expect(onResumeUpdate).toHaveBeenLastCalledWith(longDocument.id, expect.objectContaining({
       cursorWordIndex: 1,
       segmentStartWordIndex: 0,
+    }))
+  })
+
+  it('updates displayed progress when selecting an earlier visible chunk', async () => {
+    const user = userEvent.setup()
+    const onResumeUpdate = vi.fn()
+    const longDocument = buildLongDocument(8)
+    const chapter = buildChapter(longDocument)
+    const { container } = render(
+      <ReaderRail
+        baselineResult={null}
+        chapters={[chapter]}
+        defaultChunkSize={1}
+        defaultMode="rail"
+        defaultPageLayout={1}
+        defaultWpm={900}
+        document={longDocument}
+        fontSize={20}
+        initialCursorWordIndex={4}
+        initialReadThroughWordIndex={4}
+        lineHeight={1.65}
+        pages={[buildPage(longDocument, chapter.id)]}
+        scopeSelection={{ scopeType: 'document' }}
+        segmentStartWordIndex={0}
+        onBackToLibrary={vi.fn()}
+        onSegmentReset={vi.fn()}
+        onSegmentStart={vi.fn()}
+        onResumeUpdate={onResumeUpdate}
+        onScopeChange={vi.fn()}
+        onStartTest={vi.fn()}
+      />,
+    )
+
+    expect(container.querySelector('.progress-track span')?.getAttribute('style')).toContain('63%')
+
+    await user.click(screen.getByRole('button', { name: 'Previous pane' }))
+    await user.click(screen.getByText(/viewportfitword3/))
+
+    expect(container.querySelector('.active-chunk')?.textContent).toContain('viewportfitword3')
+    expect(container.querySelector('.progress-track span')?.getAttribute('style')).toContain('50%')
+    expect(onResumeUpdate).toHaveBeenLastCalledWith(longDocument.id, expect.objectContaining({
+      cursorWordIndex: 3,
+      readThroughWordIndex: 3,
     }))
   })
 })

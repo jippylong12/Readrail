@@ -10,6 +10,7 @@ import {
   getOrderedDocumentPages,
   renderStructuredContent,
 } from './structuredDocuments'
+import { countWords } from '../lib/text/wordCount'
 
 export type ReaderScopeSelection = {
   scopeType: ReadingScopeType
@@ -184,7 +185,10 @@ function buildScopeFromPages({
   const selectedPages = pagesWithOffsets.map(({ page }) => page)
   const startWordOffset = pagesWithOffsets[0]?.startWordOffset ?? 0
   const endWordOffset = pagesWithOffsets[pagesWithOffsets.length - 1]?.endWordOffset ?? document.wordCount
-  const selectedWordCount = selectedPages.reduce((total, page) => total + page.wordCount, 0)
+  const selectedWordCount = pagesWithOffsets.reduce(
+    (total, { startWordOffset, endWordOffset }) => total + Math.max(0, endWordOffset - startWordOffset),
+    0,
+  )
 
   return {
     scopeType,
@@ -209,10 +213,14 @@ function buildPageOffsets(pages: DocumentPageRecord[]): OrderedPageWithOffset[] 
   let wordCursor = 0
   return pages.map((page) => {
     const startWordOffset = wordCursor
-    const endWordOffset = startWordOffset + page.wordCount
+    const endWordOffset = startWordOffset + getReadablePageWordCount(page)
     wordCursor = endWordOffset
     return { page, startWordOffset, endWordOffset }
   })
+}
+
+function getReadablePageWordCount(page: DocumentPageRecord): number {
+  return countWords(page.text)
 }
 
 function selectContiguousChapterPages(

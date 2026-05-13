@@ -14,6 +14,7 @@ import type {
 import { clampWpm, formatDuration } from '../lib/reading/pacing'
 import { cleanReadingText } from '../lib/text/cleanup'
 import {
+  buildFilledVisibleReaderPaneLayout,
   buildVirtualReaderPaneLayout,
   type ReaderPaneMetrics,
   type VirtualReaderPane,
@@ -162,10 +163,11 @@ export function ReaderRail({
     Math.min(readThroughWordIndex, activeScope?.wordCount ?? 0),
     activeChunk?.endWord ?? Math.min(cursorWordIndex, activeScope?.wordCount ?? 0),
   )
+  const progressWordIndex = activeChunk?.endWord ?? Math.min(cursorWordIndex, activeScope?.wordCount ?? 0)
   const untestedWordCount = Math.max(0, currentWordIndex - segmentStartWordIndex)
   const comprehensionSuggestionThresholdWords = getComprehensionSuggestionThresholdWords(targetWpm)
   const progress = activeScope?.wordCount
-    ? Math.round((Math.min(currentWordIndex, activeScope.wordCount) / activeScope.wordCount) * 100)
+    ? Math.round((Math.min(progressWordIndex, activeScope.wordCount) / activeScope.wordCount) * 100)
     : 0
   const cleanedDraftText = useMemo(
     () => cleanReadingText(draftText, { preservePageBreaks: true }),
@@ -191,21 +193,20 @@ export function ReaderRail({
     Math.min(manualVisiblePaneStartIndex ?? paneLayout.visibleStartPaneIndex, Math.max(0, paneLayout.panes.length - paneLayout.effectivePaneCount)),
   )
   const displayPaneLayout = useMemo<VirtualReaderPaneLayout<Chunk>>(
-    () => ({
-      ...paneLayout,
-      visiblePanes: paneLayout.panes.slice(visiblePaneStartIndex, visiblePaneStartIndex + paneLayout.effectivePaneCount),
-      visibleStartPaneIndex: visiblePaneStartIndex,
-    }),
-    [paneLayout, visiblePaneStartIndex],
+    () => buildFilledVisibleReaderPaneLayout(chunks, activeIndex, paneLayout, paneMetrics, visiblePaneStartIndex),
+    [activeIndex, chunks, paneLayout, paneMetrics, visiblePaneStartIndex],
   )
   const canGoPreviousPane = Boolean(
-    !isRunning && activeScope && activeWindow && visiblePaneStartIndex > 0,
+    !isRunning && activeScope && activeWindow && (visiblePaneStartIndex > 0 || activeWindow.startWordIndex > 0),
   )
   const canGoNextPane = Boolean(
     !isRunning
       && activeScope
       && activeWindow
-      && visiblePaneStartIndex + paneLayout.effectivePaneCount < paneLayout.panes.length,
+      && (
+        visiblePaneStartIndex + paneLayout.effectivePaneCount < paneLayout.panes.length
+        || !activeWindow.isAtEnd
+      ),
   )
 
   const scopeRuntimeStart = useMemo(() => {
@@ -298,6 +299,7 @@ export function ReaderRail({
     segmentStartWordIndex,
     targetWpm,
   ])
+  const rememberResumeRef = useRef(rememberResume)
 
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
@@ -316,6 +318,10 @@ export function ReaderRail({
     setSuggestion(null)
   }, [scopeRuntimeStart])
   /* eslint-enable react-hooks/set-state-in-effect */
+
+  useEffect(() => {
+    rememberResumeRef.current = rememberResume
+  }, [rememberResume])
 
   useEffect(() => {
     const element = readingSurfaceRef.current
@@ -365,7 +371,7 @@ export function ReaderRail({
       const nextWordIndex = Math.min(activeChunk.endWord, activeScope.wordCount)
       setCursorWordIndex(nextWordIndex)
       setReadThroughWordIndex(nextWordIndex)
-      rememberResume({ cursorWordIndex: nextWordIndex, readThroughWordIndex: nextWordIndex })
+      rememberResumeRef.current({ cursorWordIndex: nextWordIndex, readThroughWordIndex: nextWordIndex })
       if (nextWordIndex >= activeScope.wordCount) {
         setIsRunning(false)
         setHasStartedReading(true)
@@ -388,7 +394,6 @@ export function ReaderRail({
     activeWindow,
     comprehensionSuggestionThresholdWords,
     isRunning,
-    rememberResume,
     segmentStartWordIndex,
     targetWpm,
   ])
@@ -492,14 +497,14 @@ export function ReaderRail({
   function moveReaderCursor(wordIndex: number): void {
     const normalizedWordIndex = Math.max(0, Math.min(activeScope?.wordCount ?? 0, Math.round(wordIndex)))
     setCursorWordIndex(normalizedWordIndex)
-    setReadThroughWordIndex(Math.max(readThroughWordIndex, normalizedWordIndex))
+    setReadThroughWordIndex(normalizedWordIndex)
     setActiveWindowStartWordIndex(getWindowStartForWord(activeScope, normalizedWordIndex))
     setManualVisiblePaneStartIndex(null)
     setIsRunning(false)
     setSuggestion(null)
     rememberResume({
       cursorWordIndex: normalizedWordIndex,
-      readThroughWordIndex: Math.max(readThroughWordIndex, normalizedWordIndex),
+      readThroughWordIndex: normalizedWordIndex,
     })
   }
 
@@ -508,11 +513,28 @@ export function ReaderRail({
       return
     }
 
-    setManualVisiblePaneStartIndex(Math.max(0, visiblePaneStartIndex - paneLayout.effectivePaneCount))
+    if (visiblePaneStartIndex > 0) {
+      setManualVisiblePaneStartIndex(Math.max(0, visiblePaneStartIndex - paneLayout.effectivePaneCount))
+      return
+    }
+
+    const previousWindow = activeScope.getWindow(
+      Math.max(0, activeWindow.startWordIndex - activeScope.advanceThresholdWords),
+    )
+    setActiveWindowStartWordIndex(previousWindow.startWordIndex)
+    setManualVisiblePaneStartIndex(null)
   }
 
   function goToNextPane(): void {
     if (!activeScope || !activeWindow || isRunning) {
+      return
+    }
+
+    if (visiblePaneStartIndex + paneLayout.effectivePaneCount >= paneLayout.panes.length) {
+      if (!activeWindow.isAtEnd) {
+        setActiveWindowStartWordIndex(activeScope.getNextWindow(activeWindow).startWordIndex)
+        setManualVisiblePaneStartIndex(0)
+      }
       return
     }
 
@@ -1091,6 +1113,8 @@ function ReaderPaneLayout({ chunks, activeIndex, isCursorSelectionDisabled, onSe
       className="page-panes"
       data-effective-pane-count={paneLayout.effectivePaneCount}
       data-page-count={paneLayout.visiblePanes.length}
+      data-visible-chunk-end={paneLayout.visiblePanes.at(-1)?.endChunkIndex ?? 0}
+      data-visible-chunk-start={paneLayout.visiblePanes[0]?.startChunkIndex ?? 0}
       data-visible-pane-start={paneLayout.visibleStartPaneIndex}
       style={{ gridTemplateColumns: `repeat(${paneLayout.visiblePanes.length || 1}, minmax(0, 1fr))` }}
     >

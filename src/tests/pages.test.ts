@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildFilledVisibleReaderPaneLayout,
   buildVirtualReaderPaneLayout,
   getActiveVirtualPaneIndex,
   getEffectiveReaderPaneCount,
@@ -60,5 +61,46 @@ describe('buildVirtualReaderPaneLayout', () => {
     expect(layout.activePaneIndex).toBeGreaterThanOrEqual(4)
     expect(layout.visibleStartPaneIndex).toBe(getVisiblePaneStartIndex(layout.activePaneIndex, layout.panes.length, 2))
     expect(layout.visiblePanes.some((pane) => pane.startChunkIndex <= 5 && pane.endChunkIndex >= 5)).toBe(true)
+  })
+
+  it('fills a sparse active pane with nearby prior chunks', () => {
+    const sparseMetrics = {
+      containerHeight: 120,
+      containerWidth: 360,
+      fontSize: 20,
+      lineHeight: 1.5,
+      requestedPaneCount: 1,
+    }
+    const chunks: ReaderPaneChunk[] = [
+      {
+        id: 'setup-1',
+        text: 'During that time she had fewer opportunities to obtain food and required help from the group.',
+        startWord: 0,
+        endWord: 15,
+      },
+      {
+        id: 'setup-2',
+        text: 'Bonobo societies depend on cooperative networks.',
+        startWord: 15,
+        endWord: 21,
+      },
+      {
+        id: 'active',
+        text: 'elephant societies are controlled by females, while',
+        startWord: 21,
+        endWord: 28,
+      },
+    ]
+    const layout = buildVirtualReaderPaneLayout(chunks, 2, sparseMetrics)
+    const filledLayout = buildFilledVisibleReaderPaneLayout(
+      chunks,
+      2,
+      layout,
+      sparseMetrics,
+      layout.visibleStartPaneIndex,
+    )
+
+    expect(layout.visiblePanes[0]?.chunks.map((chunk) => chunk.id)).toEqual(['active'])
+    expect(filledLayout.visiblePanes[0]?.chunks.map((chunk) => chunk.id)).toEqual(['setup-2', 'active'])
   })
 })
