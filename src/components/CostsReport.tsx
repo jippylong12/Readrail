@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { Fragment, useMemo, useState } from 'react'
 import {
   AI_COST_CONFIDENCE_LABELS,
   AI_USAGE_STAGE_LABELS,
@@ -7,6 +7,8 @@ import {
   exportCostReportCsv,
   exportCostReportJson,
   type CostReportFilters,
+  type CostReportLineItem,
+  type CostReportOcrJobBundle,
   type CostReportTimePeriod,
   type CostRollupRow,
 } from '../lib/ai/costReport'
@@ -22,6 +24,15 @@ type CostsReportProps = {
 const STAGE_OPTIONS: AiUsageStage[] = ['ocr_extraction', 'ocr_cleaner', 'ocr_formatter', 'generated_quiz']
 const STATUS_OPTIONS: AiUsageStatus[] = ['running', 'succeeded', 'failed']
 const CONFIDENCE_OPTIONS: AiCostConfidence[] = ['estimated', 'unknown', 'exact']
+const OCR_JOB_STATUS_LABELS: Record<OcrJob['status'] | 'unknown', string> = {
+  cancelled: 'Cancelled',
+  failed: 'Failed',
+  queued: 'Queued',
+  review: 'Review',
+  running: 'Running',
+  saved: 'Saved',
+  unknown: 'Unknown',
+}
 
 export function CostsReport({ documents, initialFilters, lineItems, ocrJobs }: CostsReportProps) {
   const initialDocumentId = initialFilters?.documentId ?? ''
@@ -30,6 +41,7 @@ export function CostsReport({ documents, initialFilters, lineItems, ocrJobs }: C
     documentId: initialDocumentId,
     ocrJobId: initialOcrJobId,
   }))
+  const [expandedBundleIds, setExpandedBundleIds] = useState<Set<string>>(() => new Set())
   const [timePeriod, setTimePeriod] = useState<CostReportTimePeriod>('day')
   const report = useMemo(
     () => buildCostReport({ documents, filters, lineItems, ocrJobs, timePeriod }),
@@ -38,6 +50,11 @@ export function CostsReport({ documents, initialFilters, lineItems, ocrJobs }: C
   const documentOptions = useMemo(() => buildDocumentOptions(documents, lineItems), [documents, lineItems])
   const ocrJobOptions = useMemo(() => buildOcrJobOptions(ocrJobs, lineItems), [ocrJobs, lineItems])
   const modelOptions = useMemo(() => uniqueSorted(lineItems.map((lineItem) => lineItem.model)), [lineItems])
+  const bundledLineItemIds = useMemo(() => getBundledLineItemIds(report.ocrJobBundles), [report.ocrJobBundles])
+  const unbundledLineItems = useMemo(
+    () => report.lineItems.filter((lineItem) => !bundledLineItemIds.has(lineItem.id)),
+    [bundledLineItemIds, report.lineItems],
+  )
   const hasUsageRecords = lineItems.length > 0
 
   function updateFilter<Key extends keyof CostReportFilters>(key: Key, value: CostReportFilters[Key]): void {
@@ -57,6 +74,18 @@ export function CostsReport({ documents, initialFilters, lineItems, ocrJobs }: C
     anchor.download = `readrail-costs.${kind}`
     anchor.click()
     URL.revokeObjectURL(url)
+  }
+
+  function toggleBundle(bundleKey: string): void {
+    setExpandedBundleIds((current) => {
+      const next = new Set(current)
+      if (next.has(bundleKey)) {
+        next.delete(bundleKey)
+      } else {
+        next.add(bundleKey)
+      }
+      return next
+    })
   }
 
   return (
@@ -210,57 +239,150 @@ export function CostsReport({ documents, initialFilters, lineItems, ocrJobs }: C
             </section>
           </div>
 
-          <section className="recent-sessions">
-            <div className="panel-header compact" data-tour="cost-line-items">
-              <div>
-                <span className="eyebrow">Line items</span>
-                <h2>Filtered usage records</h2>
+          {report.ocrJobBundles.length > 0 && (
+            <section className="recent-sessions">
+              <div className="panel-header compact" data-tour="cost-line-items">
+                <div>
+                  <span className="eyebrow">Details</span>
+                  <h2>OCR cost bundles</h2>
+                </div>
               </div>
-            </div>
-            <div className="attempt-table-wrap">
-              <table className="attempt-table cost-detail-table">
-                <thead>
-                  <tr>
-                    <th>Started</th>
-                    <th>Document</th>
-                    <th>OCR job</th>
-                    <th>OCR item</th>
-                    <th>Stage</th>
-                    <th>Model</th>
-                    <th>Status</th>
-                    <th>Tokens</th>
-                    <th>Cost</th>
-                    <th>Confidence</th>
-                    <th>Source</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {report.lineItems.map((lineItem) => (
-                    <tr key={lineItem.id}>
-                      <td>{formatShortDateTime(lineItem.startedAt)}</td>
-                      <td>{lineItem.documentTitle}</td>
-                      <td>{lineItem.ocrJobLabel}</td>
-                      <td>{lineItem.ocrItemLabel}</td>
-                      <td>{AI_USAGE_STAGE_LABELS[lineItem.stage]}</td>
-                      <td>{lineItem.model}</td>
-                      <td>{AI_USAGE_STATUS_LABELS[lineItem.status]}</td>
-                      <td>{lineItem.totalTokens?.toLocaleString() ?? 'Unknown'}</td>
-                      <td>{formatCurrency(lineItem.estimatedTotalCost, lineItem.currency)}</td>
-                      <td>
-                        <span className={`confidence-badge ${lineItem.confidence}`}>
-                          {AI_COST_CONFIDENCE_LABELS[lineItem.confidence]}
-                        </span>
-                      </td>
-                      <td>{lineItem.sourceFileName}</td>
+              <div className="attempt-table-wrap">
+                <table className="attempt-table cost-bundle-table">
+                  <thead>
+                    <tr>
+                      <th>Breakdown</th>
+                      <th>OCR job</th>
+                      <th>Document</th>
+                      <th>Status</th>
+                      <th>Items</th>
+                      <th>Sources</th>
+                      <th>Transactions</th>
+                      <th>Tokens</th>
+                      <th>Cost</th>
+                      <th>Confidence</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
+                  </thead>
+                  <tbody>
+                    {report.ocrJobBundles.map((bundle) => {
+                      const isExpanded = expandedBundleIds.has(bundle.key)
+                      return (
+                        <Fragment key={bundle.key}>
+                          <tr>
+                            <td>
+                              <button
+                                aria-expanded={isExpanded}
+                                aria-label={`${isExpanded ? 'Hide' : 'Show'} ${bundle.ocrJobLabel} transactions`}
+                                className="secondary-button cost-breakdown-toggle"
+                                onClick={() => toggleBundle(bundle.key)}
+                                type="button"
+                              >
+                                {isExpanded ? 'Hide' : 'Show'}
+                              </button>
+                            </td>
+                            <td>
+                              <span className="cost-primary-text">{bundle.ocrJobLabel}</span>
+                              <span className="cost-secondary-text">{formatShortDateTime(bundle.startedAt)}</span>
+                            </td>
+                            <td>{bundle.documentTitle}</td>
+                            <td>{OCR_JOB_STATUS_LABELS[bundle.status]}</td>
+                            <td>{bundle.itemCount}</td>
+                            <td>{bundle.sourceCount}</td>
+                            <td>{bundle.transactionCount}</td>
+                            <td>{bundle.totalTokens.toLocaleString()}</td>
+                            <td>{formatCurrency(bundle.estimatedTotalCost, bundle.currency)}</td>
+                            <td>
+                              <span className={`confidence-badge ${bundle.confidence}`}>
+                                {AI_COST_CONFIDENCE_LABELS[bundle.confidence]}
+                              </span>
+                            </td>
+                          </tr>
+                          {isExpanded && (
+                            <tr className="cost-breakdown-row">
+                              <td colSpan={10}>
+                                <OcrBundleBreakdown bundle={bundle} />
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
+
+          {unbundledLineItems.length > 0 && (
+            <section className="recent-sessions">
+              <div className="panel-header compact">
+                <div>
+                  <span className="eyebrow">Line items</span>
+                  <h2>Other usage records</h2>
+                </div>
+              </div>
+              <LineItemTable lineItems={unbundledLineItems} />
+            </section>
+          )}
         </>
       )}
     </section>
+  )
+}
+
+function OcrBundleBreakdown({ bundle }: { bundle: CostReportOcrJobBundle }) {
+  return (
+    <div className="cost-breakdown-content">
+      <div className="cost-breakdown-summary">
+        <span>{bundle.itemCount} OCR {bundle.itemCount === 1 ? 'item' : 'items'}</span>
+        <span>{bundle.transactionCount} AI {bundle.transactionCount === 1 ? 'transaction' : 'transactions'}</span>
+        <span>{formatCurrency(bundle.estimatedTotalCost, bundle.currency)} total</span>
+      </div>
+      <LineItemTable lineItems={bundle.items.flatMap((item) => item.lineItems)} />
+    </div>
+  )
+}
+
+function LineItemTable({ lineItems }: { lineItems: CostReportLineItem[] }) {
+  return (
+    <div className="attempt-table-wrap">
+      <table className="attempt-table cost-detail-table">
+        <thead>
+          <tr>
+            <th>Started</th>
+            <th>Document</th>
+            <th>OCR job</th>
+            <th>OCR item</th>
+            <th>Stage</th>
+            <th>Model</th>
+            <th>Status</th>
+            <th>Tokens</th>
+            <th>Cost</th>
+            <th>Confidence</th>
+            <th>Source</th>
+          </tr>
+        </thead>
+        <tbody>
+          {lineItems.map((lineItem) => (
+            <tr key={lineItem.id}>
+              <td>{formatShortDateTime(lineItem.startedAt)}</td>
+              <td>{lineItem.documentTitle}</td>
+              <td>{lineItem.ocrJobLabel}</td>
+              <td>{lineItem.ocrItemLabel}</td>
+              <td>{AI_USAGE_STAGE_LABELS[lineItem.stage]}</td>
+              <td>{lineItem.model}</td>
+              <td>{AI_USAGE_STATUS_LABELS[lineItem.status]}</td>
+              <td>{lineItem.totalTokens?.toLocaleString() ?? 'Unknown'}</td>
+              <td>{formatCurrency(lineItem.estimatedTotalCost, lineItem.currency)}</td>
+              <td>
+                <span className={`confidence-badge ${lineItem.confidence}`}>{AI_COST_CONFIDENCE_LABELS[lineItem.confidence]}</span>
+              </td>
+              <td>{lineItem.sourceFileName}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   )
 }
 
@@ -335,6 +457,10 @@ function buildOcrJobOptions(ocrJobs: OcrJob[], lineItems: AiUsageLineItem[]): Ar
     optionByValue.set(value, lineItem.ocrJobId ? jobById.get(lineItem.ocrJobId) ?? 'Unknown OCR job' : 'No OCR job')
   }
   return [...optionByValue.entries()].map(([value, label]) => ({ value, label })).sort((left, right) => left.label.localeCompare(right.label))
+}
+
+function getBundledLineItemIds(bundles: CostReportOcrJobBundle[]): Set<string> {
+  return new Set(bundles.flatMap((bundle) => bundle.items.flatMap((item) => item.lineItems.map((lineItem) => lineItem.id))))
 }
 
 function uniqueSorted(values: string[]): string[] {

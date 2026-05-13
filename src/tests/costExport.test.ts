@@ -46,6 +46,7 @@ describe('cost report exports', () => {
       filters: { confidence: string; stage: string }
       summary: { recordCount: number; estimatedTotalCost: number }
       rollups: { byDocument: unknown[]; byStage: unknown[] }
+      ocrJobBundles: Array<{ itemCount: number; lineItems?: unknown[]; transactionCount: number; items: Array<{ lineItems: unknown[] }> }>
       lineItems: unknown[]
     }
 
@@ -54,6 +55,10 @@ describe('cost report exports', () => {
     expect(parsed.summary).toMatchObject({ estimatedTotalCost: 0.00042, recordCount: 1 })
     expect(parsed.rollups.byDocument).toHaveLength(1)
     expect(parsed.rollups.byStage).toHaveLength(1)
+    expect(parsed.ocrJobBundles).toHaveLength(1)
+    expect(parsed.ocrJobBundles[0]).toMatchObject({ itemCount: 1, transactionCount: 1 })
+    expect(parsed.ocrJobBundles[0].items[0].lineItems).toHaveLength(1)
+    expect(parsed.ocrJobBundles[0].lineItems).toBeUndefined()
     expect(parsed.lineItems).toHaveLength(1)
     expect(parsed.lineItems[0]).toMatchObject({ ocrItemId: 'item-1', ocrItemLabel: 'item-1' })
 
@@ -76,6 +81,67 @@ describe('cost report exports', () => {
     expect(rows[1]).toContain('item-1,item-1,"scan,page.png"')
     expect(rows[1]).toContain('ocr_extraction,google,gemini-3.1-flash-lite,succeeded,estimated,USD')
     expect(rows[1]).toContain('"Needs ""review"", retry later"')
+  })
+
+  it('builds OCR job bundles without dropping line-item export detail', () => {
+    const report = buildCostReport({
+      documents: [documentRecord],
+      lineItems: [
+        buildLineItem({ id: 'usage-1-extract', ocrItemId: 'item-1', sourceFileName: 'page-1.png', stage: 'ocr_extraction' }),
+        buildLineItem({ id: 'usage-1-clean', ocrItemId: 'item-1', sourceFileName: 'page-1.png', stage: 'ocr_cleaner' }),
+        buildLineItem({ id: 'usage-2-extract', ocrItemId: 'item-2', sourceFileName: 'page-2.png', stage: 'ocr_extraction' }),
+      ],
+      ocrJobs: [{ ...ocrJob, inputFileCount: 2 }],
+    })
+    const csvRows = exportCostReportCsv(report).split('\n')
+
+    expect(report.ocrJobBundles).toHaveLength(1)
+    expect(report.ocrJobBundles[0]).toMatchObject({
+      itemCount: 2,
+      sourceCount: 2,
+      transactionCount: 3,
+      totalTokens: 3600,
+      estimatedTotalCost: 0.00126,
+      confidence: 'estimated',
+    })
+    expect(report.ocrJobBundles[0].items.map((item) => item.ocrItemLabel)).toEqual(['item-1', 'item-2'])
+    expect(report.ocrJobBundles[0].items[0].lineItems.map((lineItem) => lineItem.stage)).toEqual(['ocr_extraction', 'ocr_cleaner'])
+    expect(report.lineItems).toHaveLength(3)
+    expect(csvRows).toHaveLength(4)
+    expect(csvRows[0]).not.toContain('bundle')
+  })
+
+  it('builds legacy OCR bundles when usage records do not have an OCR job id', () => {
+    const report = buildCostReport({
+      documents: [documentRecord],
+      lineItems: [
+        buildLineItem({
+          id: 'legacy-extract',
+          ocrJobId: null,
+          ocrItemId: 'legacy-item',
+          sourceFileName: 'legacy-page.png',
+          stage: 'ocr_extraction',
+        }),
+        buildLineItem({
+          id: 'legacy-clean',
+          ocrJobId: null,
+          ocrItemId: 'legacy-item',
+          sourceFileName: 'legacy-page.png',
+          stage: 'ocr_cleaner',
+        }),
+      ],
+      ocrJobs: [],
+    })
+
+    expect(report.ocrJobBundles).toHaveLength(1)
+    expect(report.ocrJobBundles[0]).toMatchObject({
+      ocrJobId: null,
+      ocrJobLabel: 'OCR bundle May 10, 2026',
+      itemCount: 1,
+      sourceCount: 1,
+      transactionCount: 2,
+    })
+    expect(report.ocrJobBundles[0].items[0].lineItems.map((lineItem) => lineItem.id)).toEqual(['legacy-extract', 'legacy-clean'])
   })
 
   it('marks missing pricing or token totals as unknown confidence', () => {
