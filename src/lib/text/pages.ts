@@ -41,13 +41,14 @@ export type VirtualReaderPaneLayout<TChunk extends ReaderPaneChunk = ReaderPaneC
 }
 
 const DEFAULT_GAP = 16
-const DEFAULT_MIN_PANE_WIDTH = 200
+const DEFAULT_MIN_PANE_WIDTH = 320
 const DEFAULT_MOBILE_BREAKPOINT = 720
 const DEFAULT_PANE_PADDING_BLOCK = 40
 const DEFAULT_PANE_PADDING_INLINE = 44
 const DEFAULT_SURFACE_PADDING_BLOCK = 56
 const DEFAULT_SURFACE_PADDING_INLINE = 56
 const AVERAGE_READER_CHARACTER_WIDTH_EM = 0.54
+const MULTI_PANE_CHARACTER_CAPACITY_RATIO = 0.58
 const MIN_FILLED_PANE_RATIO = 0.75
 const MAX_FILLED_PANE_OVERFLOW_RATIO = 1.25
 
@@ -86,12 +87,21 @@ export function buildFilledVisibleReaderPaneLayout<TChunk extends ReaderPaneChun
   const effectivePaneCount = Math.max(1, layout.effectivePaneCount)
   const normalizedVisibleStartPaneIndex = Math.max(
     0,
-    Math.min(visibleStartPaneIndex, Math.max(0, layout.panes.length - effectivePaneCount)),
+    Math.min(visibleStartPaneIndex, Math.max(0, layout.panes.length - 1)),
   )
   const visiblePanes = layout.panes.slice(
     normalizedVisibleStartPaneIndex,
     normalizedVisibleStartPaneIndex + effectivePaneCount,
   )
+
+  if (effectivePaneCount > 1) {
+    return {
+      ...layout,
+      visiblePanes,
+      visibleStartPaneIndex: normalizedVisibleStartPaneIndex,
+    }
+  }
+
   const firstVisiblePane = visiblePanes[0]
   const lastVisiblePane = visiblePanes[visiblePanes.length - 1]
   if (!firstVisiblePane || !lastVisiblePane) {
@@ -110,39 +120,26 @@ export function buildFilledVisibleReaderPaneLayout<TChunk extends ReaderPaneChun
       ? normalizedActiveIndex
       : visibleStartChunkIndex
   const charactersPerLine = getEstimatedCharactersPerLine(metrics)
-  const maxLinesPerPane = getEstimatedLinesPerPane(metrics, effectivePaneCount)
   const maxCharacterUnitsPerPane = getMaxCharacterUnitsPerPane(metrics, effectivePaneCount)
   const maxVisibleCharacterUnits = maxCharacterUnitsPerPane * effectivePaneCount
   const range = getFilledChunkRange(chunks, anchorIndex, maxVisibleCharacterUnits, charactersPerLine)
   const rangeChunks = chunks.slice(range.startChunkIndex, range.endChunkIndex + 1)
-  const filledPanes =
-    effectivePaneCount === 1
-      ? [
-          buildPane(
-            rangeChunks,
-            range.startChunkIndex,
-            range.endChunkIndex,
-            rangeChunks.reduce(
-              (total, chunk) => total + estimateChunkCharacterUnits(chunk, charactersPerLine),
-              0,
-            ),
-            charactersPerLine,
-          ),
-        ]
-      : splitChunksIntoVirtualPanes(rangeChunks, maxLinesPerPane, metrics).map((pane) => ({
-          ...pane,
-          id: `reader-pane-${range.startChunkIndex + pane.startChunkIndex}-${range.startChunkIndex + pane.endChunkIndex}`,
-          startChunkIndex: range.startChunkIndex + pane.startChunkIndex,
-          endChunkIndex: range.startChunkIndex + pane.endChunkIndex,
-        }))
-  const filledVisiblePanes =
-    filledPanes.length <= effectivePaneCount
-      ? filledPanes
-      : getVisibleFilledPanes(filledPanes, effectivePaneCount, anchorIndex)
+  const filledPanes = [
+    buildPane(
+      rangeChunks,
+      range.startChunkIndex,
+      range.endChunkIndex,
+      rangeChunks.reduce(
+        (total, chunk) => total + estimateChunkCharacterUnits(chunk, charactersPerLine),
+        0,
+      ),
+      charactersPerLine,
+    ),
+  ]
 
   return {
     ...layout,
-    visiblePanes: filledVisiblePanes,
+    visiblePanes: filledPanes,
     visibleStartPaneIndex: normalizedVisibleStartPaneIndex,
   }
 }
@@ -193,7 +190,7 @@ export function getVisiblePaneStartIndex(activePaneIndex: number, paneCount: num
   const windowOffset = normalizedActivePaneIndex % normalizedVisiblePaneCount
   const firstPaneInWindow = normalizedActivePaneIndex - windowOffset
 
-  return Math.min(firstPaneInWindow, Math.max(0, paneCount - normalizedVisiblePaneCount))
+  return Math.min(firstPaneInWindow, Math.max(0, paneCount - 1))
 }
 
 function splitChunksIntoVirtualPanes<TChunk extends ReaderPaneChunk>(
@@ -210,7 +207,9 @@ function splitChunksIntoVirtualPanes<TChunk extends ReaderPaneChunk>(
   let paneStartIndex = 0
   let paneCharacterUnits = 0
   const charactersPerLine = getEstimatedCharactersPerLine(metrics)
-  const maxCharacterUnitsPerPane = Math.max(charactersPerLine, maxLinesPerPane * charactersPerLine)
+  const effectivePaneCount = getEffectiveReaderPaneCount(metrics)
+  const capacityRatio = effectivePaneCount > 1 ? MULTI_PANE_CHARACTER_CAPACITY_RATIO : 1
+  const maxCharacterUnitsPerPane = Math.max(charactersPerLine, Math.floor(maxLinesPerPane * charactersPerLine * capacityRatio))
 
   chunks.forEach((chunk, chunkIndex) => {
     const chunkCharacterUnits = estimateChunkCharacterUnits(chunk, charactersPerLine)
@@ -288,16 +287,6 @@ function getFilledChunkRange<TChunk extends ReaderPaneChunk>(
   }
 
   return { startChunkIndex, endChunkIndex }
-}
-
-function getVisibleFilledPanes<TChunk extends ReaderPaneChunk>(
-  panes: Array<VirtualReaderPane<TChunk>>,
-  effectivePaneCount: number,
-  anchorIndex: number,
-): Array<VirtualReaderPane<TChunk>> {
-  const anchorPaneIndex = getActiveVirtualPaneIndex(panes, anchorIndex)
-  const visibleStartPaneIndex = getVisiblePaneStartIndex(anchorPaneIndex, panes.length, effectivePaneCount)
-  return panes.slice(visibleStartPaneIndex, visibleStartPaneIndex + effectivePaneCount)
 }
 
 function buildPane<TChunk extends ReaderPaneChunk>(
