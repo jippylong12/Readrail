@@ -4,6 +4,7 @@ import type { ReadingScopeType } from '../types/domain'
 export type AppRoute =
   | 'library-import'
   | 'library-ocr'
+  | 'library-ocr-jobs'
   | 'library-saved'
   | 'library-document'
   | 'library-page'
@@ -58,6 +59,9 @@ export function routeFromPath(pathname: string): RouteState {
       return { route: 'library-import', documentId: null }
     }
     if (segments[1] === 'ocr') {
+      if (segments[2] === 'jobs') {
+        return { route: 'library-ocr-jobs', documentId: null }
+      }
       return { route: 'library-ocr', documentId: null }
     }
     if (segments[1] === 'documents' && segments[2]) {
@@ -127,6 +131,8 @@ export function pathForRoute(routeState: RouteState): string {
       return '/library/manual'
     case 'library-ocr':
       return '/library/ocr'
+    case 'library-ocr-jobs':
+      return '/library/ocr/jobs'
     case 'library-document':
       if (!routeState.documentId) {
         return '/library/saved'
@@ -189,7 +195,7 @@ function costPath(routeState: RouteState): string {
 }
 
 export function primaryRouteFor(route: AppRoute): PrimaryRoute {
-  if (route === 'library-import' || route === 'library-ocr' || route === 'library-document' || route === 'library-page') {
+  if (route === 'library-import' || route === 'library-ocr' || route === 'library-ocr-jobs' || route === 'library-document' || route === 'library-page') {
     return 'library-saved'
   }
 

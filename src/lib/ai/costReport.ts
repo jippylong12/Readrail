@@ -1,5 +1,6 @@
 import type {
   AiCostConfidence,
+  AiBillingMode,
   AiUsageLineItem,
   AiUsageStage,
   AiUsageStatus,
@@ -38,6 +39,7 @@ export type CostReportLineItem = {
   ocrItemLabel: string
   sourceFileName: string
   stage: AiUsageStage
+  billingMode: AiBillingMode
   provider: string
   model: string
   status: AiUsageStatus
@@ -141,6 +143,11 @@ export const AI_COST_CONFIDENCE_LABELS: Record<AiCostConfidence, string> = {
   unknown: 'Unknown',
 }
 
+export const AI_BILLING_MODE_LABELS: Record<AiBillingMode, string> = {
+  interactive: 'Interactive',
+  batch: 'Batch',
+}
+
 export function buildCostReport(input: CostReportInput): CostReport {
   const filters = normalizeFilters(input.filters)
   const documentById = new Map(input.documents.map((document) => [document.id, document]))
@@ -209,6 +216,7 @@ export function exportCostReportCsv(report: CostReport): string {
     'ocr_item_label',
     'source_file_name',
     'stage',
+    'billing_mode',
     'provider',
     'model',
     'status',
@@ -234,6 +242,7 @@ export function exportCostReportCsv(report: CostReport): string {
       lineItem.ocrItemLabel,
       lineItem.sourceFileName,
       lineItem.stage,
+      lineItem.billingMode,
       lineItem.provider,
       lineItem.model,
       lineItem.status,
@@ -293,6 +302,7 @@ function enrichLineItem(
     ocrItemLabel: getOcrItemLabel(lineItem.ocrItemId),
     sourceFileName: lineItem.sourceFileName ?? 'No source file',
     stage: lineItem.stage,
+    billingMode: lineItem.billingMode ?? 'interactive',
     provider: lineItem.provider,
     model: lineItem.model,
     status: lineItem.status,

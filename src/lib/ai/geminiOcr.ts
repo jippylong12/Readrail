@@ -349,7 +349,7 @@ function cleanOcrPage(
   }
 }
 
-function buildCleanupPrompt(result: OcrResult): string {
+export function buildCleanupPrompt(result: OcrResult): string {
   return [
     'Clean OCR output conservatively. Return the same JSON shape.',
     'Remove only obvious scanned-book artifacts: standalone page numbers, repeated running headers or footers, broken hyphenation across line breaks, and empty scan noise.',
@@ -361,7 +361,7 @@ function buildCleanupPrompt(result: OcrResult): string {
   ].join('\n\n')
 }
 
-function buildFormatterPrompt(result: OcrResult): string {
+export function buildFormatterPrompt(result: OcrResult): string {
   return [
     'Format cleaned OCR text for reading. Return the same JSON shape.',
     'Repair paragraph breaks and spacing while preserving all words, punctuation, order, page metadata, notes, warnings, and uncertain spans.',
@@ -372,7 +372,7 @@ function buildFormatterPrompt(result: OcrResult): string {
   ].join('\n\n')
 }
 
-function mergeOcrResults(previous: OcrResult, next: OcrResult): OcrResult {
+export function mergeOcrResults(previous: OcrResult, next: OcrResult): OcrResult {
   return {
     titleGuess: next.titleGuess ?? previous.titleGuess,
     warnings: [...previous.warnings, ...next.warnings],

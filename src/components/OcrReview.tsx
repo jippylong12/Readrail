@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowDown, ArrowUp, Filter, GripVertical } from 'lucide-react'
+import { ArrowDown, ArrowUp, Filter, GripVertical, RefreshCw } from 'lucide-react'
 import { cleanReadingText } from '../lib/text/cleanup'
 import { countWords } from '../lib/text/wordCount'
 import { getDefaultPageTitle } from '../app/structuredDocuments'
@@ -14,6 +14,7 @@ import {
 import type {
   DocumentChapterRecord,
   DocumentRecord,
+  OcrBatchRun,
   OcrJob,
   OcrJobItem,
   OcrJobItemPage,
@@ -32,6 +33,7 @@ type OcrReviewProps = {
   appendStartSourcePageNumber?: number
   loadApiKey: () => Promise<string | null>
   onCreateDocument: (title: string, pages: OcrPageInput[]) => void
+  onCreateChapter?: (documentId: string, title?: string) => DocumentChapterRecord | null
   onAppendPages: (documentId: string, pages: OcrPageInput[], chapterId?: string | null) => void
   onOpenJobCosts?: (ocrJobId: string) => void
 }
@@ -62,8 +64,11 @@ type OcrReviewEntry = OcrReviewPageEntry | OcrReviewItemEntry
 
 type OcrReviewSummary = Record<OcrReviewEntryStatus, number>
 type OcrFileSortMode = 'name_asc' | 'name_desc' | 'modified_asc' | 'modified_desc' | 'manual'
+type OcrDestinationMode = 'new_document' | 'existing_document'
+type OcrChapterMode = 'existing' | 'new'
 
 const MAX_OCR_FILES = 25
+const MAX_BATCH_OCR_FILES = 500
 const fileNameCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
 const OCR_FILE_SORT_OPTIONS: Array<{ mode: OcrFileSortMode; label: string }> = [
   { mode: 'name_asc', label: 'Filename A-Z' },
@@ -84,16 +89,24 @@ export function OcrReview({
   appendStartSourcePageNumber = 1,
   loadApiKey,
   onCreateDocument,
+  onCreateChapter,
   onAppendPages,
   onOpenJobCosts,
 }: OcrReviewProps) {
   const [fileDrafts, setFileDrafts] = useState<OcrFileDraft[]>([])
+  const [destinationMode, setDestinationMode] = useState<OcrDestinationMode>(appendTargetDocumentId ? 'existing_document' : 'new_document')
+  const [newDocumentTitle, setNewDocumentTitle] = useState('')
   const [appendDocumentId, setAppendDocumentId] = useState('')
+  const [appendChapterId, setAppendChapterId] = useState('')
+  const [appendChapterMode, setAppendChapterMode] = useState<OcrChapterMode>('existing')
+  const [newChapterTitle, setNewChapterTitle] = useState('')
+  const [createdChapterTitlesById, setCreatedChapterTitlesById] = useState<Record<string, string>>({})
   const [fileSortMode, setFileSortMode] = useState<OcrFileSortMode>('name_asc')
   const [startSourcePageDraft, setStartSourcePageDraft] = useState(() =>
     Math.max(1, Math.round(appendStartSourcePageNumber)).toString(),
   )
   const [isSortMenuOpen, setIsSortMenuOpen] = useState(false)
+  const [refreshingBatchScope, setRefreshingBatchScope] = useState<'visible' | 'all' | null>(null)
   const [draggedFileDraftId, setDraggedFileDraftId] = useState<string | null>(null)
   const [fileDragOverId, setFileDragOverId] = useState<string | null>(null)
   const [focusedReviewId, setFocusedReviewId] = useState<string | null>(null)
@@ -105,7 +118,10 @@ export function OcrReview({
   const ocrJobItems = useAppStore((state) => state.ocrJobItems)
   const ocrRuntimeJobs = useAppStore((state) => state.ocrRuntimeJobs)
   const ocrConcurrentItemLimit = useAppStore((state) => state.settings.ocr.concurrentItemLimit)
+  const ocrProcessingMode = useAppStore((state) => state.settings.ocr.processingMode)
+  const ocrBatchRuns = useAppStore((state) => state.ocrBatchRuns)
   const startOcrJob = useAppStore((state) => state.startOcrJob)
+  const refreshOcrBatchJobs = useAppStore((state) => state.refreshOcrBatchJobs)
   const retryOcrJobItem = useAppStore((state) => state.retryOcrJobItem)
   const replaceOcrJobItemFile = useAppStore((state) => state.replaceOcrJobItemFile)
   const skipOcrJobItem = useAppStore((state) => state.skipOcrJobItem)
@@ -114,39 +130,56 @@ export function OcrReview({
   const markOcrJobSaved = useAppStore((state) => state.markOcrJobSaved)
   const setOcrJobDocumentTitle = useAppStore((state) => state.setOcrJobDocumentTitle)
   const availableDocuments = documents.filter((document) => !document.archivedAt)
-  const appendTargetDocument = appendTargetDocumentId
-    ? availableDocuments.find((document) => document.id === appendTargetDocumentId) ?? null
+  const appendDocumentValue = appendDocumentId || availableDocuments[0]?.id || ''
+  const selectedDestinationDocumentId =
+    appendTargetDocumentId ?? (destinationMode === 'existing_document' ? appendDocumentValue : '')
+  const selectedDestinationDocument = selectedDestinationDocumentId
+    ? availableDocuments.find((document) => document.id === selectedDestinationDocumentId) ?? null
     : null
-  const appendTargetChapters = appendTargetDocumentId
+  const selectedDestinationChapters = selectedDestinationDocumentId
     ? documentChapters
-        .filter((chapter) => chapter.documentId === appendTargetDocumentId)
+        .filter((chapter) => chapter.documentId === selectedDestinationDocumentId)
         .sort((left, right) => left.sortOrder - right.sortOrder)
     : []
-  const selectedAppendChapterIdBeforeJob = appendTargetDocumentId
-    ? appendTargetChapterId || appendTargetChapters[appendTargetChapters.length - 1]?.id || null
-    : null
+  const explicitAppendChapterId = selectedDestinationChapters.some((chapter) => chapter.id === appendChapterId)
+    ? appendChapterId
+    : ''
+  const selectedAppendChapterIdBeforeJob =
+    selectedDestinationDocumentId && appendChapterMode === 'existing'
+      ? appendTargetChapterId || explicitAppendChapterId || selectedDestinationChapters[selectedDestinationChapters.length - 1]?.id || null
+      : null
   const scopedJobs = useMemo(
     () =>
       ocrJobs
         .filter(
           (job) =>
-            job.documentId === (appendTargetDocumentId ?? null) &&
+            (!appendTargetDocumentId || job.documentId === appendTargetDocumentId) &&
             job.status !== 'saved' &&
             job.status !== 'cancelled',
         )
         .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)),
     [appendTargetDocumentId, ocrJobs],
   )
+  const visibleScopedJobs = useMemo(() => scopedJobs.slice(0, 25), [scopedJobs])
   const activeJob =
     selectedJobId && scopedJobs.some((job) => job.id === selectedJobId)
       ? scopedJobs.find((job) => job.id === selectedJobId) ?? null
       : scopedJobs[0] ?? null
   const runtimeJob = activeJob ? ocrRuntimeJobs[activeJob.id] : null
   const selectedAppendChapterId = activeJob?.targetChapterId ?? selectedAppendChapterIdBeforeJob
+  const activeJobDocument =
+    activeJob?.documentId ? availableDocuments.find((document) => document.id === activeJob.documentId) ?? null : null
+  const activeJobChapters = activeJob?.documentId
+    ? documentChapters
+        .filter((chapter) => chapter.documentId === activeJob.documentId)
+        .sort((left, right) => left.sortOrder - right.sortOrder)
+    : selectedDestinationChapters
   const selectedAppendChapter =
-    appendTargetChapters.find((chapter) => chapter.id === selectedAppendChapterId) ??
-    appendTargetChapters[appendTargetChapters.length - 1] ??
+    activeJobChapters.find((chapter) => chapter.id === selectedAppendChapterId) ??
+    (activeJob?.documentId ? null : selectedDestinationChapters[selectedDestinationChapters.length - 1]) ??
     null
+  const selectedAppendChapterTitle =
+    selectedAppendChapter?.title ?? (selectedAppendChapterId ? createdChapterTitlesById[selectedAppendChapterId] ?? null : null)
   const jobItems = useMemo(
     () =>
       activeJob
@@ -168,19 +201,27 @@ export function OcrReview({
   const reviewSummary = useMemo(() => summarizeReviewEntries(reviewEntries), [reviewEntries])
   const reviewablePageCount = useMemo(() => countReviewablePages(jobItems), [jobItems])
   const pagesForSave = useMemo(() => buildReviewedPages(jobItems, preservePageBreaks), [jobItems, preservePageBreaks])
+  const hasPendingOcrItems = jobItems.some((item) => item.status === 'queued' || item.status === 'running')
   const hasBlockingItems = jobItems.some((item) => item.status === 'queued' || item.status === 'running' || item.status === 'failed')
   const hasUnapprovedPages = jobItems.some(
     (item) =>
       item.status === 'review' &&
       item.pages.some((page) => page.reviewStatus !== 'reviewed' && page.reviewStatus !== 'skipped'),
   )
-  const isReviewAvailable = Boolean(activeJob) && activeJob?.status !== 'queued'
+  const isReviewAvailable =
+    Boolean(activeJob) && activeJob?.status !== 'queued' && !(activeJob?.processingMode === 'batch' && hasPendingOcrItems)
   const totalWords = useMemo(
     () => pagesForSave.reduce((total, page) => total + countWords(cleanReadingText(page.text, { preservePageBreaks })), 0),
     [pagesForSave, preservePageBreaks],
   )
+  const activeBatchRun = activeJob
+    ? ocrBatchRuns.filter((run) => run.jobId === activeJob.id).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0] ?? null
+    : null
   const canSavePages = totalWords > 0 && !hasBlockingItems && !hasUnapprovedPages
-  const progressMessage = runtimeJob?.progressMessage || formatJobProgressMessage(activeJob)
+  const progressMessage =
+    hasPendingOcrItems && activeJob?.processingMode === 'batch'
+      ? formatBatchJobProgressMessage(activeBatchRun)
+      : runtimeJob?.progressMessage || formatJobProgressMessage(activeJob)
   const itemProgressById = runtimeJob?.itemProgressById ?? {}
   const progressPercent = calculateProgressPercent(activeJob?.status ?? 'idle', jobItems, itemProgressById)
   const progressSummary = summarizeOcrProgress(jobItems)
@@ -188,10 +229,17 @@ export function OcrReview({
   const progressDetail = progressMessage && progressMessage !== progressSummaryText ? progressMessage : ''
   const isRunning = activeJob?.status === 'running' || jobItems.some((item) => item.status === 'queued' || item.status === 'running')
   const warnings = activeJob?.warnings ?? selectionWarnings
-  const error = runtimeJob?.error ?? activeJob?.errorMessage ?? ''
-  const documentTitle = activeJob ? runtimeJob?.documentTitle || inferDocumentTitle(jobItems, fileDrafts) : ''
-
-  const appendDocumentValue = appendDocumentId || availableDocuments[0]?.id || ''
+  const shouldShowJobError = !hasPendingOcrItems && activeJob?.status !== 'running' && activeJob?.status !== 'queued'
+  const error = shouldShowJobError ? runtimeJob?.error ?? activeJob?.errorMessage ?? '' : ''
+  const documentTitle = activeJob ? runtimeJob?.documentTitle || inferDocumentTitle(jobItems, fileDrafts) : newDocumentTitle
+  const maxSelectedFiles = ocrProcessingMode === 'batch' ? MAX_BATCH_OCR_FILES : MAX_OCR_FILES
+  const hasActiveBatchJobs = scopedJobs.some((job) => job.processingMode === 'batch' && (job.status === 'queued' || job.status === 'running'))
+  const canStartForDestination =
+    destinationMode === 'new_document' ||
+    (Boolean(selectedDestinationDocumentId) && (appendChapterMode === 'existing' || newChapterTitle.trim().length > 0))
+  const activeJobDestinationLabel = activeJob?.documentId
+    ? `${activeJobDocument?.title ?? 'selected document'}${selectedAppendChapterTitle ? ` / ${selectedAppendChapterTitle}` : ''}`
+    : 'a new document'
 
   useEffect(
     () => () => {
@@ -202,30 +250,79 @@ export function OcrReview({
     [],
   )
 
+  useEffect(() => {
+    if (!hasActiveBatchJobs) {
+      return
+    }
+    const visibleTimer = setInterval(() => {
+      void refreshOcrBatchJobs({ loadApiKey, jobIds: visibleScopedJobs.map((job) => job.id) })
+    }, 30_000)
+    const allTimer = setInterval(() => {
+      void refreshOcrBatchJobs({ loadApiKey })
+    }, 300_000)
+    return () => {
+      clearInterval(visibleTimer)
+      clearInterval(allTimer)
+    }
+  }, [hasActiveBatchJobs, loadApiKey, refreshOcrBatchJobs, visibleScopedJobs])
+
   function startOcr(selectedDrafts = fileDrafts): void {
     if (!selectedDrafts.length || !hasKey) {
       return
     }
 
+    const targetDocumentId = destinationMode === 'existing_document' ? selectedDestinationDocumentId || null : null
+    if (destinationMode === 'existing_document' && !targetDocumentId) {
+      setSelectionWarnings(['Choose a destination document before starting OCR.'])
+      return
+    }
+
+    let targetChapterId = destinationMode === 'existing_document' ? selectedAppendChapterIdBeforeJob : null
+    if (targetDocumentId && appendChapterMode === 'new') {
+      const title = newChapterTitle.trim()
+      if (!title) {
+        setSelectionWarnings(['Enter a chapter title before starting OCR.'])
+        return
+      }
+      if (!onCreateChapter) {
+        setSelectionWarnings(['Create a chapter from the Library before starting OCR.'])
+        return
+      }
+      const chapter = onCreateChapter(targetDocumentId, title)
+      if (!chapter) {
+        setSelectionWarnings(['Could not create the destination chapter.'])
+        return
+      }
+      targetChapterId = chapter.id
+      setAppendChapterId(chapter.id)
+      setCreatedChapterTitlesById((titlesById) => ({ ...titlesById, [chapter.id]: chapter.title }))
+      setAppendChapterMode('existing')
+      setNewChapterTitle('')
+    }
+
     const jobId = startOcrJob({
       files: selectedDrafts,
-      documentId: appendTargetDocumentId ?? null,
-      targetChapterId: selectedAppendChapterIdBeforeJob,
+      documentId: targetDocumentId,
+      targetChapterId,
       loadApiKey,
       stripImageMetadataBeforeOcr,
       concurrentItemLimit: ocrConcurrentItemLimit,
+      processingMode: ocrProcessingMode,
     })
     if (!jobId) {
       return
     }
     setSelectedJobId(jobId)
+    if (!targetDocumentId && newDocumentTitle.trim()) {
+      setOcrJobDocumentTitle(jobId, newDocumentTitle.trim())
+    }
     setFocusedReviewId(null)
     setSelectionWarnings([])
     setFileDrafts([])
   }
 
   function selectFiles(selectedFiles: File[]): void {
-    const limitedFiles = sortFilesByMode(selectedFiles, 'name_asc').slice(0, MAX_OCR_FILES)
+    const limitedFiles = sortFilesByMode(selectedFiles, 'name_asc').slice(0, maxSelectedFiles)
     const sourcePageStart = Math.max(1, Math.round(appendStartSourcePageNumber))
     setStartSourcePageDraft(sourcePageStart.toString())
     setFileDrafts(
@@ -239,7 +336,25 @@ export function OcrReview({
     setFileSortMode('name_asc')
     setIsSortMenuOpen(false)
     setFocusedReviewId(null)
-    setSelectionWarnings(selectedFiles.length > MAX_OCR_FILES ? [`Only the first ${MAX_OCR_FILES} files will be processed.`] : [])
+    setSelectionWarnings(selectedFiles.length > maxSelectedFiles ? [`Only the first ${maxSelectedFiles} files will be processed.`] : [])
+  }
+
+  async function refreshVisibleBatchJobs(): Promise<void> {
+    setRefreshingBatchScope('visible')
+    try {
+      await refreshOcrBatchJobs({ loadApiKey, jobIds: visibleScopedJobs.map((job) => job.id) })
+    } finally {
+      setRefreshingBatchScope(null)
+    }
+  }
+
+  async function refreshAllBatchJobs(): Promise<void> {
+    setRefreshingBatchScope('all')
+    try {
+      await refreshOcrBatchJobs({ loadApiKey })
+    } finally {
+      setRefreshingBatchScope(null)
+    }
   }
 
   function updateFileDraft(fileId: string, updates: Partial<OcrFileDraft>): void {
@@ -313,20 +428,18 @@ export function OcrReview({
     setFileSortMode('manual')
   }
 
-  function handleCreateDocument(): void {
+  function handleSaveReviewedPages(): void {
     if (!activeJob) {
       return
     }
+    if (activeJob.documentId) {
+      markOcrJobSaved(activeJob.id)
+      onAppendPages(activeJob.documentId, pagesForSave, activeJob.targetChapterId ?? null)
+      return
+    }
+
     markOcrJobSaved(activeJob.id)
     onCreateDocument(documentTitle, pagesForSave)
-  }
-
-  function handleAppendPages(): void {
-    if (!activeJob) {
-      return
-    }
-    markOcrJobSaved(activeJob.id)
-    onAppendPages(appendTargetDocumentId ?? appendDocumentValue, pagesForSave, selectedAppendChapterId)
   }
 
   return (
@@ -342,53 +455,193 @@ export function OcrReview({
       <p className="notice">
         Choose scans or PDFs here. Files go directly to Google with your Gemini key, then return as reviewed pages you can save into a document.
       </p>
+      {ocrProcessingMode === 'batch' && (
+        <p className="notice">
+          Batch OCR saves about 50% on Gemini usage, supports up to {MAX_BATCH_OCR_FILES} files, and may take 24-48 hours.
+          Readrail resumes polling after reopen, but cleanup and formatting only advance while the app is open.
+        </p>
+      )}
       {stripImageMetadataBeforeOcr && (
         <p className="notice">
           Supported image files are re-encoded locally before OCR so embedded metadata is removed before upload.
         </p>
       )}
 
-      {appendTargetDocumentId && (
-        <div className="ocr-destination-panel">
-          <div>
-            <span className="eyebrow">Destination</span>
-            <strong>{appendTargetDocument?.title ?? 'Selected document'}</strong>
+      <div className="ocr-destination-panel">
+        <div className="ocr-destination-header">
+          <span className="eyebrow">Destination</span>
+          <strong>Save OCR output</strong>
+          <span>Choose where reviewed pages will go before OCR starts.</span>
+        </div>
+        {!appendTargetDocumentId && !activeJob?.documentId ? (
+          <>
+            <div className="segmented ocr-destination-mode" role="tablist" aria-label="OCR destination">
+              <button
+                aria-selected={destinationMode === 'new_document'}
+                className={destinationMode === 'new_document' ? 'active' : ''}
+                onClick={() => setDestinationMode('new_document')}
+                role="tab"
+                type="button"
+              >
+                New document
+              </button>
+              <button
+                aria-selected={destinationMode === 'existing_document'}
+                className={destinationMode === 'existing_document' ? 'active' : ''}
+                disabled={availableDocuments.length === 0}
+                onClick={() => setDestinationMode('existing_document')}
+                role="tab"
+                type="button"
+              >
+                Existing document
+              </button>
+            </div>
+            {destinationMode === 'new_document' ? (
+              <label className="field compact ocr-destination-field">
+                Document title
+                <input
+                  onChange={(event) => {
+                    setNewDocumentTitle(event.target.value)
+                    if (activeJob && !activeJob.documentId) {
+                      setOcrJobDocumentTitle(activeJob.id, event.target.value)
+                    }
+                  }}
+                  placeholder="Use OCR title suggestion"
+                  value={activeJob && !activeJob.documentId ? documentTitle : newDocumentTitle}
+                />
+              </label>
+            ) : (
+              <div className="ocr-destination-grid">
+                <label className="field compact">
+                  Document
+                  <select
+                    disabled={availableDocuments.length === 0}
+                    onChange={(event) => {
+                      setAppendDocumentId(event.target.value)
+                      setAppendChapterId('')
+                    }}
+                    value={appendDocumentValue}
+                  >
+                    {availableDocuments.length === 0 ? (
+                      <option value="">No documents available</option>
+                    ) : (
+                      availableDocuments.map((document) => (
+                        <option key={document.id} value={document.id}>
+                          {document.title}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </label>
+                <label className="field compact">
+                  Chapter
+                  <select
+                    onChange={(event) => {
+                      if (event.target.value === '__new__') {
+                        setAppendChapterMode('new')
+                        setAppendChapterId('')
+                        return
+                      }
+                      setAppendChapterMode('existing')
+                      setAppendChapterId(event.target.value)
+                    }}
+                    value={appendChapterMode === 'new' ? '__new__' : selectedAppendChapterIdBeforeJob ?? ''}
+                  >
+                    {selectedDestinationChapters.length === 0 ? (
+                      <option value="">Document default</option>
+                    ) : (
+                      selectedDestinationChapters.map((chapter) => (
+                        <option key={chapter.id} value={chapter.id}>
+                          {chapter.title}
+                        </option>
+                      ))
+                    )}
+                    <option value="__new__">Create new chapter</option>
+                  </select>
+                </label>
+                {appendChapterMode === 'new' && (
+                  <label className="field compact">
+                    New chapter title
+                    <input
+                      onChange={(event) => setNewChapterTitle(event.target.value)}
+                      placeholder="Chapter title"
+                      value={newChapterTitle}
+                    />
+                  </label>
+                )}
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="ocr-destination-summary">
+            <strong>{activeJobDocument?.title ?? selectedDestinationDocument?.title ?? 'Selected document'}</strong>
             <span>
-              {selectedAppendChapter
-                ? `New pages will be added to ${selectedAppendChapter.title}.`
+              {selectedAppendChapterTitle
+                ? `New pages will be added to ${selectedAppendChapterTitle}.`
                 : 'New pages will be added to this document.'}
             </span>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {scopedJobs.length > 0 && (
-        <div className="ocr-job-status-list" aria-label="OCR jobs">
-          {scopedJobs.map((job, index) => {
-            const items = ocrJobItems.filter((item) => item.jobId === job.id)
-            return (
+        <div className="ocr-job-section" aria-label="OCR jobs">
+          {hasActiveBatchJobs && (
+            <div className="ocr-job-toolbar">
+              <span>Batch OCR status</span>
               <button
-                aria-current={activeJob?.id === job.id ? 'page' : undefined}
-                className={`ocr-job-status ${activeJob?.id === job.id ? 'active' : ''}`}
-                key={job.id}
-                onClick={() => {
-                  setSelectedJobId(job.id)
-                  setFocusedReviewId(null)
-                }}
+                className="secondary-button compact"
+                disabled={refreshingBatchScope !== null}
+                onClick={() => void refreshVisibleBatchJobs()}
                 type="button"
               >
-                <span className="eyebrow">OCR job {index + 1}</span>
-                <strong>{formatJobStatus(job.status)}</strong>
-                <span>{summarizeJobItems(items)}</span>
+                <RefreshCw aria-hidden="true" size={14} />
+                {refreshingBatchScope === 'visible' ? 'Refreshing visible' : 'Refresh visible'}
               </button>
-            )
-          })}
+              <button
+                className="ghost-button compact"
+                disabled={refreshingBatchScope !== null}
+                onClick={() => void refreshAllBatchJobs()}
+                type="button"
+              >
+                <RefreshCw aria-hidden="true" size={14} />
+                {refreshingBatchScope === 'all' ? 'Refreshing all' : 'Refresh all'}
+              </button>
+            </div>
+          )}
+          <div className="ocr-job-status-list">
+            {visibleScopedJobs.map((job, index) => {
+              const items = ocrJobItems.filter((item) => item.jobId === job.id)
+              const activeBatchRun = ocrBatchRuns
+                .filter((run) => run.jobId === job.id)
+                .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0]
+              return (
+                <button
+                  aria-current={activeJob?.id === job.id ? 'page' : undefined}
+                  className={`ocr-job-status ${activeJob?.id === job.id ? 'active' : ''}`}
+                  key={job.id}
+                  onClick={() => {
+                    setSelectedJobId(job.id)
+                    setFocusedReviewId(null)
+                  }}
+                  type="button"
+                >
+                  <span className="eyebrow">OCR job {index + 1}</span>
+                  <strong>{job.processingMode === 'batch' ? `Batch ${formatJobStatus(job.status)}` : formatJobStatus(job.status)}</strong>
+                  <span>{summarizeJobItems(items)}</span>
+                  {activeBatchRun && (
+                    <span>{formatBatchRunSummary(activeBatchRun.stage, activeBatchRun.providerState ?? activeBatchRun.status, activeBatchRun.lastPolledAt)}</span>
+                  )}
+                </button>
+              )
+            })}
+          </div>
         </div>
       )}
 
       <label className={hasKey ? 'ocr-file-dropzone' : 'ocr-file-dropzone disabled'}>
         <span>Choose scans or PDFs</span>
-        <strong>{hasKey ? `Select up to ${MAX_OCR_FILES} files, then set their order` : 'Add a Gemini key in Settings to enable OCR'}</strong>
+        <strong>{hasKey ? `Select up to ${maxSelectedFiles} files, then set their order` : 'Add a Gemini key in Settings to enable OCR'}</strong>
         <input
           accept="image/*,application/pdf"
           disabled={!hasKey || isRunning}
@@ -578,8 +831,8 @@ export function OcrReview({
                       <td>{item.sourceFileName}</td>
                       <td>{item.sourcePageNumber ?? item.orderIndex + 1}</td>
                       <td>{formatItemStatus(item.status)}</td>
-                      <td>{formatItemProgressStage(item, itemProgress)}</td>
-                      <td>{formatItemProgressMessage(item, itemProgress)}</td>
+                      <td>{formatItemProgressStage(item, itemProgress, activeJob, activeBatchRun)}</td>
+                      <td>{formatItemProgressMessage(item, itemProgress, activeJob, activeBatchRun)}</td>
                     </tr>
                   )
                 })}
@@ -591,12 +844,6 @@ export function OcrReview({
 
       {isReviewAvailable && activeJob ? (
         <>
-          {!appendTargetDocumentId && (
-            <label className="field">
-              Document title
-              <input onChange={(event) => setOcrJobDocumentTitle(activeJob.id, event.target.value)} value={documentTitle} />
-            </label>
-          )}
           {reviewEntries.length === 0 ? (
             <div className="empty-state">
               <strong>No OCR pages returned</strong>
@@ -770,48 +1017,14 @@ export function OcrReview({
               {!hasBlockingItems && hasUnapprovedPages ? ' - approve or skip every included page before saving' : ''}
             </span>
             <div className="button-row">
-              {!appendTargetDocumentId && (
-                <button
-                  className="primary-button"
-                  disabled={!canSavePages}
-                  onClick={handleCreateDocument}
-                  type="button"
-                >
-                  Create document from pages
-                </button>
-              )}
-              {appendTargetDocumentId ? (
-                <span className="append-target-note">
-                  Adding to {appendTargetDocument?.title ?? 'selected document'}
-                  {selectedAppendChapter ? ` / ${selectedAppendChapter.title}` : ''}
-                </span>
-              ) : (
-                <label className="field append-target-field">
-                  Append to
-                  <select
-                    disabled={availableDocuments.length === 0}
-                    onChange={(event) => setAppendDocumentId(event.target.value)}
-                    value={appendDocumentValue}
-                  >
-                    {availableDocuments.length === 0 ? (
-                      <option value="">No documents available</option>
-                    ) : (
-                      availableDocuments.map((document) => (
-                        <option key={document.id} value={document.id}>
-                          {document.title}
-                        </option>
-                      ))
-                    )}
-                  </select>
-                </label>
-              )}
+              <span className="append-target-note">Saving to {activeJobDestinationLabel}</span>
               <button
-                className={appendTargetDocumentId ? 'primary-button' : 'secondary-button'}
-                disabled={!canSavePages || !(appendTargetDocumentId ?? appendDocumentValue)}
-                onClick={handleAppendPages}
+                className="primary-button"
+                disabled={!canSavePages}
+                onClick={handleSaveReviewedPages}
                 type="button"
               >
-                {appendTargetDocumentId ? 'Add reviewed pages' : 'Append pages'}
+                {activeJob.documentId ? 'Add reviewed pages' : 'Create document from pages'}
               </button>
             </div>
           </div>
@@ -819,14 +1032,16 @@ export function OcrReview({
       ) : (
         <button
           className="secondary-button"
-          disabled={!hasKey || fileDrafts.length === 0 || isRunning}
+          disabled={!hasKey || fileDrafts.length === 0 || isRunning || !canStartForDestination}
           onClick={() => startOcr()}
           type="button"
         >
           {isRunning
             ? 'Running OCR...'
             : fileDrafts.length > 0
-              ? `Process ${fileDrafts.length} page(s)`
+              ? canStartForDestination
+                ? `Process ${fileDrafts.length} page(s)`
+                : 'Choose a destination'
               : 'OCR disabled until files are selected'}
         </button>
       )}
@@ -1047,9 +1262,14 @@ function formatOcrProgressSummary(summary: { complete: number; running: number; 
   return `${summary.complete} of ${summary.total} complete · ${summary.running} running · ${summary.queued} queued`
 }
 
-function formatItemProgressStage(item: OcrJobItem, progress: OcrRuntimeItemProgress | undefined): string {
+function formatItemProgressStage(
+  item: OcrJobItem,
+  progress: OcrRuntimeItemProgress | undefined,
+  job: OcrJob | null,
+  batchRun: OcrBatchRun | null,
+): string {
   if (item.status === 'queued') {
-    return 'Waiting'
+    return job?.processingMode === 'batch' ? 'Not submitted' : 'Waiting'
   }
   if (item.status === 'review') {
     return 'Ready'
@@ -1061,6 +1281,10 @@ function formatItemProgressStage(item: OcrJobItem, progress: OcrRuntimeItemProgr
     return 'Skipped'
   }
 
+  if (job?.processingMode === 'batch' && batchRun) {
+    return formatBatchStageLabel(batchRun.stage, batchRun.status)
+  }
+
   const progressState = progress?.progressState ?? initialOcrProgressState
   const runningStep = OCR_PROGRESS_STEPS.find(({ stage }) => progressState[stage] === 'running')
   if (runningStep) {
@@ -1070,15 +1294,35 @@ function formatItemProgressStage(item: OcrJobItem, progress: OcrRuntimeItemProgr
   return lastCompletedStep ? lastCompletedStep.label : 'Starting'
 }
 
-function formatItemProgressMessage(item: OcrJobItem, progress: OcrRuntimeItemProgress | undefined): string {
+function formatItemProgressMessage(
+  item: OcrJobItem,
+  progress: OcrRuntimeItemProgress | undefined,
+  job: OcrJob | null,
+  batchRun: OcrBatchRun | null,
+): string {
   if (progress?.message) {
     return progress.message
   }
   if (item.status === 'queued') {
-    return 'Queued.'
+    return job?.processingMode === 'batch' ? 'Waiting for Readrail to submit this item to Gemini Batch OCR.' : 'Queued.'
   }
   if (item.status === 'review') {
     return 'Ready for review.'
+  }
+  if (item.status === 'running' && job?.processingMode === 'batch') {
+    if (!batchRun) {
+      return 'Batch OCR job created. Waiting to submit the first Gemini batch.'
+    }
+    if (!batchRun.providerBatchName) {
+      return `${formatBatchStageName(batchRun.stage)} batch is being created.`
+    }
+    if (batchRun.status === 'submitted' || batchRun.status === 'running') {
+      return `${formatBatchStageName(batchRun.stage)} is waiting for Gemini Batch results. Last provider state: ${batchRun.providerState ?? batchRun.status}.`
+    }
+    if (batchRun.status === 'succeeded') {
+      return `${formatBatchStageName(batchRun.stage)} finished. Readrail is preparing the next OCR stage.`
+    }
+    return `${formatBatchStageName(batchRun.stage)} batch ${batchRun.status}.`
   }
   return item.failureReason ?? formatItemStatus(item.status)
 }
@@ -1165,6 +1409,53 @@ function formatJobStatus(status: OcrJob['status']): string {
       return 'Failed'
     case 'cancelled':
       return 'Cancelled'
+  }
+}
+
+function formatBatchRunSummary(stage: string, state: string, lastPolledAt: string | null): string {
+  const stageLabel = formatBatchStageName(stage)
+  const checked = lastPolledAt ? ` · checked ${new Date(lastPolledAt).toLocaleTimeString()}` : ''
+  return `${stageLabel}: ${state}${checked}`
+}
+
+function formatBatchJobProgressMessage(batchRun: OcrBatchRun | null): string {
+  if (!batchRun) {
+    return 'Batch OCR job created. Waiting to submit the first Gemini batch.'
+  }
+  if (!batchRun.providerBatchName) {
+    return `${formatBatchStageName(batchRun.stage)} batch is being created.`
+  }
+  if (batchRun.status === 'submitted' || batchRun.status === 'running') {
+    const checked = batchRun.lastPolledAt ? ` Last checked ${new Date(batchRun.lastPolledAt).toLocaleTimeString()}.` : ''
+    return `${formatBatchStageName(batchRun.stage)} is waiting for Gemini Batch results.${checked}`
+  }
+  if (batchRun.status === 'succeeded') {
+    return `${formatBatchStageName(batchRun.stage)} finished. Readrail is preparing the next OCR stage.`
+  }
+  return `${formatBatchStageName(batchRun.stage)} batch ${batchRun.status}.`
+}
+
+function formatBatchStageName(stage: string): string {
+  return stage === 'ocr' ? 'OCR extraction' : stage === 'cleaner' ? 'Cleaner' : 'Formatter'
+}
+
+function formatBatchStageLabel(stage: string, status: OcrBatchRun['status']): string {
+  const stageName = formatBatchStageName(stage)
+  switch (status) {
+    case 'creating':
+      return `${stageName} - creating`
+    case 'submitted':
+      return `${stageName} - submitted`
+    case 'running':
+      return `${stageName} - waiting`
+    case 'succeeded':
+      return `${stageName} - complete`
+    case 'failed':
+      return `${stageName} - failed`
+    case 'cancelled':
+      return `${stageName} - cancelled`
+    case 'expired':
+      return `${stageName} - expired`
   }
 }
 

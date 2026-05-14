@@ -29,6 +29,7 @@ export function SettingsPanel({
   const [apiKey, setApiKey] = useState('')
   const [hasKey, setHasKey] = useState(false)
   const [message, setMessage] = useState('')
+  const [isBatchDialogOpen, setIsBatchDialogOpen] = useState(false)
 
   useEffect(() => {
     if (!isTauriRuntime()) {
@@ -65,6 +66,29 @@ export function SettingsPanel({
     setHasKey(false)
     onKeyStateChange(false, '')
     setMessage('Gemini key deleted.')
+  }
+
+  function enableBatchOcr(): void {
+    onSettingsChange({
+      ocr: {
+        ...settings.ocr,
+        processingMode: 'batch',
+        batchDisclaimerAcceptedAt: new Date().toISOString(),
+      },
+    })
+    setIsBatchDialogOpen(false)
+  }
+
+  function toggleBatchOcr(isEnabled: boolean): void {
+    if (!isEnabled) {
+      onSettingsChange({ ocr: { ...settings.ocr, processingMode: 'interactive' } })
+      return
+    }
+    if (settings.ocr.batchDisclaimerAcceptedAt) {
+      onSettingsChange({ ocr: { ...settings.ocr, processingMode: 'batch' } })
+      return
+    }
+    setIsBatchDialogOpen(true)
   }
 
   return (
@@ -180,23 +204,43 @@ export function SettingsPanel({
           <p className="settings-note">
             Supported image files are re-encoded locally before Gemini OCR. PDFs and unsupported image formats are sent unchanged.
           </p>
-          <label className="field">
-            OCR concurrency
+          <label className="toggle">
             <input
-              max={OCR_CONCURRENT_ITEM_LIMIT_MAX}
-              min={OCR_CONCURRENT_ITEM_LIMIT_MIN}
-              onChange={(event) =>
-                onSettingsChange({
-                  ocr: { ...settings.ocr, concurrentItemLimit: Number(event.target.value) },
-                })
-              }
-              type="number"
-              value={settings.ocr.concurrentItemLimit}
+              checked={settings.ocr.processingMode === 'batch'}
+              onChange={(event) => toggleBatchOcr(event.target.checked)}
+              type="checkbox"
             />
+            Use Gemini Batch OCR
           </label>
           <p className="settings-note">
-            Higher values send more Gemini requests at once.
+            Batch OCR reduces estimated Gemini OCR costs by 50%, raises imports to 500 files, and can take 24-48 hours.
           </p>
+          {settings.ocr.processingMode === 'batch' ? (
+            <div className="settings-readout" aria-label="Batch OCR import limit">
+              <span>Batch OCR import limit</span>
+              <strong>500 files</strong>
+            </div>
+          ) : (
+            <>
+              <label className="field">
+                Interactive OCR concurrency
+                <input
+                  max={OCR_CONCURRENT_ITEM_LIMIT_MAX}
+                  min={OCR_CONCURRENT_ITEM_LIMIT_MIN}
+                  onChange={(event) =>
+                    onSettingsChange({
+                      ocr: { ...settings.ocr, concurrentItemLimit: Number(event.target.value) },
+                    })
+                  }
+                  type="number"
+                  value={settings.ocr.concurrentItemLimit}
+                />
+              </label>
+              <p className="settings-note">
+                Higher values send more Gemini requests at once. Interactive OCR supports up to 25 selected files.
+              </p>
+            </>
+          )}
           <button className="danger-button" onClick={onResetData} type="button">
             Delete local app data
           </button>
@@ -228,6 +272,38 @@ export function SettingsPanel({
           </button>
         </section>
       </div>
+      {isBatchDialogOpen && (
+        <div className="modal-backdrop" role="presentation">
+          <section aria-labelledby="batch-ocr-title" className="modal-card" role="dialog">
+            <div className="panel-header compact">
+              <div>
+                <span className="eyebrow">Gemini Batch OCR</span>
+                <h2 id="batch-ocr-title">Use delayed batch processing</h2>
+              </div>
+            </div>
+            <p className="settings-note">
+              Batch OCR can cut Gemini OCR cost estimates by 50% and raises the import limit to 500 files.
+            </p>
+            <p className="settings-note">
+              Gemini targets completion within 24 hours, but jobs can take 24-48 hours depending on provider load and may expire.
+            </p>
+            <p className="settings-note">
+              Readrail can resume polling after reopen. The next OCR stage only starts while the app is open and your Gemini key is available.
+            </p>
+            <p className="settings-note">
+              Provider limits still apply, including File API storage, concurrent batch jobs, and model-specific queued token limits.
+            </p>
+            <div className="button-row">
+              <button className="primary-button" onClick={enableBatchOcr} type="button">
+                Enable Batch OCR
+              </button>
+              <button className="secondary-button" onClick={() => setIsBatchDialogOpen(false)} type="button">
+                Keep interactive OCR
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
     </section>
   )
 }

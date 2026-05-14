@@ -12,6 +12,8 @@ import type {
   DocumentChapterRecord,
   DocumentPageRecord,
   DocumentRecord,
+  OcrBatchRun,
+  OcrBatchStage,
   OcrJob,
   OcrJobItem,
   OcrJobItemPage,
@@ -31,7 +33,17 @@ import type {
   QuizAttemptKind,
 } from '../types/domain'
 import { runGeminiOcrFromFiles } from '../lib/ai/geminiOcr'
-import type { OcrPipelineProgress, OcrPipelineStage, OcrResultPage } from '../lib/ai/geminiOcr'
+import type { OcrPipelineProgress, OcrPipelineStage, OcrResult, OcrResultPage } from '../lib/ai/geminiOcr'
+import {
+  applyBatchCleanerResult,
+  applyBatchFormatterResult,
+  deleteGeminiFiles,
+  pollGeminiOcrBatch,
+  submitGeminiOcrExtractionBatch,
+  submitGeminiOcrTextBatch,
+  type GeminiBatchOcrResponse,
+} from '../lib/ai/geminiBatchOcr'
+import { estimateAiUsageCost } from '../lib/ai/pricing'
 import { stripImageMetadata } from '../lib/files/imageMetadata'
 import { calculateAdjustedWpm, calculateActualWpm } from '../lib/reading/pacing'
 import { cleanReadingText } from '../lib/text/cleanup'
@@ -42,6 +54,7 @@ import {
   loadDurableStateFromDatabase,
   saveAiUsageLineItemToDatabase,
   saveDocumentToDatabase,
+  saveOcrBatchRunToDatabase,
   saveOcrJobToDatabase,
   saveQuizAttemptToDatabase,
   saveSessionToDatabase,
@@ -121,6 +134,7 @@ type StartOcrJobInput = {
   loadApiKey: () => Promise<string | null>
   stripImageMetadataBeforeOcr: boolean
   concurrentItemLimit: number
+  processingMode?: OcrJob['processingMode']
 }
 
 type RetryOcrJobItemInput = {
@@ -151,6 +165,7 @@ export type CreateAiUsageLineItemInput = {
   ocrItemId?: string | null
   sourceFileName?: string | null
   stage: AiUsageStage
+  billingMode?: AiUsageLineItem['billingMode']
   provider: string
   model: string
   status?: AiUsageStatus
@@ -176,6 +191,7 @@ type AppState = {
   documentPages: DocumentPageRecord[]
   ocrJobs: OcrJob[]
   ocrJobItems: OcrJobItem[]
+  ocrBatchRuns: OcrBatchRun[]
   ocrRuntimeJobs: Record<string, OcrRuntimeJobState>
   sessions: ReadingSession[]
   activeDocumentId: string | null
@@ -194,6 +210,8 @@ type AppState = {
     targetChapterId?: string | null,
   ) => DocumentRecord | null
   saveOcrJob: (job: OcrJob, items: OcrJobItem[]) => void
+  saveOcrBatchRun: (batchRun: OcrBatchRun) => void
+  refreshOcrBatchJobs: (input: { loadApiKey: () => Promise<string | null>; jobIds?: string[] }) => Promise<void>
   createAiUsageLineItem: (input: CreateAiUsageLineItemInput) => AiUsageLineItem
   updateAiUsageLineItem: (id: string, updates: UpdateAiUsageLineItemInput) => AiUsageLineItem | null
   queryAiUsageLineItems: (query?: AiUsageLineItemQuery) => AiUsageLineItem[]
@@ -258,6 +276,8 @@ const defaultSettings: AppSettings = {
     modelId: 'gemini-3.1-flash-lite',
     preservePageBreaks: true,
     concurrentItemLimit: 10,
+    processingMode: 'interactive',
+    batchDisclaimerAcceptedAt: null,
   },
 }
 
@@ -321,6 +341,7 @@ function buildAiUsageLineItem(input: CreateAiUsageLineItemInput): AiUsageLineIte
     ocrItemId: input.ocrItemId ?? null,
     sourceFileName: input.sourceFileName ?? null,
     stage: input.stage,
+    billingMode: input.billingMode ?? 'interactive',
     provider: input.provider,
     model: input.model,
     status: input.status ?? 'running',
@@ -651,6 +672,7 @@ function createOcrJobRecords(
   documentId: string | null,
   targetChapterId: string | null,
   concurrentItemLimit: number,
+  processingMode: OcrJob['processingMode'],
 ): { job: OcrJob; items: OcrJobItem[]; filesByItemId: Record<string, File> } {
   const now = new Date().toISOString()
   const jobId = crypto.randomUUID()
@@ -686,6 +708,7 @@ function createOcrJobRecords(
       targetChapterId,
       status: 'queued',
       concurrentItemLimit: normalizedConcurrentItemLimit,
+      processingMode,
       modelId: OCR_MODEL_ID,
       inputFileCount: fileInputs.length,
       promptVersion: OCR_PROMPT_VERSION,
@@ -797,7 +820,11 @@ async function runOcrJob(jobId: string, input: RetryOcrJobItemInput): Promise<vo
       return
     }
 
-    await runQueuedOcrJobItems(jobId, apiKey, input.stripImageMetadataBeforeOcr, snapshot.job.concurrentItemLimit)
+    if (snapshot.job.processingMode === 'batch') {
+      await runBatchOcrJob(jobId, apiKey, input.stripImageMetadataBeforeOcr)
+    } else {
+      await runQueuedOcrJobItems(jobId, apiKey, input.stripImageMetadataBeforeOcr, snapshot.job.concurrentItemLimit)
+    }
     finalizeOcrJob(jobId)
   } catch (error) {
     const message = formatOcrErrorMessage(error)
@@ -818,6 +845,469 @@ async function runOcrJob(jobId: string, input: RetryOcrJobItemInput): Promise<vo
     )
     setOcrRuntimeState(jobId, { error: message, progressMessage: message })
   }
+}
+
+async function runBatchOcrJob(
+  jobId: string,
+  apiKey: string,
+  shouldStripImageMetadata: boolean,
+): Promise<void> {
+  await advanceBatchOcrJob(jobId, apiKey, shouldStripImageMetadata)
+}
+
+async function advanceBatchOcrJob(
+  jobId: string,
+  apiKey: string,
+  shouldStripImageMetadata: boolean,
+): Promise<void> {
+  const snapshot = getOcrJobSnapshot(jobId)
+  if (!snapshot) {
+    return
+  }
+
+  setOcrRuntimeState(jobId, {
+    error: null,
+    progressMessage: formatBatchOcrProgressMessage(jobId, snapshot.items),
+  })
+
+  const extractionRun = getOcrBatchRun(jobId, 'ocr')
+  if (!extractionRun) {
+    await submitBatchExtractionStage(jobId, apiKey, shouldStripImageMetadata)
+    return
+  }
+  if (!isTerminalBatchStatus(extractionRun.status)) {
+    await pollAndApplyBatchStage(jobId, apiKey, extractionRun)
+    return
+  }
+  if (extractionRun.status !== 'succeeded') {
+    finalizeOcrJob(jobId)
+    return
+  }
+
+  const cleanerRun = getOcrBatchRun(jobId, 'cleaner')
+  if (!cleanerRun) {
+    await submitBatchTextStage(jobId, apiKey, 'cleaner')
+    return
+  }
+  if (!isTerminalBatchStatus(cleanerRun.status)) {
+    await pollAndApplyBatchStage(jobId, apiKey, cleanerRun)
+    return
+  }
+  if (cleanerRun.status !== 'succeeded') {
+    finalizeOcrJob(jobId)
+    return
+  }
+
+  const formatterRun = getOcrBatchRun(jobId, 'formatter')
+  if (!formatterRun) {
+    await submitBatchTextStage(jobId, apiKey, 'formatter')
+    return
+  }
+  if (!isTerminalBatchStatus(formatterRun.status)) {
+    await pollAndApplyBatchStage(jobId, apiKey, formatterRun)
+  }
+}
+
+async function submitBatchExtractionStage(
+  jobId: string,
+  apiKey: string,
+  shouldStripImageMetadata: boolean,
+): Promise<void> {
+  const snapshot = getOcrJobSnapshot(jobId)
+  const runtime = useAppStore.getState().ocrRuntimeJobs[jobId]
+  if (!snapshot || !runtime) {
+    return
+  }
+
+  const itemsWithFiles = snapshot.items
+    .filter((item) => item.status === 'queued' || item.status === 'running')
+    .map((item) => ({ item, file: runtime.filesByItemId[item.id] }))
+  const missingItems = itemsWithFiles.filter((entry) => !entry.file).map((entry) => entry.item)
+  missingItems.forEach((item) => {
+    markOcrItemFailed(jobId, item.id, 'Readrail needs the original file to submit this batch OCR item.')
+  })
+
+  const readyEntries = itemsWithFiles.filter((entry): entry is { item: OcrJobItem; file: File } => Boolean(entry.file))
+  if (!readyEntries.length) {
+    return
+  }
+
+  const now = new Date().toISOString()
+  const itemIds = readyEntries.map((entry) => entry.item.id)
+  const batchRun = createOcrBatchRun(jobId, 'ocr', itemIds, now)
+  useAppStore.getState().saveOcrBatchRun(batchRun)
+  useAppStore.getState().saveOcrJob(
+    { ...snapshot.job, status: 'running', errorMessage: null, completedAt: null, updatedAt: now },
+    snapshot.items.map((item) =>
+      itemIds.includes(item.id)
+        ? { ...item, status: 'running', failureReason: null, warnings: [], pages: [], ocrText: null, updatedAt: now }
+        : item,
+    ),
+  )
+  itemIds.forEach((itemId) => {
+    setOcrRuntimeItemProgress(jobId, itemId, {
+      message: 'Submitted to Gemini Batch OCR.',
+      startedAt: now,
+      completedAt: null,
+      failureMessage: null,
+      progressState: { ocr: 'running', cleaner: 'pending', formatter: 'pending' },
+    })
+  })
+
+  const preparedEntries = await Promise.all(
+    readyEntries.map(async (entry) => ({
+      item: entry.item,
+      prepared: await prepareFilesForOcr([entry.file], shouldStripImageMetadata),
+    })),
+  )
+  const submitted = await submitGeminiOcrExtractionBatch(
+    apiKey,
+    preparedEntries.map((entry) => ({
+      itemId: entry.item.id,
+      file: entry.prepared.files[0],
+    })),
+  )
+  const submittedAt = new Date().toISOString()
+  const warningsByItemId = new Map(preparedEntries.map((entry) => [entry.item.id, entry.prepared.warnings]))
+  const latest = getOcrJobSnapshot(jobId)
+  if (latest) {
+    useAppStore.getState().saveOcrJob(
+      { ...latest.job, updatedAt: submittedAt },
+      latest.items.map((item) =>
+        warningsByItemId.has(item.id)
+          ? { ...item, warnings: warningsByItemId.get(item.id) ?? [], updatedAt: submittedAt }
+          : item,
+      ),
+    )
+  }
+  useAppStore.getState().saveOcrBatchRun({
+    ...batchRun,
+    status: submitted.status,
+    providerBatchName: submitted.batchName,
+    providerState: submitted.providerState,
+    remoteFileNames: submitted.remoteFileNames,
+    submittedAt,
+    updatedAt: submittedAt,
+  })
+}
+
+async function submitBatchTextStage(
+  jobId: string,
+  apiKey: string,
+  stage: Extract<OcrBatchStage, 'cleaner' | 'formatter'>,
+): Promise<void> {
+  const snapshot = getOcrJobSnapshot(jobId)
+  if (!snapshot) {
+    return
+  }
+
+  const readyItems = snapshot.items.filter((item) => item.status === 'running' && item.pages.length > 0)
+  if (!readyItems.length) {
+    return
+  }
+
+  const now = new Date().toISOString()
+  const batchRun = createOcrBatchRun(jobId, stage, readyItems.map((item) => item.id), now)
+  useAppStore.getState().saveOcrBatchRun(batchRun)
+  readyItems.forEach((item) => {
+    const currentProgress =
+      useAppStore.getState().ocrRuntimeJobs[jobId]?.itemProgressById[item.id]?.progressState ?? initialOcrProgressState
+    setOcrRuntimeItemProgress(jobId, item.id, {
+      message: stage === 'cleaner' ? 'Submitted to Gemini Batch cleaner.' : 'Submitted to Gemini Batch formatter.',
+      progressState: { ...currentProgress, [stage]: 'running' },
+    })
+  })
+  const submitted = await submitGeminiOcrTextBatch(
+    apiKey,
+    stage,
+    readyItems.map((item) => ({ itemId: item.id, result: ocrResultFromJobItem(item) })),
+  )
+  const submittedAt = new Date().toISOString()
+  useAppStore.getState().saveOcrBatchRun({
+    ...batchRun,
+    status: submitted.status,
+    providerBatchName: submitted.batchName,
+    providerState: submitted.providerState,
+    submittedAt,
+    updatedAt: submittedAt,
+  })
+}
+
+async function pollAndApplyBatchStage(jobId: string, apiKey: string, batchRun: OcrBatchRun): Promise<void> {
+  if (!batchRun.providerBatchName) {
+    failBatchRun(batchRun, 'Gemini did not return a batch id.')
+    return
+  }
+
+  const polled = await pollGeminiOcrBatch(apiKey, batchRun.providerBatchName, batchRun.itemIds)
+  const now = new Date().toISOString()
+  const nextRun: OcrBatchRun = {
+    ...batchRun,
+    status: polled.status,
+    providerBatchName: polled.batchName,
+    providerState: polled.providerState,
+    completedRequestCount: polled.completedRequestCount,
+    failedRequestCount: polled.failedRequestCount,
+    errorMessage: polled.errorMessage,
+    updatedAt: now,
+    completedAt: isTerminalBatchStatus(polled.status) ? now : null,
+    lastPolledAt: now,
+  }
+  useAppStore.getState().saveOcrBatchRun(nextRun)
+
+  if (!isTerminalBatchStatus(polled.status)) {
+    setOcrRuntimeState(jobId, { progressMessage: formatBatchOcrProgressMessage(jobId, getOcrJobSnapshot(jobId)?.items ?? []) })
+    return
+  }
+
+  if (polled.status !== 'succeeded') {
+    batchRun.itemIds.forEach((itemId) => markOcrItemFailed(jobId, itemId, polled.errorMessage ?? `Gemini batch ${polled.status}.`))
+    finalizeOcrJob(jobId)
+    return
+  }
+
+  applyBatchStageResponses(jobId, nextRun, polled.responses)
+  if (batchRun.stage === 'ocr') {
+    const cleanupWarning = await deleteGeminiFiles(apiKey, batchRun.remoteFileNames)
+    if (cleanupWarning) {
+      useAppStore.getState().saveOcrBatchRun({ ...nextRun, cleanupWarning })
+      appendOcrJobWarning(jobId, cleanupWarning)
+    }
+  }
+  await advanceBatchOcrJob(jobId, apiKey, false)
+}
+
+function applyBatchStageResponses(jobId: string, batchRun: OcrBatchRun, responses: GeminiBatchOcrResponse[]): void {
+  const snapshot = getOcrJobSnapshot(jobId)
+  if (!snapshot) {
+    return
+  }
+
+  const responsesByItemId = new Map(responses.map((response) => [response.itemId, response]))
+  const completedAt = new Date().toISOString()
+  const stageStatus: Record<OcrPipelineStage, OcrStageState> =
+    batchRun.stage === 'ocr'
+      ? { ocr: 'done', cleaner: 'pending', formatter: 'pending' }
+      : batchRun.stage === 'cleaner'
+        ? { ocr: 'done', cleaner: 'done', formatter: 'pending' }
+        : { ocr: 'done', cleaner: 'done', formatter: 'done' }
+
+  useAppStore.getState().saveOcrJob(
+    { ...snapshot.job, updatedAt: completedAt },
+    snapshot.items.map((item) => {
+      const response = responsesByItemId.get(item.id)
+      if (!response) {
+        return item
+      }
+      recordBatchUsageLineItem(snapshot.job, item, batchRun, response, completedAt)
+      if (response.errorMessage || !response.result) {
+        return {
+          ...item,
+          status: 'failed',
+          failureReason: response.errorMessage ?? 'Gemini batch response did not include OCR output.',
+          updatedAt: completedAt,
+        }
+      }
+      const previousResult = ocrResultFromJobItem(item)
+      const nextResult =
+        batchRun.stage === 'ocr'
+          ? response.result
+          : batchRun.stage === 'cleaner'
+            ? applyBatchCleanerResult(previousResult, response.result)
+            : applyBatchFormatterResult(previousResult, response.result)
+      const pages = nextResult.pages.map((page, pageIndex) =>
+        buildOcrJobItemPageFromMetadata(page, item, pageIndex, nextResult.pages.length),
+      )
+      return {
+        ...item,
+        status: batchRun.stage === 'formatter' ? 'review' : 'running',
+        ocrText: pages.map((page) => page.text).join('\n\n'),
+        pages,
+        warnings: uniqueStrings([...item.warnings, ...nextResult.warnings]),
+        failureReason: null,
+        updatedAt: completedAt,
+      }
+    }),
+  )
+
+  responses.forEach((response) => {
+    setOcrRuntimeItemProgress(jobId, response.itemId, {
+      message: response.errorMessage ?? formatBatchStageDoneMessage(batchRun.stage),
+      completedAt: batchRun.stage === 'formatter' || response.errorMessage ? completedAt : null,
+      failureMessage: response.errorMessage,
+      progressState: response.errorMessage ? { ...stageStatus, [batchRun.stage]: 'failed' } : stageStatus,
+    })
+  })
+}
+
+function recordBatchUsageLineItem(
+  job: OcrJob,
+  item: OcrJobItem,
+  batchRun: OcrBatchRun,
+  response: GeminiBatchOcrResponse,
+  completedAt: string,
+): void {
+  const stage: AiUsageStage =
+    batchRun.stage === 'ocr' ? 'ocr_extraction' : batchRun.stage === 'cleaner' ? 'ocr_cleaner' : 'ocr_formatter'
+  useAppStore.getState().createAiUsageLineItem({
+    id: `${batchRun.id}:${item.id}`,
+    documentId: job.documentId,
+    ocrJobId: job.id,
+    ocrItemId: item.id,
+    sourceFileName: item.sourceFileName,
+    stage,
+    billingMode: 'batch',
+    provider: 'google',
+    model: job.modelId,
+    status: response.errorMessage ? 'failed' : 'succeeded',
+    startedAt: batchRun.submittedAt ?? batchRun.createdAt,
+    completedAt,
+    failureMessage: response.errorMessage,
+    rawProviderMetadata: {
+      ...(response.rawProviderMetadata ?? {}),
+      batchName: batchRun.providerBatchName,
+      providerState: batchRun.providerState,
+    },
+    tokenBreakdown: response.tokenBreakdown,
+    pricingSnapshot: estimateAiUsageCost({
+      provider: 'google',
+      modelId: job.modelId,
+      effectiveDate: completedAt,
+      tokenBreakdown: response.tokenBreakdown,
+      billingMode: 'batch',
+    }),
+  })
+}
+
+function createOcrBatchRun(jobId: string, stage: OcrBatchStage, itemIds: string[], now: string): OcrBatchRun {
+  return {
+    id: crypto.randomUUID(),
+    jobId,
+    stage,
+    status: 'creating',
+    providerBatchName: null,
+    providerState: null,
+    requestCount: itemIds.length,
+    completedRequestCount: 0,
+    failedRequestCount: 0,
+    itemIds,
+    remoteFileNames: [],
+    errorMessage: null,
+    cleanupWarning: null,
+    createdAt: now,
+    submittedAt: null,
+    updatedAt: now,
+    completedAt: null,
+    lastPolledAt: null,
+  }
+}
+
+function getOcrBatchRun(jobId: string, stage: OcrBatchStage): OcrBatchRun | null {
+  return (
+    useAppStore
+      .getState()
+      .ocrBatchRuns.filter((run) => run.jobId === jobId && run.stage === stage)
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0] ?? null
+  )
+}
+
+function isTerminalBatchStatus(status: OcrBatchRun['status']): boolean {
+  return status === 'succeeded' || status === 'failed' || status === 'cancelled' || status === 'expired'
+}
+
+function failBatchRun(batchRun: OcrBatchRun, message: string): void {
+  const now = new Date().toISOString()
+  useAppStore.getState().saveOcrBatchRun({
+    ...batchRun,
+    status: 'failed',
+    errorMessage: message,
+    updatedAt: now,
+    completedAt: now,
+  })
+}
+
+function appendOcrJobWarning(jobId: string, warning: string): void {
+  const snapshot = getOcrJobSnapshot(jobId)
+  if (!snapshot) {
+    return
+  }
+  useAppStore.getState().saveOcrJob(
+    { ...snapshot.job, warnings: uniqueStrings([...snapshot.job.warnings, warning]), updatedAt: new Date().toISOString() },
+    snapshot.items,
+  )
+}
+
+function ocrResultFromJobItem(item: OcrJobItem): OcrResult {
+  return {
+    titleGuess: item.title,
+    warnings: item.warnings,
+    pages: item.pages.map((page) => ({
+      pageNumber: page.pageNumber,
+      sourcePageNumber: page.sourcePageNumber,
+      text: page.text,
+      uncertainSpans: page.uncertainSpans,
+      confidence: page.ocrConfidence,
+      notes: page.ocrNotes,
+      sourceFileName: page.sourceFileName,
+    })),
+  }
+}
+
+function buildOcrJobItemPageFromMetadata(
+  page: OcrResultPage,
+  item: OcrJobItem,
+  pageIndex: number,
+  itemPageCount: number,
+): OcrJobItemPage {
+  return {
+    pageNumber: pageIndex + 1,
+    title: itemPageCount === 1 ? item.title : item.title ? `${item.title} ${pageIndex + 1}` : null,
+    text: page.text,
+    reviewStatus: inferOcrReviewStatus(page.uncertainSpans.length, page.confidence, page.notes),
+    sourcePageNumber:
+      page.sourcePageNumber ??
+      (itemPageCount === 1 && item.sourcePageNumber !== null ? item.sourcePageNumber : null) ??
+      page.pageNumber,
+    ocrConfidence: page.confidence,
+    ocrNotes: page.notes,
+    uncertainSpans: page.uncertainSpans,
+    sourceFileName: page.sourceFileName ?? item.sourceFileName,
+    sourceKind: inferOcrSourceKindFromItem(item),
+  }
+}
+
+function inferOcrSourceKindFromItem(item: OcrJobItem): OcrPageInput['sourceKind'] {
+  if (item.sourceFileType === 'application/pdf' || /\.pdf$/i.test(item.sourceFileName)) {
+    return 'pdf'
+  }
+  if (item.sourceFileType.startsWith('image/')) {
+    return 'image'
+  }
+  return null
+}
+
+function formatBatchStageDoneMessage(stage: OcrBatchStage): string {
+  if (stage === 'ocr') {
+    return 'Batch OCR extracted text.'
+  }
+  if (stage === 'cleaner') {
+    return 'Batch cleaner finished.'
+  }
+  return 'Batch formatter finished.'
+}
+
+function formatBatchOcrProgressMessage(jobId: string, items: OcrJobItem[]): string {
+  const activeRun = useAppStore
+    .getState()
+    .ocrBatchRuns.filter((run) => run.jobId === jobId && !isTerminalBatchStatus(run.status))
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0]
+  const baseMessage = formatOcrQueueProgressMessage(items)
+  if (!activeRun) {
+    return baseMessage
+  }
+  const stageLabel = activeRun.stage === 'ocr' ? 'OCR extraction' : activeRun.stage === 'cleaner' ? 'Cleaner' : 'Formatter'
+  const checked = activeRun.lastPolledAt ? ` Last checked ${new Date(activeRun.lastPolledAt).toLocaleTimeString()}.` : ''
+  return `${stageLabel} batch ${activeRun.providerState ?? activeRun.status}.${checked}`
 }
 
 async function runQueuedOcrJobItems(
@@ -1027,18 +1517,27 @@ function finalizeOcrJob(jobId: string): void {
   const hasReviewItems = snapshot.items.some((item) => item.status === 'review')
   const hasFailedItems = snapshot.items.some((item) => item.status === 'failed')
   const status: OcrJob['status'] = hasRunningItems ? 'running' : hasReviewItems || hasFailedItems ? 'review' : 'failed'
+  const errorMessage = hasRunningItems || hasReviewItems || hasFailedItems ? null : 'No OCR pages returned.'
   useAppStore.getState().saveOcrJob(
     {
       ...snapshot.job,
       status,
-      errorMessage: hasReviewItems || hasFailedItems ? null : 'No OCR pages returned.',
+      errorMessage,
       updatedAt: now,
       completedAt: hasRunningItems ? null : now,
     },
     snapshot.items,
   )
   setOcrRuntimeState(jobId, {
-    progressMessage: status === 'review' ? 'Ready for review.' : 'OCR finished without reviewable pages.',
+    error: errorMessage,
+    progressMessage:
+      status === 'running'
+        ? snapshot.job.processingMode === 'batch'
+          ? formatBatchOcrProgressMessage(jobId, snapshot.items)
+          : formatOcrQueueProgressMessage(snapshot.items)
+        : status === 'review'
+          ? 'Ready for review.'
+          : 'OCR finished without reviewable pages.',
   })
 }
 
@@ -1196,6 +1695,7 @@ export const useAppStore = create<AppState>()(
       documentPages: [],
       ocrJobs: [],
       ocrJobItems: [],
+      ocrBatchRuns: [],
       ocrRuntimeJobs: {},
       sessions: [],
       activeDocumentId: null,
@@ -1366,6 +1866,67 @@ export const useAppStore = create<AppState>()(
         }))
         void saveOcrJobToDatabase(job, items)
       },
+      saveOcrBatchRun: (batchRun) => {
+        set((state) => ({
+          ocrBatchRuns: [batchRun, ...state.ocrBatchRuns.filter((candidate) => candidate.id !== batchRun.id)],
+        }))
+        void saveOcrBatchRunToDatabase(batchRun)
+      },
+      refreshOcrBatchJobs: async (input) => {
+        const apiKey = await input.loadApiKey()
+        if (!apiKey) {
+          const now = new Date().toISOString()
+          set((state) => ({
+            ocrRuntimeJobs: {
+              ...state.ocrRuntimeJobs,
+              ...Object.fromEntries(
+                state.ocrJobs
+                  .filter((job) => job.processingMode === 'batch' && (job.status === 'queued' || job.status === 'running'))
+                  .map((job) => [
+                    job.id,
+                    {
+                      ...(state.ocrRuntimeJobs[job.id] ?? {
+                        jobId: job.id,
+                        filesByItemId: {},
+                        progressState: { ...initialOcrProgressState },
+                        itemProgressById: {},
+                        titleGuess: null,
+                        documentTitle: '',
+                        error: null,
+                      }),
+                      progressMessage: 'Needs Gemini key to resume batch OCR polling.',
+                      error: 'Needs Gemini key to resume batch OCR polling.',
+                    },
+                  ]),
+              ),
+            },
+          }))
+          useAppStore
+            .getState()
+            .ocrJobs.filter((job) => job.processingMode === 'batch' && (job.status === 'queued' || job.status === 'running'))
+            .forEach((job) => {
+              const snapshot = getOcrJobSnapshot(job.id)
+              if (snapshot) {
+                useAppStore.getState().saveOcrJob({ ...snapshot.job, updatedAt: now }, snapshot.items)
+              }
+            })
+          return
+        }
+
+        const jobIdFilter = input.jobIds ? new Set(input.jobIds) : null
+        const jobs = get()
+          .ocrJobs.filter(
+            (job) =>
+              job.processingMode === 'batch' &&
+              (job.status === 'queued' || job.status === 'running') &&
+              (!jobIdFilter || jobIdFilter.has(job.id)),
+          )
+          .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+        for (const job of jobs) {
+          await advanceBatchOcrJob(job.id, apiKey, false)
+          finalizeOcrJob(job.id)
+        }
+      },
       createAiUsageLineItem: (input) => {
         const lineItem = buildAiUsageLineItem(input)
         set((state) => ({
@@ -1399,7 +1960,13 @@ export const useAppStore = create<AppState>()(
           return null
         }
 
-        const records = createOcrJobRecords(input.files, input.documentId, input.targetChapterId, input.concurrentItemLimit)
+        const records = createOcrJobRecords(
+          input.files,
+          input.documentId,
+          input.targetChapterId,
+          input.concurrentItemLimit,
+          input.processingMode ?? useAppStore.getState().settings.ocr.processingMode,
+        )
         set((state) => ({
           ocrRuntimeJobs: {
             ...state.ocrRuntimeJobs,
@@ -1553,6 +2120,10 @@ export const useAppStore = create<AppState>()(
         const state = useAppStore.getState()
         for (const job of state.ocrJobs) {
           if (job.status !== 'queued' && job.status !== 'running') {
+            continue
+          }
+          if (job.processingMode === 'batch') {
+            setOcrRuntimeState(job.id, { progressMessage: 'Batch OCR can resume when Readrail polls Gemini again.' })
             continue
           }
           const items = state.ocrJobItems.filter((item) => item.jobId === job.id)
@@ -2169,6 +2740,11 @@ export const useAppStore = create<AppState>()(
               concurrentItemLimit: normalizeOcrConcurrentItemLimit(
                 settings.ocr?.concurrentItemLimit ?? state.settings.ocr.concurrentItemLimit,
               ),
+              processingMode: settings.ocr?.processingMode === 'batch' ? 'batch' : settings.ocr?.processingMode === 'interactive' ? 'interactive' : state.settings.ocr.processingMode,
+              batchDisclaimerAcceptedAt:
+                settings.ocr?.batchDisclaimerAcceptedAt === undefined
+                  ? state.settings.ocr.batchDisclaimerAcceptedAt
+                  : settings.ocr.batchDisclaimerAcceptedAt,
             },
           },
         }))
@@ -2309,6 +2885,7 @@ export const useAppStore = create<AppState>()(
           documentPages: [],
           ocrJobs: [],
           ocrJobItems: [],
+          ocrBatchRuns: [],
           ocrRuntimeJobs: {},
           sessions: [],
           activeDocumentId: null,
@@ -2354,6 +2931,7 @@ export const useAppStore = create<AppState>()(
           documentPages: databaseState.documentPages,
           ocrJobs: databaseState.ocrJobs,
           ocrJobItems: databaseState.ocrJobItems,
+          ocrBatchRuns: databaseState.ocrBatchRuns,
           sessions: databaseState.sessions,
           activeDocumentId:
             state.activeDocumentId ??
@@ -2369,7 +2947,7 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: 'readrail-local-state',
-      version: 12,
+      version: 13,
       migrate: (persistedState: unknown, fromVersion: number) => {
         const state = persistedState as Record<string, unknown>
         const settings = state.settings as AppSettings | undefined
@@ -2420,6 +2998,7 @@ export const useAppStore = create<AppState>()(
         if (fromVersion < 6) {
           state.ocrJobs = state.ocrJobs || []
           state.ocrJobItems = state.ocrJobItems || []
+          state.ocrBatchRuns = state.ocrBatchRuns || []
         }
         // v6 -> v7: seed Reader scope metadata for legacy sessions.
         if (fromVersion < 7) {
@@ -2463,6 +3042,24 @@ export const useAppStore = create<AppState>()(
             concurrentItemLimit: normalizeOcrConcurrentItemLimit(job.concurrentItemLimit),
           }))
         }
+        if (fromVersion < 13) {
+          state.ocrBatchRuns = state.ocrBatchRuns || []
+          if (settings?.ocr) {
+            settings.ocr.processingMode = settings.ocr.processingMode === 'batch' ? 'batch' : 'interactive'
+            settings.ocr.batchDisclaimerAcceptedAt =
+              typeof settings.ocr.batchDisclaimerAcceptedAt === 'string' ? settings.ocr.batchDisclaimerAcceptedAt : null
+          }
+          const jobs = (state.ocrJobs as OcrJob[] | undefined) ?? []
+          state.ocrJobs = jobs.map((job) => ({
+            ...job,
+            processingMode: job.processingMode === 'batch' ? 'batch' : 'interactive',
+          }))
+          const lineItems = (state.aiUsageLineItems as AiUsageLineItem[] | undefined) ?? []
+          state.aiUsageLineItems = lineItems.map((lineItem) => ({
+            ...lineItem,
+            billingMode: lineItem.billingMode === 'batch' ? 'batch' : 'interactive',
+          }))
+        }
         return state
       },
       partialize: (state) => ({
@@ -2471,6 +3068,7 @@ export const useAppStore = create<AppState>()(
         documentPages: state.documentPages,
         ocrJobs: state.ocrJobs,
         ocrJobItems: state.ocrJobItems,
+        ocrBatchRuns: state.ocrBatchRuns,
         sessions: state.sessions,
         activeDocumentId: state.activeDocumentId,
         settings: state.settings,

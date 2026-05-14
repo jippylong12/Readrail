@@ -14,6 +14,8 @@ const settings: AppSettings = {
     modelId: 'gemini-3.1-flash-lite',
     preservePageBreaks: true,
     concurrentItemLimit: 10,
+    processingMode: 'interactive',
+    batchDisclaimerAcceptedAt: null,
   },
   privacy: {
     confirmRemoteOcrEachTime: true,
@@ -79,12 +81,37 @@ describe('SettingsPanel', () => {
       />,
     )
 
-    expect(screen.getByText('Higher values send more Gemini requests at once.')).toBeTruthy()
+    expect(screen.getByText('Higher values send more Gemini requests at once. Interactive OCR supports up to 25 selected files.')).toBeTruthy()
 
-    fireEvent.change(screen.getByLabelText('OCR concurrency'), { target: { value: '25' } })
+    fireEvent.change(screen.getByLabelText('Interactive OCR concurrency'), { target: { value: '25' } })
 
     expect(onSettingsChange).toHaveBeenCalledWith({
       ocr: expect.objectContaining({ concurrentItemLimit: 25 }),
     })
+  })
+
+  it('replaces interactive concurrency with the batch file limit when Batch OCR is enabled', () => {
+    render(
+      <SettingsPanel
+        baselineResult={null}
+        settings={{
+          ...settings,
+          ocr: {
+            ...settings.ocr,
+            processingMode: 'batch',
+            batchDisclaimerAcceptedAt: '2026-05-14T12:00:00.000Z',
+          },
+        }}
+        onKeyStateChange={vi.fn()}
+        onOpenJourney={vi.fn()}
+        onReplayTour={vi.fn()}
+        onResetData={vi.fn()}
+        onResetTours={vi.fn()}
+        onSettingsChange={vi.fn()}
+      />,
+    )
+
+    expect(screen.queryByLabelText('Interactive OCR concurrency')).toBeNull()
+    expect(screen.getByLabelText('Batch OCR import limit').textContent).toContain('500 files')
   })
 })

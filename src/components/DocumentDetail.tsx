@@ -1,24 +1,17 @@
 import { useEffect, useState } from 'react'
 import { DocumentOrganizer } from './DocumentOrganizer'
-import { OcrReview } from './OcrReview'
 import { getOrderedChapterPages, getOrderedDocumentChapters } from '../app/structuredDocuments'
 import type { OcrPageInput } from '../app/store'
 import type { DocumentChapterRecord, DocumentPageRecord, DocumentRecord } from '../types/domain'
 
 type DocumentDetailProps = {
   document: DocumentRecord | null
-  documents: DocumentRecord[]
   chapters: DocumentChapterRecord[]
   pages: DocumentPageRecord[]
-  hasKey: boolean
-  preservePageBreaks: boolean
-  stripImageMetadataBeforeOcr: boolean
-  loadApiKey: () => Promise<string | null>
   routeChapterId?: string | null
   routePageNumber?: number | null
   onBack: () => void
   onOpenCosts: (documentId: string) => void
-  onOpenJobCosts: (ocrJobId: string) => void
   onDocumentViewChange: (
     documentId: string,
     chapterId: string | null,
@@ -38,24 +31,17 @@ type DocumentDetailProps = {
     updates: Partial<Pick<DocumentPageRecord, 'ocrNotes' | 'reviewStatus' | 'sourcePageNumber' | 'text' | 'title'>>,
   ) => void
   onAppendPages: (documentId: string, pages: OcrPageInput[], chapterId?: string | null) => void
-  onCreateDocument: (title: string, pages: OcrPageInput[]) => void
   onOpenPageDetail: (documentId: string, pageId: string) => void
 }
 
 export function DocumentDetail({
   document,
-  documents,
   chapters,
   pages,
-  hasKey,
-  preservePageBreaks,
-  stripImageMetadataBeforeOcr,
-  loadApiKey,
   routeChapterId,
   routePageNumber,
   onBack,
   onOpenCosts,
-  onOpenJobCosts,
   onDocumentViewChange,
   onOpenReader,
   onCreateChapter,
@@ -67,7 +53,6 @@ export function DocumentDetail({
   onDeletePages,
   onUpdatePageMetadata,
   onAppendPages,
-  onCreateDocument,
   onOpenPageDetail,
 }: DocumentDetailProps) {
   const documentChapters = document ? chapters.filter((chapter) => chapter.documentId === document.id) : []
@@ -104,12 +89,6 @@ export function DocumentDetail({
       </section>
     )
   }
-
-  const nextSourcePageNumber =
-    documentPages.reduce((highestPageNumber, page) => {
-      const candidate = page.sourcePageNumber ?? page.pageNumber
-      return Number.isFinite(candidate) ? Math.max(highestPageNumber, candidate) : highestPageNumber
-    }, 0) + 1
 
   return (
     <div className="content-stack">
@@ -190,21 +169,6 @@ export function DocumentDetail({
           selectedChapterId={selectedChapter?.id ?? null}
         />
       </section>
-
-      <OcrReview
-        appendTargetDocumentId={document.id}
-        appendTargetChapterId={selectedChapter?.id ?? null}
-        appendStartSourcePageNumber={nextSourcePageNumber}
-        documents={documents}
-        documentChapters={chapters}
-        hasKey={hasKey}
-        loadApiKey={loadApiKey}
-        onAppendPages={onAppendPages}
-        onCreateDocument={onCreateDocument}
-        onOpenJobCosts={onOpenJobCosts}
-        preservePageBreaks={preservePageBreaks}
-        stripImageMetadataBeforeOcr={stripImageMetadataBeforeOcr}
-      />
     </div>
   )
 }

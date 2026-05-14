@@ -8,6 +8,7 @@ import type {
   DocumentChapterRecord,
   DocumentPageRecord,
   DocumentRecord,
+  OcrBatchRun,
   OcrJob,
   OcrJobItem,
   OcrJobItemPage,
@@ -50,6 +51,7 @@ export type DurableDatabaseState = {
   documentPages: DocumentPageRecord[]
   ocrJobs: OcrJob[]
   ocrJobItems: OcrJobItem[]
+  ocrBatchRuns: OcrBatchRun[]
   sessions: ReadingSession[]
   quizAttempts: QuizAttempt[]
   aiUsageLineItems: AiUsageLineItem[]
@@ -177,6 +179,7 @@ export async function clearDurableStateFromDatabase(): Promise<void> {
   await database.execute('DELETE FROM quiz_attempts')
   await database.execute('DELETE FROM comprehension_checks')
   await database.execute('DELETE FROM reading_sessions')
+  await database.execute('DELETE FROM ocr_batch_runs')
   await database.execute('DELETE FROM ocr_job_items')
   await database.execute('DELETE FROM ocr_jobs')
   await database.execute('DELETE FROM source_files')
@@ -246,14 +249,15 @@ export async function saveOcrJobToDatabase(job: OcrJob, items: OcrJobItem[]): Pr
 
   await database.execute(
     `INSERT INTO ocr_jobs (
-      id, document_id, target_chapter_id, status, concurrent_item_limit, model_id, input_file_count, prompt_version,
+      id, document_id, target_chapter_id, status, concurrent_item_limit, processing_mode, model_id, input_file_count, prompt_version,
       warnings_json, error_message, created_at, updated_at, completed_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
     ON CONFLICT(id) DO UPDATE SET
       document_id = excluded.document_id,
       target_chapter_id = excluded.target_chapter_id,
       status = excluded.status,
       concurrent_item_limit = excluded.concurrent_item_limit,
+      processing_mode = excluded.processing_mode,
       input_file_count = excluded.input_file_count,
       warnings_json = excluded.warnings_json,
       error_message = excluded.error_message,
@@ -265,6 +269,7 @@ export async function saveOcrJobToDatabase(job: OcrJob, items: OcrJobItem[]): Pr
       job.targetChapterId,
       job.status,
       job.concurrentItemLimit,
+      job.processingMode,
       job.modelId,
       job.inputFileCount,
       job.promptVersion,
@@ -319,6 +324,56 @@ export async function saveOcrJobToDatabase(job: OcrJob, items: OcrJobItem[]): Pr
   }
 }
 
+export async function saveOcrBatchRunToDatabase(batchRun: OcrBatchRun): Promise<void> {
+  const database = await getDatabase()
+  if (!database) {
+    return
+  }
+
+  await database.execute(
+    `INSERT INTO ocr_batch_runs (
+      id, job_id, stage, status, provider_batch_name, provider_state, request_count,
+      completed_request_count, failed_request_count, item_ids_json, remote_file_names_json,
+      error_message, cleanup_warning, created_at, submitted_at, updated_at, completed_at, last_polled_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+    ON CONFLICT(id) DO UPDATE SET
+      status = excluded.status,
+      provider_batch_name = excluded.provider_batch_name,
+      provider_state = excluded.provider_state,
+      request_count = excluded.request_count,
+      completed_request_count = excluded.completed_request_count,
+      failed_request_count = excluded.failed_request_count,
+      item_ids_json = excluded.item_ids_json,
+      remote_file_names_json = excluded.remote_file_names_json,
+      error_message = excluded.error_message,
+      cleanup_warning = excluded.cleanup_warning,
+      submitted_at = excluded.submitted_at,
+      updated_at = excluded.updated_at,
+      completed_at = excluded.completed_at,
+      last_polled_at = excluded.last_polled_at`,
+    [
+      batchRun.id,
+      batchRun.jobId,
+      batchRun.stage,
+      batchRun.status,
+      batchRun.providerBatchName,
+      batchRun.providerState,
+      batchRun.requestCount,
+      batchRun.completedRequestCount,
+      batchRun.failedRequestCount,
+      JSON.stringify(batchRun.itemIds),
+      JSON.stringify(batchRun.remoteFileNames),
+      batchRun.errorMessage,
+      batchRun.cleanupWarning,
+      batchRun.createdAt,
+      batchRun.submittedAt,
+      batchRun.updatedAt,
+      batchRun.completedAt,
+      batchRun.lastPolledAt,
+    ],
+  )
+}
+
 export async function saveAiUsageLineItemToDatabase(lineItem: AiUsageLineItem): Promise<void> {
   const database = await getDatabase()
   if (!database) {
@@ -327,16 +382,17 @@ export async function saveAiUsageLineItemToDatabase(lineItem: AiUsageLineItem): 
 
   await database.execute(
     `INSERT INTO ai_usage_line_items (
-      id, document_id, ocr_job_id, ocr_item_id, source_file_name, stage, provider, model,
+      id, document_id, ocr_job_id, ocr_item_id, source_file_name, stage, billing_mode, provider, model,
       status, started_at, completed_at, failure_message, raw_provider_metadata_json,
       token_breakdown_json, pricing_snapshot_json
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
     ON CONFLICT(id) DO UPDATE SET
       document_id = excluded.document_id,
       ocr_job_id = excluded.ocr_job_id,
       ocr_item_id = excluded.ocr_item_id,
       source_file_name = excluded.source_file_name,
       stage = excluded.stage,
+      billing_mode = excluded.billing_mode,
       provider = excluded.provider,
       model = excluded.model,
       status = excluded.status,
@@ -352,6 +408,7 @@ export async function saveAiUsageLineItemToDatabase(lineItem: AiUsageLineItem): 
       lineItem.ocrItemId,
       lineItem.sourceFileName,
       lineItem.stage,
+      lineItem.billingMode ?? 'interactive',
       lineItem.provider,
       lineItem.model,
       lineItem.status,
@@ -487,6 +544,7 @@ export async function loadDurableStateFromDatabase(): Promise<DurableDatabaseSta
     pageRows,
     ocrJobRows,
     ocrJobItemRows,
+    ocrBatchRunRows,
     sessionRows,
     quizAttemptRows,
     aiUsageLineItemRows,
@@ -496,6 +554,7 @@ export async function loadDurableStateFromDatabase(): Promise<DurableDatabaseSta
     database.select<DocumentPageRow[]>('SELECT * FROM document_pages ORDER BY document_id ASC, sort_order ASC'),
     database.select<OcrJobRow[]>('SELECT * FROM ocr_jobs ORDER BY updated_at DESC, created_at DESC'),
     database.select<OcrJobItemRow[]>('SELECT * FROM ocr_job_items ORDER BY job_id ASC, order_index ASC'),
+    database.select<OcrBatchRunRow[]>('SELECT * FROM ocr_batch_runs ORDER BY updated_at DESC, created_at DESC'),
     database.select<ReadingSessionRow[]>('SELECT * FROM reading_sessions ORDER BY started_at DESC'),
     database.select<QuizAttemptRow[]>('SELECT * FROM quiz_attempts ORDER BY created_at DESC'),
     database.select<AiUsageLineItemRow[]>('SELECT * FROM ai_usage_line_items ORDER BY started_at DESC'),
@@ -507,6 +566,7 @@ export async function loadDurableStateFromDatabase(): Promise<DurableDatabaseSta
     documentPages: pageRows.map(documentPageFromRow),
     ocrJobs: ocrJobRows.map(ocrJobFromRow),
     ocrJobItems: ocrJobItemRows.map(ocrJobItemFromRow),
+    ocrBatchRuns: ocrBatchRunRows.map(ocrBatchRunFromRow),
     sessions: sessionRows.map(readingSessionFromRow),
     quizAttempts: quizAttemptRows.map(quizAttemptFromRow),
     aiUsageLineItems: aiUsageLineItemRows.map(aiUsageLineItemFromRow),
@@ -565,6 +625,7 @@ type OcrJobRow = {
   target_chapter_id: string | null
   status: OcrJob['status']
   concurrent_item_limit: number | null
+  processing_mode: OcrJob['processingMode'] | null
   model_id: string
   input_file_count: number
   prompt_version: string
@@ -573,6 +634,27 @@ type OcrJobRow = {
   created_at: string
   updated_at: string
   completed_at: string | null
+}
+
+type OcrBatchRunRow = {
+  id: string
+  job_id: string
+  stage: OcrBatchRun['stage']
+  status: OcrBatchRun['status']
+  provider_batch_name: string | null
+  provider_state: string | null
+  request_count: number
+  completed_request_count: number | null
+  failed_request_count: number | null
+  item_ids_json: string | null
+  remote_file_names_json: string | null
+  error_message: string | null
+  cleanup_warning: string | null
+  created_at: string
+  submitted_at: string | null
+  updated_at: string
+  completed_at: string | null
+  last_polled_at: string | null
 }
 
 type OcrJobItemRow = {
@@ -628,6 +710,7 @@ type AiUsageLineItemRow = {
   ocr_item_id: string | null
   source_file_name: string | null
   stage: AiUsageStage
+  billing_mode: AiUsageLineItem['billingMode'] | null
   provider: string
   model: string
   status: AiUsageStatus
@@ -725,6 +808,7 @@ function ocrJobFromRow(row: OcrJobRow): OcrJob {
     targetChapterId: row.target_chapter_id,
     status: normalizeOcrJobStatus(row.status),
     concurrentItemLimit: normalizeOcrConcurrentItemLimit(row.concurrent_item_limit),
+    processingMode: normalizeOcrProcessingMode(row.processing_mode),
     modelId: row.model_id,
     inputFileCount: normalizeNumber(row.input_file_count, 0),
     promptVersion: row.prompt_version,
@@ -733,6 +817,29 @@ function ocrJobFromRow(row: OcrJobRow): OcrJob {
     createdAt: row.created_at,
     updatedAt: row.updated_at || row.created_at,
     completedAt: row.completed_at,
+  }
+}
+
+function ocrBatchRunFromRow(row: OcrBatchRunRow): OcrBatchRun {
+  return {
+    id: row.id,
+    jobId: row.job_id,
+    stage: normalizeOcrBatchStage(row.stage),
+    status: normalizeOcrBatchRunStatus(row.status),
+    providerBatchName: row.provider_batch_name,
+    providerState: row.provider_state,
+    requestCount: normalizeNumber(row.request_count, 0),
+    completedRequestCount: normalizeNumber(row.completed_request_count, 0),
+    failedRequestCount: normalizeNumber(row.failed_request_count, 0),
+    itemIds: normalizeStringArray(parseNullableJson<unknown>(row.item_ids_json, [])),
+    remoteFileNames: normalizeStringArray(parseNullableJson<unknown>(row.remote_file_names_json, [])),
+    errorMessage: row.error_message,
+    cleanupWarning: row.cleanup_warning,
+    createdAt: row.created_at,
+    submittedAt: row.submitted_at,
+    updatedAt: row.updated_at || row.created_at,
+    completedAt: row.completed_at,
+    lastPolledAt: row.last_polled_at,
   }
 }
 
@@ -794,6 +901,7 @@ function aiUsageLineItemFromRow(row: AiUsageLineItemRow): AiUsageLineItem {
     ocrItemId: row.ocr_item_id,
     sourceFileName: row.source_file_name,
     stage: row.stage,
+    billingMode: normalizeAiBillingMode(row.billing_mode),
     provider: row.provider,
     model: row.model,
     status: row.status,
@@ -870,6 +978,36 @@ function normalizeOcrJobStatus(status: string): OcrJob['status'] {
     return status
   }
   return 'cancelled'
+}
+
+function normalizeOcrProcessingMode(mode: string | null | undefined): OcrJob['processingMode'] {
+  return mode === 'batch' ? 'batch' : 'interactive'
+}
+
+function normalizeOcrBatchStage(stage: string | null | undefined): OcrBatchRun['stage'] {
+  if (stage === 'cleaner' || stage === 'formatter') {
+    return stage
+  }
+  return 'ocr'
+}
+
+function normalizeOcrBatchRunStatus(status: string | null | undefined): OcrBatchRun['status'] {
+  if (
+    status === 'creating' ||
+    status === 'submitted' ||
+    status === 'running' ||
+    status === 'succeeded' ||
+    status === 'failed' ||
+    status === 'cancelled' ||
+    status === 'expired'
+  ) {
+    return status
+  }
+  return 'creating'
+}
+
+function normalizeAiBillingMode(mode: string | null | undefined): AiUsageLineItem['billingMode'] {
+  return mode === 'batch' ? 'batch' : 'interactive'
 }
 
 function normalizeOcrConcurrentItemLimit(value: unknown): number {
@@ -1030,6 +1168,8 @@ function normalizePricingSnapshot(value: Partial<AiPricingSnapshot> | null): AiP
     effectiveDate: typeof value.effectiveDate === 'string' ? value.effectiveDate : null,
     modelId: typeof value.modelId === 'string' ? value.modelId : null,
     currency: typeof value.currency === 'string' ? value.currency : null,
+    billingMode: value.billingMode === 'batch' ? 'batch' : 'interactive',
+    costMultiplier: typeof value.costMultiplier === 'number' && Number.isFinite(value.costMultiplier) ? value.costMultiplier : 1,
     inputRatePerMillionTokens: normalizeNullableNumber(value.inputRatePerMillionTokens),
     outputRatePerMillionTokens: normalizeNullableNumber(value.outputRatePerMillionTokens),
     thinkingRatePerMillionTokens: normalizeNullableNumber(value.thinkingRatePerMillionTokens),

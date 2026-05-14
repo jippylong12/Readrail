@@ -1622,12 +1622,13 @@ describe('OcrReview', () => {
       />,
     )
 
+    await user.click(screen.getByRole('tab', { name: 'Existing document' }))
     const input = container.querySelector<HTMLInputElement>('input[type="file"]')
     await user.upload(input!, new File(['pdf'], 'append.pdf', { type: 'application/pdf' }))
     await user.click(screen.getByRole('button', { name: 'Process 1 page(s)' }))
 
-    await waitFor(() => expect(screen.getByLabelText('Append to')).toBeTruthy())
-    await user.click(screen.getByRole('button', { name: 'Append pages' }))
+    await waitFor(() => expect(screen.getByText('Saving to Existing book')).toBeTruthy())
+    await user.click(screen.getByRole('button', { name: 'Add reviewed pages' }))
 
     expect(onAppendPages).toHaveBeenCalledWith(
       'document-1',
@@ -1643,7 +1644,7 @@ describe('OcrReview', () => {
     )
   })
 
-  it('shows the target chapter when adding pages from a document route', async () => {
+  it('assigns reviewed OCR pages to a selected document chapter', async () => {
     const user = userEvent.setup()
     const onAppendPages = vi.fn()
     runGeminiOcrFromFilesMock
@@ -1679,8 +1680,6 @@ describe('OcrReview', () => {
       })
     const { container } = render(
       <OcrReview
-        appendTargetChapterId="chapter-1"
-        appendTargetDocumentId="document-1"
         appendStartSourcePageNumber={157}
         documentChapters={existingChapters}
         documents={[existingDocument]}
@@ -1694,9 +1693,8 @@ describe('OcrReview', () => {
     )
 
     expect(screen.getByText('Destination')).toBeTruthy()
-    expect(screen.getByText('Existing book')).toBeTruthy()
-    expect(screen.getByText('New pages will be added to Part One.')).toBeTruthy()
-    expect(screen.queryByLabelText('Add to chapter')).toBeNull()
+    await user.click(screen.getByRole('tab', { name: 'Existing document' }))
+    await user.selectOptions(screen.getByLabelText('Chapter'), 'chapter-1')
 
     const input = container.querySelector<HTMLInputElement>('input[type="file"]')
     await user.upload(input!, [
@@ -1707,7 +1705,7 @@ describe('OcrReview', () => {
     expect(screen.getByLabelText('Source page for chapter-page.png')).toHaveProperty('value', '158')
     await user.click(screen.getByRole('button', { name: 'Process 2 page(s)' }))
 
-    await waitFor(() => expect(screen.getByText('Adding to Existing book / Part One')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('Saving to Existing book / Part One')).toBeTruthy())
     await user.click(screen.getByRole('button', { name: 'Add reviewed pages' }))
 
     expect(onAppendPages).toHaveBeenCalledWith(
@@ -1717,6 +1715,65 @@ describe('OcrReview', () => {
         expect.objectContaining({ sourcePageNumber: 158, text: 'Next chapter target page' }),
       ],
       'chapter-1',
+    )
+  })
+
+  it('creates a new chapter before starting OCR when selected as the destination', async () => {
+    const user = userEvent.setup()
+    const createdChapter: DocumentChapterRecord = {
+      id: 'chapter-new',
+      documentId: existingDocument.id,
+      title: 'Appendix',
+      sortOrder: 2,
+      createdAt: existingDocument.createdAt,
+      updatedAt: existingDocument.updatedAt,
+    }
+    const onCreateChapter = vi.fn().mockReturnValue(createdChapter)
+    const onAppendPages = vi.fn()
+    runGeminiOcrFromFilesMock.mockResolvedValue({
+      titleGuess: 'New chapter scan',
+      pages: [
+        {
+          pageNumber: 1,
+          sourcePageNumber: null,
+          text: 'New chapter text',
+          confidence: null,
+          notes: null,
+          sourceFileName: null,
+          uncertainSpans: [],
+        },
+      ],
+      warnings: [],
+    })
+    const { container } = render(
+      <OcrReview
+        documentChapters={existingChapters}
+        documents={[existingDocument]}
+        hasKey
+        loadApiKey={vi.fn().mockResolvedValue('browser-key')}
+        onAppendPages={onAppendPages}
+        onCreateChapter={onCreateChapter}
+        onCreateDocument={vi.fn()}
+        preservePageBreaks
+        stripImageMetadataBeforeOcr={false}
+      />,
+    )
+
+    await user.click(screen.getByRole('tab', { name: 'Existing document' }))
+    await user.selectOptions(screen.getByLabelText('Chapter'), '__new__')
+    await user.type(screen.getByLabelText('New chapter title'), 'Appendix')
+
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]')
+    await user.upload(input!, new File(['image'], 'appendix.png', { type: 'image/png' }))
+    await user.click(screen.getByRole('button', { name: 'Process 1 page(s)' }))
+
+    expect(onCreateChapter).toHaveBeenCalledWith('document-1', 'Appendix')
+    await waitFor(() => expect(screen.getByText('Saving to Existing book / Appendix')).toBeTruthy())
+    await user.click(screen.getByRole('button', { name: 'Add reviewed pages' }))
+    expect(onAppendPages).toHaveBeenCalledWith(
+      'document-1',
+      [expect.objectContaining({ text: 'New chapter text' })],
+      'chapter-new',
     )
   })
 })

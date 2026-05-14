@@ -483,15 +483,20 @@ h3 {
 }
 
 .ocr-destination-panel {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(180px, 0.7fr) minmax(0, 1.3fr);
   align-items: end;
-  justify-content: space-between;
-  gap: 8px;
+  gap: 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface-muted) 52%, var(--surface));
   padding: 10px;
+}
+
+.ocr-destination-header,
+.ocr-destination-summary {
+  display: grid;
+  gap: 3px;
 }
 
 .ocr-destination-panel strong,
@@ -502,6 +507,21 @@ h3 {
 .ocr-destination-panel span:not(.eyebrow) {
   color: var(--muted);
   font-weight: 700;
+}
+
+.ocr-destination-mode {
+  width: 100%;
+  min-width: 260px;
+}
+
+.ocr-destination-field {
+  min-width: 260px;
+}
+
+.ocr-destination-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(150px, 1fr));
+  gap: 8px;
 }
 
 .ocr-file-row,
@@ -682,6 +702,41 @@ h3 {
   font-size: 0.86rem;
 }
 
+.ocr-job-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.ocr-job-table-wrap {
+  overflow-x: auto;
+}
+
+.ocr-job-table th,
+.ocr-job-table td {
+  border-bottom: 1px solid var(--line);
+  padding: 10px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.ocr-job-table th {
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.ocr-job-table td:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.ocr-job-table td:first-child span {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
 .ocr-progress-table th,
 .ocr-progress-table td {
   border-bottom: 1px solid var(--line);
@@ -700,6 +755,26 @@ h3 {
 .ocr-progress-table td:first-child {
   color: var(--text);
   font-weight: 700;
+}
+
+.ocr-job-section {
+  display: grid;
+  gap: 10px;
+}
+
+.ocr-job-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.ocr-job-toolbar span {
+  margin-right: auto;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+  text-transform: uppercase;
 }
 
 .ocr-job-status-list {
@@ -728,6 +803,26 @@ h3 {
   color: var(--muted);
   font-size: 0.84rem;
   font-weight: 700;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  padding: 24px;
+  place-items: center;
+  background: color-mix(in srgb, var(--background) 72%, transparent);
+}
+
+.modal-card {
+  display: grid;
+  width: min(100%, 560px);
+  gap: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 22px;
 }
 
 .ocr-file-dropzone {
@@ -1617,7 +1712,12 @@ h3 {
 }
 
 .library-tabs {
-  width: min(100%, 420px);
+  width: min(100%, 640px);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.library-tabs button {
+  white-space: nowrap;
 }
 
 .info-button {
@@ -2731,6 +2831,27 @@ h3 {
   line-height: 1.5;
 }
 
+.settings-readout {
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: color-mix(in srgb, var(--primary) 7%, var(--surface));
+}
+
+.settings-readout span {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.settings-readout strong {
+  color: var(--text);
+  font-size: 1.15rem;
+}
+
 .error-text {
   color: var(--danger);
   font-weight: 800;
@@ -2903,6 +3024,11 @@ h3 {
     justify-content: flex-start;
   }
 
+  .ocr-destination-panel,
+  .ocr-destination-grid {
+    grid-template-columns: 1fr;
+  }
+
   .document-row-actions,
   .reader-header-actions,
   .reader-scope-controls,
@@ -2910,6 +3036,7 @@ h3 {
   .ocr-page-header,
   .ocr-save-actions,
   .ocr-destination-panel,
+  .ocr-destination-grid,
   .ocr-file-row,
   .ocr-file-controls,
   .organizer-chapter-header,
@@ -2926,6 +3053,8 @@ h3 {
   .reader-scope-controls .segmented,
   .document-edit-footer .button-row,
   .document-edit-footer .button-row button,
+  .ocr-destination-mode,
+  .ocr-destination-field,
   .ocr-save-actions .button-row,
   .ocr-save-actions .button-row button,
   .ocr-file-controls button,

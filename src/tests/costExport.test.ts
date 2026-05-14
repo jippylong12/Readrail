@@ -80,7 +80,7 @@ describe('cost report exports', () => {
     expect(rows[1]).toContain('"Structured, Book"')
     expect(rows[1]).toContain('job-1,"OCR job, 10 at a time')
     expect(rows[1]).toContain('item-1,item-1,"scan,page.png"')
-    expect(rows[1]).toContain('ocr_extraction,google,gemini-3.1-flash-lite,succeeded,estimated,USD')
+    expect(rows[1]).toContain('ocr_extraction,interactive,google,gemini-3.1-flash-lite,succeeded,estimated,USD')
     expect(rows[1]).toContain('"Needs ""review"", retry later"')
   })
 

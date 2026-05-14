@@ -4,6 +4,7 @@ import type {
   ModalityTokenCount,
 } from '@google/genai'
 import type {
+  AiBillingMode,
   AiPricingSnapshot,
   AiUsageStage,
   AiUsageStatus,
@@ -18,6 +19,7 @@ export type GeminiUsageAttribution = {
   ocrJobId?: string | null
   ocrItemId?: string | null
   sourceFileName?: string | null
+  billingMode?: AiBillingMode
 }
 
 export type GeminiUsageLineItemInput = GeminiUsageAttribution & {
@@ -139,6 +141,7 @@ function recordGeminiUsage<T>(
         modelId: input.model,
         effectiveDate: result.completedAt,
         tokenBreakdown,
+        billingMode: input.attribution?.billingMode ?? 'interactive',
       }),
     })
   } catch {

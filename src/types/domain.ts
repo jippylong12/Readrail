@@ -179,6 +179,8 @@ export type OcrSettings = {
   modelId: 'gemini-3.1-flash-lite'
   preservePageBreaks: boolean
   concurrentItemLimit: number
+  processingMode?: OcrProcessingMode
+  batchDisclaimerAcceptedAt?: string | null
 }
 
 export type AppSettings = {
@@ -247,6 +249,7 @@ export type OcrJob = {
   targetChapterId: string | null
   status: 'queued' | 'running' | 'review' | 'saved' | 'failed' | 'cancelled'
   concurrentItemLimit: number
+  processingMode?: OcrProcessingMode
   modelId: string
   inputFileCount: number
   promptVersion: string
@@ -257,7 +260,34 @@ export type OcrJob = {
   completedAt: string | null
 }
 
+export type OcrProcessingMode = 'interactive' | 'batch'
+
 export type OcrJobItemStatus = 'queued' | 'running' | 'review' | 'failed' | 'skipped'
+
+export type OcrBatchStage = 'ocr' | 'cleaner' | 'formatter'
+
+export type OcrBatchRunStatus = 'creating' | 'submitted' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'expired'
+
+export type OcrBatchRun = {
+  id: string
+  jobId: string
+  stage: OcrBatchStage
+  status: OcrBatchRunStatus
+  providerBatchName: string | null
+  providerState: string | null
+  requestCount: number
+  completedRequestCount: number
+  failedRequestCount: number
+  itemIds: string[]
+  remoteFileNames: string[]
+  errorMessage: string | null
+  cleanupWarning: string | null
+  createdAt: string
+  submittedAt: string | null
+  updatedAt: string
+  completedAt: string | null
+  lastPolledAt: string | null
+}
 
 export type OcrJobItemPage = {
   pageNumber: number
@@ -297,6 +327,8 @@ export type AiUsageStatus = 'running' | 'succeeded' | 'failed'
 
 export type AiCostConfidence = 'exact' | 'estimated' | 'unknown'
 
+export type AiBillingMode = 'interactive' | 'batch'
+
 export type AiUsageTokenBreakdown = {
   inputTokens: number | null
   outputTokens: number | null
@@ -324,6 +356,8 @@ export type AiPricingSnapshot = {
   effectiveDate: string | null
   modelId: string | null
   currency: string | null
+  billingMode?: AiBillingMode
+  costMultiplier?: number
   inputRatePerMillionTokens: number | null
   outputRatePerMillionTokens: number | null
   thinkingRatePerMillionTokens: number | null
@@ -341,6 +375,7 @@ export type AiUsageLineItem = {
   ocrItemId: string | null
   sourceFileName: string | null
   stage: AiUsageStage
+  billingMode?: AiBillingMode
   provider: string
   model: string
   status: AiUsageStatus

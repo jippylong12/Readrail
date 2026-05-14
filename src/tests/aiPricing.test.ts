@@ -155,6 +155,8 @@ describe('AI cost estimation', () => {
       effectiveDate: null,
       modelId: 'unknown-model',
       currency: null,
+      billingMode: 'interactive',
+      costMultiplier: 1,
       inputRatePerMillionTokens: null,
       outputRatePerMillionTokens: null,
       thinkingRatePerMillionTokens: null,
@@ -164,5 +166,24 @@ describe('AI cost estimation', () => {
       estimatedTotalCost: null,
       confidence: 'unknown',
     })
+  })
+
+  it('applies the Gemini batch discount to estimated costs', () => {
+    const snapshot = estimateAiUsageCost({
+      provider: 'google',
+      modelId: 'gemini-3.1-flash-lite',
+      effectiveDate: '2026-05-12',
+      billingMode: 'batch',
+      tokenBreakdown: {
+        inputTokens: 1_000_000,
+        outputTokens: 1_000_000,
+      },
+    })
+
+    expect(snapshot.billingMode).toBe('batch')
+    expect(snapshot.costMultiplier).toBe(0.5)
+    expect(snapshot.estimatedInputCost).toBeCloseTo(0.125)
+    expect(snapshot.estimatedOutputCost).toBeCloseTo(0.75)
+    expect(snapshot.estimatedTotalCost).toBeCloseTo(0.875)
   })
 })

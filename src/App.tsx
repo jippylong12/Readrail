@@ -6,6 +6,7 @@ import { DocumentDetail } from './components/DocumentDetail'
 import { ImportPanel } from './components/ImportPanel'
 import { LibraryList } from './components/LibraryList'
 import { OnboardingJourney } from './components/OnboardingJourney'
+import { OcrJobsPanel } from './components/OcrJobsPanel'
 import { OcrReview } from './components/OcrReview'
 import { PageDetail } from './components/PageDetail'
 import { ReaderRail } from './components/ReaderRail'
@@ -562,13 +563,14 @@ function App() {
       onReplayTour={() => replayTour()}
       onRouteChange={changeRoute}
     >
-      {(route === 'library-import' || route === 'library-ocr' || route === 'library-saved') && (
+      {(route === 'library-import' || route === 'library-ocr' || route === 'library-ocr-jobs' || route === 'library-saved') && (
         <div className="content-stack">
           <section className="library-tabs-panel" data-tour="library-tabs">
             <div className="segmented library-tabs" role="tablist" aria-label="Library sections">
               {([
                 ['library-import', 'Manual'],
                 ['library-ocr', 'OCR'],
+                ['library-ocr-jobs', 'OCR Jobs'],
                 ['library-saved', 'Saved'],
               ] as const).map(([tabId, label]) => (
                 <button
@@ -599,12 +601,24 @@ function App() {
               hasKey={hasGeminiKey}
               loadApiKey={() => loadGeminiApiKey('ocr')}
               onAppendPages={appendAndOpenOcrPages}
+              onCreateChapter={createChapter}
               onCreateDocument={createAndOpenOcrDocument}
               onOpenJobCosts={(ocrJobId) => {
                 navigate({ route: 'costs', documentId: null, ocrJobId })
               }}
               preservePageBreaks={settings.ocr.preservePageBreaks}
               stripImageMetadataBeforeOcr={settings.privacy.stripImageMetadataBeforeOcr}
+            />
+          )}
+
+          {route === 'library-ocr-jobs' && (
+            <OcrJobsPanel
+              documents={documents}
+              loadApiKey={() => loadGeminiApiKey('ocr')}
+              onOpenImport={() => navigate({ route: 'library-ocr', documentId: null })}
+              onOpenJobCosts={(ocrJobId) => {
+                navigate({ route: 'costs', documentId: null, ocrJobId })
+              }}
             />
           )}
 
@@ -634,16 +648,10 @@ function App() {
         <DocumentDetail
           chapters={documentChapters}
           document={routedDocument}
-          documents={documents}
-          hasKey={hasGeminiKey}
-          loadApiKey={() => loadGeminiApiKey('ocr')}
           onAppendPages={appendAndOpenOcrPages}
           onBack={() => navigate({ route: 'library-saved', documentId: null })}
           onOpenCosts={(documentId) => {
             navigate({ route: 'costs', documentId })
-          }}
-          onOpenJobCosts={(ocrJobId) => {
-            navigate({ route: 'costs', documentId: null, ocrJobId })
           }}
           onDocumentViewChange={(documentId, chapterId, pageNumber, options) => {
             navigate({ route: 'library-document', documentId, chapterId, pageNumber }, options)
@@ -654,7 +662,6 @@ function App() {
           onCreateChapter={(documentId, title) => {
             createChapter(documentId, title)
           }}
-          onCreateDocument={createAndOpenOcrDocument}
           onDeleteChapter={(chapterId) => {
             deleteChapter(chapterId)
           }}
@@ -671,10 +678,8 @@ function App() {
           onRenameChapter={renameChapter}
           onUpdatePageMetadata={updatePageMetadata}
           pages={documentPages}
-          preservePageBreaks={settings.ocr.preservePageBreaks}
           routeChapterId={navigation.chapterId ?? null}
           routePageNumber={navigation.pageNumber ?? null}
-          stripImageMetadataBeforeOcr={settings.privacy.stripImageMetadataBeforeOcr}
         />
       )}
 

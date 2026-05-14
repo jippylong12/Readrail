@@ -1,4 +1,4 @@
-import type { AiPricingSnapshot, AiUsageTokenBreakdown } from '../../types/domain'
+import type { AiBillingMode, AiPricingSnapshot, AiUsageTokenBreakdown } from '../../types/domain'
 
 export type AiPricingEntry = {
   version: 'v1'
@@ -23,6 +23,7 @@ export type AiCostEstimateInput = {
   modelId: string
   effectiveDate: string | Date
   tokenBreakdown: Partial<AiUsageTokenBreakdown> | null | undefined
+  billingMode?: AiBillingMode
 }
 
 const USD = 'USD'
@@ -81,9 +82,11 @@ export function lookupAiPricing(input: AiPricingLookupInput): AiPricingEntry | n
 }
 
 export function estimateAiUsageCost(input: AiCostEstimateInput): AiPricingSnapshot {
+  const billingMode = input.billingMode ?? 'interactive'
+  const costMultiplier = billingMode === 'batch' ? 0.5 : 1
   const pricing = lookupAiPricing(input)
   if (!pricing) {
-    return buildUnknownSnapshot(input.modelId, null)
+    return buildUnknownSnapshot(input.modelId, null, billingMode, costMultiplier)
   }
 
   const inputTokens = normalizeTokenCount(input.tokenBreakdown?.inputTokens)
@@ -92,17 +95,17 @@ export function estimateAiUsageCost(input: AiCostEstimateInput): AiPricingSnapsh
   const canEstimateBillableOutput = outputTokens !== null || thinkingTokens !== null
 
   if (inputTokens === null || !canEstimateBillableOutput) {
-    return buildUnknownSnapshot(input.modelId, pricing)
+    return buildUnknownSnapshot(input.modelId, pricing, billingMode, costMultiplier)
   }
 
-  const estimatedInputCost = estimateTokenCost(inputTokens, pricing.inputRatePerMillionTokens)
+  const estimatedInputCost = estimateTokenCost(inputTokens, pricing.inputRatePerMillionTokens, costMultiplier)
   const estimatedOutputCost =
-    outputTokens === null ? null : estimateTokenCost(outputTokens, pricing.outputRatePerMillionTokens)
+    outputTokens === null ? null : estimateTokenCost(outputTokens, pricing.outputRatePerMillionTokens, costMultiplier)
   const thinkingRatePerMillionTokens = getThinkingRate(pricing, outputTokens, thinkingTokens)
   const estimatedThinkingCost =
     thinkingTokens === null || thinkingRatePerMillionTokens === null
       ? null
-      : estimateTokenCost(thinkingTokens, thinkingRatePerMillionTokens)
+      : estimateTokenCost(thinkingTokens, thinkingRatePerMillionTokens, costMultiplier)
   const estimatedTotalCost =
     estimatedInputCost + (estimatedOutputCost ?? 0) + (estimatedThinkingCost ?? 0)
 
@@ -110,6 +113,8 @@ export function estimateAiUsageCost(input: AiCostEstimateInput): AiPricingSnapsh
     effectiveDate: pricing.effectiveDate,
     modelId: pricing.modelId,
     currency: pricing.currency,
+    billingMode,
+    costMultiplier,
     inputRatePerMillionTokens: pricing.inputRatePerMillionTokens,
     outputRatePerMillionTokens: pricing.outputRatePerMillionTokens,
     thinkingRatePerMillionTokens,
@@ -138,11 +143,18 @@ function getThinkingRate(
   return pricing.outputRatePerMillionTokens
 }
 
-function buildUnknownSnapshot(modelId: string, pricing: AiPricingEntry | null): AiPricingSnapshot {
+function buildUnknownSnapshot(
+  modelId: string,
+  pricing: AiPricingEntry | null,
+  billingMode: AiBillingMode,
+  costMultiplier: number,
+): AiPricingSnapshot {
   return {
     effectiveDate: pricing?.effectiveDate ?? null,
     modelId: pricing?.modelId ?? modelId,
     currency: pricing?.currency ?? null,
+    billingMode,
+    costMultiplier,
     inputRatePerMillionTokens: pricing?.inputRatePerMillionTokens ?? null,
     outputRatePerMillionTokens: pricing?.outputRatePerMillionTokens ?? null,
     thinkingRatePerMillionTokens: pricing?.thinkingRatePerMillionTokens ?? null,
@@ -154,8 +166,8 @@ function buildUnknownSnapshot(modelId: string, pricing: AiPricingEntry | null): 
   }
 }
 
-function estimateTokenCost(tokens: number, ratePerMillionTokens: number): number {
-  return (tokens / 1_000_000) * ratePerMillionTokens
+function estimateTokenCost(tokens: number, ratePerMillionTokens: number, costMultiplier: number): number {
+  return (tokens / 1_000_000) * ratePerMillionTokens * costMultiplier
 }
 
 function normalizeTokenCount(value: unknown): number | null {

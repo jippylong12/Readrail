@@ -25,6 +25,7 @@ export async function getDatabase(): Promise<SqlDatabase | null> {
       }
       await runStructuredDocumentSqliteMigration(database)
       await runOcrJobSqliteMigration(database)
+      await runBatchOcrSqliteMigration(database)
       await runReadingSessionScopeSqliteMigration(database)
       await runQuizAttemptSqliteMigration(database)
 
@@ -172,5 +173,17 @@ async function runOcrJobSqliteMigration(database: SqlDatabase): Promise<void> {
   }
   if (!ocrJobColumns.some((column) => column.name === 'concurrent_item_limit')) {
     await database.execute('ALTER TABLE ocr_jobs ADD COLUMN concurrent_item_limit INTEGER NOT NULL DEFAULT 10')
+  }
+}
+
+async function runBatchOcrSqliteMigration(database: SqlDatabase): Promise<void> {
+  const ocrJobColumns = await database.select<TableColumn[]>('PRAGMA table_info(ocr_jobs)')
+  if (!ocrJobColumns.some((column) => column.name === 'processing_mode')) {
+    await database.execute("ALTER TABLE ocr_jobs ADD COLUMN processing_mode TEXT NOT NULL DEFAULT 'interactive'")
+  }
+
+  const usageColumns = await database.select<TableColumn[]>('PRAGMA table_info(ai_usage_line_items)')
+  if (!usageColumns.some((column) => column.name === 'billing_mode')) {
+    await database.execute("ALTER TABLE ai_usage_line_items ADD COLUMN billing_mode TEXT NOT NULL DEFAULT 'interactive'")
   }
 }
